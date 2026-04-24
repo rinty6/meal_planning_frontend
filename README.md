@@ -93,34 +93,4 @@ eas submit --platform ios --profile production
 eas submit --platform android --profile production
 ```
 
-## App Store Readiness Checklist
-
-Before a public release, confirm these items are complete:
-
-- replace placeholder or internal environment values with production secrets
-- verify the visible product name and branding in `app.json` because the current Expo name is still `meal_app`
-- prepare App Store and Play Store metadata, screenshots, support contact, and privacy policy links
-- review notification, camera, image-picker, and authentication permissions text for store compliance
-- test the production backend URL and Clerk configuration in a signed preview build
-- verify in-app legal attribution for food data and images where required
-
-Two release notes already visible in the wider project work are worth preserving here:
-
-- Open Food Facts attribution should be present in the final legal flow if that dataset is surfaced to users
-- FatSecret attribution requirements for food data and imagery should remain visible in-app or through linked legal pages
-
-## Deployment Notes
-
-The mobile app depends on both sibling services in this workspace:
-
-- `../backend` for the main product API and notification endpoints
-- `../machine_learning` indirectly through the backend recommendation routes
-
-For the cleanest deployment pipeline:
-
-1. deploy and validate the backend
-2. confirm ML recommendation and prime endpoints are reachable from the backend
-3. point `EXPO_PUBLIC_BACKEND_URL` at the deployed backend
-4. generate an internal EAS preview build for real-device smoke testing
-5. promote to production builds only after end-to-end verification
 
