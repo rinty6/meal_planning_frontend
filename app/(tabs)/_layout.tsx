@@ -1,35 +1,57 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
+import { Tabs, Redirect } from 'expo-router'
+import { useAuth } from '@clerk/clerk-expo'
+import { Ionicons } from '@expo/vector-icons'
+import NotificationSetup from '../../components/NotificationSetup'
 
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+const TabLayout = () => {
+  const { isSignedIn } = useAuth()
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  // 1. Security Check
+  if (!isSignedIn) {
+    return <Redirect href="/(auth)/sign-in" />
+  }
 
+  // 2. Actually return the Tabs component!
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+    <>
+    <NotificationSetup />
+    <Tabs 
+        screenOptions={{ 
         headerShown: false,
-        tabBarButton: HapticTab,
-      }}>
-      <Tabs.Screen
-        name="index"
+        tabBarActiveTintColor: '#FF9500',
+  
+    }}>
+      <Tabs.Screen 
+        name="index" 
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "home" : "home-outline"} size={24} color={color} />,
+        }} 
+      />
+      <Tabs.Screen 
+        name="meal" 
+        options={{
+          title: 'Meal',
+          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "restaurant" : "restaurant-outline"} size={24} color={color} />,
+        }} 
+      />
+      <Tabs.Screen 
+        name="calorie" 
+        options={{
+          title: 'Calorie',
+          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "heart" : "heart-outline"} size={24} color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="explore"
+      <Tabs.Screen 
+        name="profile" 
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: 'Profile',
+          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "person" : "person-outline"} size={24} color={color} />,
         }}
       />
     </Tabs>
-  );
+    </>
+  )
 }
+
+export default TabLayout
