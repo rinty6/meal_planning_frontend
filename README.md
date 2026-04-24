@@ -1,4 +1,4 @@
-# 🇦🇺 AussieCal: Calorie Tracker & Smart Meal Planner
+# GoodHealthMate: Calorie Tracker & Smart Meal Planner
 
 Welcome to **AussieCal**! This is a full-stack health application designed specifically for Australians to track their daily nutrition and use Machine Learning to predict their ideal caloric intake.
 
