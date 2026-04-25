@@ -1,43 +1,10 @@
-# Good Health Mate Mobile App
+# Welcome to your Expo app 👋
 
-This folder contains the Expo / React Native client for the meal planning product. It is the user-facing app that handles authentication, onboarding, meal planning, calorie tracking, recommendation display, favorites, profile management, and notification setup.
+This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
-## Product Summary
+## Get started
 
-The mobile app is organized around a few core flows:
-
-- authentication with Clerk
-- onboarding and profile capture
-- tab-based navigation for meals, calories, and profile
-- personalized meal recommendation consumption through the backend API
-- saved items and local app state for favorites, planning, notifications, and profile data
-
-The current app structure reflects that split:
-
-- `app/(auth)` contains sign-in, sign-up, and email verification routes
-- `app/(onboarding)` contains the onboarding flow
-- `app/(tabs)` contains the main in-app experience, including calorie, meal, and profile areas
-- `components/` contains shared UI such as combo cards, recent meal modals, notification setup, food facts cards, and terms of service
-- `services/` contains API clients and app-side state helpers for meals, planning, recommendations, favorites, notifications, barcode utilities, and profile sync
-
-## Tech Stack
-
-- Expo 54 with Expo Router
-- React 19 and React Native 0.81
-- Clerk Expo for authentication
-- NativeWind and Tailwind-based styling
-- Expo Notifications, Camera, Image Picker, Secure Store, and Updates
-- TypeScript for the application codebase
-
-## Local Development
-
-### Prerequisites
-
-- Node.js 20+
-- npm
-- Expo development environment for Android, iOS, or web testing
-
-### Install
+1. Install dependencies
 
 ```bash
 npm install
@@ -86,40 +53,21 @@ Configured EAS profiles:
 Typical commands:
 
 ```bash
-eas build --platform android --profile preview
-eas build --platform android --profile production
-eas build --platform ios --profile production
-eas submit --platform ios --profile production
-eas submit --platform android --profile production
+npm run reset-project
 ```
 
-## App Store Readiness Checklist
+This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
 
-Before a public release, confirm these items are complete:
+## Learn more
 
-- replace placeholder or internal environment values with production secrets
-- verify the visible product name and branding in `app.json` because the current Expo name is still `meal_app`
-- prepare App Store and Play Store metadata, screenshots, support contact, and privacy policy links
-- review notification, camera, image-picker, and authentication permissions text for store compliance
-- test the production backend URL and Clerk configuration in a signed preview build
-- verify in-app legal attribution for food data and images where required
+To learn more about developing your project with Expo, look at the following resources:
 
-Two release notes already visible in the wider project work are worth preserving here:
+- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
+- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
 
-- Open Food Facts attribution should be present in the final legal flow if that dataset is surfaced to users
-- FatSecret attribution requirements for food data and imagery should remain visible in-app or through linked legal pages
+## Join the community
 
-## Deployment Notes
+Join our community of developers creating universal apps.
 
-The mobile app depends on both sibling services in this workspace:
-
-- `../backend` for the main product API and notification endpoints
-- `../machine_learning` indirectly through the backend recommendation routes
-
-For the cleanest deployment pipeline:
-
-1. deploy and validate the backend
-2. confirm ML recommendation and prime endpoints are reachable from the backend
-3. point `EXPO_PUBLIC_BACKEND_URL` at the deployed backend
-4. generate an internal EAS preview build for real-device smoke testing
-5. promote to production builds only after end-to-end verification
+- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
+- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
