@@ -52,7 +52,9 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [hasCompletedSearch, setHasCompletedSearch] = useState(false);
   const [addingId, setAddingId] = useState<string | null>(null);
+  const latestSearchRequestRef = useRef(0);
 
   // --- MANUAL ENTRY STATE ---
   const [manualName, setManualName] = useState('');
@@ -184,17 +186,34 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
 
   // 1. HANDLE SEARCH (Existing Logic)
   const handleSearch = async () => {
-    if (!query.trim()) return;
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) return;
+    const requestId = latestSearchRequestRef.current + 1;
+    latestSearchRequestRef.current = requestId;
     setLoading(true);
+    setHasCompletedSearch(false);
     try {
-      const items = await searchFoodItems(query);
+      const items = await searchFoodItems(trimmedQuery);
+      if (latestSearchRequestRef.current !== requestId) return;
       setResults(items);
     } catch (error) {
       console.error('Search error:', error);
+      if (latestSearchRequestRef.current !== requestId) return;
       setResults([]);
     } finally {
-      setLoading(false);
+      if (latestSearchRequestRef.current === requestId) {
+        setLoading(false);
+        setHasCompletedSearch(true);
+      }
     }
+  };
+
+  const handleSearchTextChange = (text: string) => {
+    latestSearchRequestRef.current += 1;
+    setQuery(text);
+    setResults([]);
+    setLoading(false);
+    setHasCompletedSearch(false);
   };
 
   // 2. Add from Search
@@ -268,8 +287,18 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setViewMode('search'); 
   };
 
+  const resetSearchState = () => {
+    setQuery('');
+    setResults([]);
+    setLoading(false);
+    setHasCompletedSearch(false);
+    setAddingId(null);
+    latestSearchRequestRef.current += 1;
+  };
+
   const handleClose = () => {
     resetManualForm();
+    resetSearchState();
     onClose();
   };
 
@@ -311,7 +340,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                     className="flex-1 ml-2 text-base text-black"
                     placeholder="Search (e.g., Chicken)"
                     value={query}
-                    onChangeText={setQuery}
+                    onChangeText={handleSearchTextChange}
                     onSubmitEditing={handleSearch}
                     returnKeyType="search"
                   />
@@ -352,7 +381,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                       </View>
                     )}
                     ListEmptyComponent={
-                      !loading && query.length > 0 ? (
+                      hasCompletedSearch && query.trim().length > 0 ? (
                         <Text className="text-center text-gray-400 mt-10">No foods found.</Text>
                       ) : null
                     }

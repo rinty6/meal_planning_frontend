@@ -13,6 +13,7 @@ type ImageLookupSource =
   | 'food-detail'
   | 'food-search'
   | 'recipe-search'
+  | 'generated'
   | 'miss';
 
 type ImageLookupState = 'resolved' | 'unavailable';
@@ -41,8 +42,8 @@ type FoodDetailFactsResult = {
   nutritionFacts: ReturnType<typeof buildNutritionFactsFromFood>;
 };
 
-// Bump the cache version so expanded alias queries can replay older cached misses.
-const IMAGE_LOOKUP_CACHE_STORAGE_KEY = 'meal-app:fatsecret-image-cache:v3';
+// Bump the cache version so stale generated placeholders and misses are replayed.
+const IMAGE_LOOKUP_CACHE_STORAGE_KEY = 'meal-app:fatsecret-image-cache:v9';
 const IMAGE_LOOKUP_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const IMAGE_LOOKUP_MISS_TTL_MS = 1000 * 60 * 60 * 12;
 const IMAGE_LOOKUP_CACHE_MAX_ENTRIES = 250;
@@ -81,6 +82,7 @@ const PREPARED_DISH_KEYWORDS = [
   'pasta',
   'rice',
   'noodle',
+  'noodles',
   'burger',
   'pizza',
   'pho',
@@ -118,6 +120,84 @@ const NON_ENGLISH_LOOKUP_MARKERS = [
   'spinazie',
   'yaourt',
 ];
+const IMAGE_LOOKUP_PREFIX_PATTERNS = [
+  /^to\s+go\s+/i,
+  /^ready\s+to\s+(?:eat|drink)\s+/i,
+  /^select\s+/i,
+  /^barista\s+series\s+/i,
+];
+const PREPARED_DISH_FALLBACK_SUFFIXES = new Set([
+  'bowl',
+  'burger',
+  'curry',
+  'noodle',
+  'noodles',
+  'omelet',
+  'omelette',
+  'pasta',
+  'pho',
+  'pizza',
+  'rice',
+  'salad',
+  'sandwich',
+  'soup',
+  'sushi',
+  'taco',
+  'toast',
+  'wrap',
+]);
+// Use simple representative image concepts when an exact FatSecret dish image is missing or misleading.
+const SEMANTIC_IMAGE_OVERRIDES = [
+  {
+    key: 'breakfast-sammy',
+    markers: ['breakfast sammy'],
+    queries: ['Breakfast Sandwich', 'Sandwich'],
+    forceSearch: true,
+  },
+  {
+    key: 'goat-milk-yogurt',
+    markers: ['plain goat milk yogurt'],
+    queries: ['Plain Yogurt', 'Greek Yogurt', 'Yogurt'],
+    forceSearch: true,
+  },
+  {
+    key: 'red-lobster-maple-chicken',
+    markers: ['red lobster', 'maple glazed chicken'],
+    queries: ['Grilled Chicken', 'Chicken Breast', 'Maple Glazed Chicken'],
+    forceSearch: true,
+  },
+  {
+    key: 'cottage-cheese-pineapple',
+    markers: ['cottage cheese', 'pineapple'],
+    queries: ['Cottage Cheese'],
+    forceSearch: true,
+  },
+  {
+    key: 'natto',
+    markers: ['natto'],
+    queries: ['Natto', 'Fermented Soybeans', 'Soybeans'],
+    forceSearch: true,
+  },
+  {
+    key: 'rotisserie-turkey-breast-bowl',
+    markers: ['rotisserie', 'turkey', 'breast', 'bowl'],
+    queries: ['Chicken Breast Bowl', 'Chicken Bowl', 'Grilled Chicken'],
+    forceSearch: true,
+  },
+];
+const IMAGE_LOOKUP_SERVING_SIZE_WORDS = new Set([
+  'mini',
+  'small',
+  'regular',
+  'medium',
+  'large',
+  'bigger',
+  'big',
+  'half',
+  'full',
+  'kids',
+  'kid',
+]);
 
 let hasLoadedImageLookupCache = false;
 let imageLookupCacheReadyPromise: Promise<void> | null = null;
@@ -169,6 +249,115 @@ const tokenizeLookupTitle = (value: any) =>
     .split(/\s+/)
     .map((token) => token.trim())
     .filter((token) => token.length > 1 && !/^\d+$/.test(token));
+const stripImageLookupServingSizeWords = (value: any) => {
+  let text = normalizeWhitespace(value)
+    .replace(/\((?:mini|small|regular|medium|large|bigger|big|half|full|kids?|serving)\)/gi, ' ')
+    .replace(/,\s*(?:mini|small|regular|medium|large|bigger|big|half|full|kids?)\b/gi, ' ');
+  const words = text.split(/\s+/).filter(Boolean);
+  while (words.length > 1 && IMAGE_LOOKUP_SERVING_SIZE_WORDS.has(normalizeLookupKey(words[words.length - 1]))) {
+    words.pop();
+  }
+  return normalizeWhitespace(words.join(' '));
+};
+const buildSemanticImageOverrideText = (item: any) =>
+  normalizeLookupKey([
+    item?.title,
+    item?.food_name,
+    item?.original_title,
+    item?.canonical_title,
+    item?.mapped_title,
+    item?.mapped_canonical_title,
+    item?.brand_name,
+    item?.brand,
+  ].filter(Boolean).join(' '));
+const getSemanticImageOverride = (item: any) => {
+  const lookupText = buildSemanticImageOverrideText(item);
+  if (!lookupText) return null;
+
+  const tokens = new Set(tokenizeLookupTitle(lookupText));
+  const configuredOverride = SEMANTIC_IMAGE_OVERRIDES.find((override) =>
+    override.markers.every((marker) => {
+      const normalizedMarker = normalizeLookupKey(marker);
+      if (!normalizedMarker.includes(' ')) {
+        return tokens.has(normalizedMarker);
+      }
+      return lookupText.includes(normalizedMarker);
+    })
+  );
+  if (configuredOverride) return configuredOverride;
+
+  const noodleQueries = buildNoodleImageOverrideQueries(item);
+  return noodleQueries.length > 0
+    ? {
+        key: 'prepared-noodle-dish',
+        markers: ['noodle'],
+        queries: noodleQueries,
+        forceSearch: true,
+      }
+    : null;
+};
+const buildNoodleImageOverrideQueries = (item: any) => {
+  const lookupText = buildSemanticImageOverrideText(item);
+  const tokens = new Set(tokenizeLookupTitle(lookupText));
+  if (!tokens.has('noodle') && !tokens.has('noodles')) return [];
+
+  const title = normalizeWhitespace(
+    item?.canonical_title ||
+    item?.mapped_canonical_title ||
+    item?.mapped_title ||
+    item?.title ||
+    item?.food_name ||
+    ''
+  );
+  const brand = normalizeWhitespace(item?.brand_name || item?.brand || '');
+  const titleWithoutSize = stripImageLookupServingSizeWords(stripTitleDecorators(title));
+  const cleanedTitle = stripImageLookupServingSizeWords(
+    stripLookupPrefixes(stripBrandPrefix(titleWithoutSize, brand))
+  );
+  const cleanedTokens = tokenizeLookupTitle(cleanedTitle);
+  const proteinTokens = cleanedTokens.filter((token) => TITLE_PROTEIN_MARKERS.has(token));
+  const cuisineTokens = cleanedTokens.filter((token) => (
+    token === 'korean' ||
+    token === 'japanese' ||
+    token === 'chinese' ||
+    token === 'thai' ||
+    token === 'vietnamese' ||
+    token === 'asian'
+  ));
+  const queries: string[] = [];
+
+  if (proteinTokens.length > 0) {
+    queries.push(`${proteinTokens[0]} noodles`);
+  }
+  if (cuisineTokens.length > 0 && proteinTokens.length > 0) {
+    queries.push(`${cuisineTokens[0]} ${proteinTokens[0]} noodles`);
+  }
+  if (cuisineTokens.length > 0) {
+    queries.push(`${cuisineTokens[0]} noodles`);
+  }
+  if (cleanedTitle) {
+    queries.push(cleanedTitle);
+  }
+  queries.push('Noodles');
+
+  return dedupeStrings(queries, 5);
+};
+const TITLE_PROTEIN_MARKERS = new Set([
+  'beef',
+  'chicken',
+  'duck',
+  'egg',
+  'eggs',
+  'lamb',
+  'pork',
+  'salmon',
+  'sausage',
+  'shrimp',
+  'steak',
+  'tofu',
+  'tuna',
+  'turkey',
+]);
 const computeTitleSimilarity = (left: any, right: any) => {
   const leftTokens = new Set(tokenizeLookupTitle(left));
   const rightTokens = new Set(tokenizeLookupTitle(right));
@@ -180,6 +369,19 @@ const computeTitleSimilarity = (left: any, right: any) => {
   }
 
   return intersection / Math.max(leftTokens.size, rightTokens.size);
+};
+const hasConflictingProteinMarkers = (targetTitle: any, candidateTitle: any) => {
+  const targetMarkers = new Set(tokenizeLookupTitle(targetTitle).filter((token) => TITLE_PROTEIN_MARKERS.has(token)));
+  const candidateMarkers = new Set(tokenizeLookupTitle(candidateTitle).filter((token) => TITLE_PROTEIN_MARKERS.has(token)));
+  if (targetMarkers.size === 0 || candidateMarkers.size === 0) return false;
+
+  for (const marker of targetMarkers) {
+    if (candidateMarkers.has(marker)) {
+      return false;
+    }
+  }
+
+  return true;
 };
 const stripTitleDecorators = (value: any) =>
   normalizeWhitespace(String(value || '').replace(/\([^)]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' '));
@@ -298,6 +500,47 @@ const buildCategoryFallbackQueries = (item: any) => {
 
   return dedupeStrings(fallbacks, 4);
 };
+const stripLookupPrefixes = (value: any) => {
+  let text = normalizeWhitespace(value);
+  for (const pattern of IMAGE_LOOKUP_PREFIX_PATTERNS) {
+    text = text.replace(pattern, '');
+  }
+  return normalizeWhitespace(text);
+};
+const buildSemanticImageFallbackQueries = (item: any) => {
+  const title = normalizeWhitespace(item?.title || item?.food_name || '');
+  const brand = normalizeWhitespace(item?.brand_name || item?.brand || '');
+  const titleWithoutSize = stripImageLookupServingSizeWords(stripTitleDecorators(title));
+  const strippedTitle = stripLookupPrefixes(stripBrandPrefix(titleWithoutSize, brand));
+  const queries: string[] = [];
+
+  if (strippedTitle && normalizeLookupKey(strippedTitle) !== normalizeLookupKey(title)) {
+    // Retry broad branded titles with their simpler dish phrase first.
+    queries.push(strippedTitle);
+  }
+
+  const connectorMatch = strippedTitle.match(/^(.*?)(?:\s+(?:and|with|&)\s+).+$/i);
+  if (connectorMatch) {
+    // Prefer the primary food phrase when toppings or extra sides are present.
+    const primaryPhrase = normalizeWhitespace(connectorMatch[1]);
+    if (primaryPhrase) queries.push(primaryPhrase);
+  }
+
+  const titleWords = strippedTitle.split(/\s+/).filter(Boolean);
+  const lastWord = normalizeLookupKey(titleWords[titleWords.length - 1] || '');
+  if (PREPARED_DISH_FALLBACK_SUFFIXES.has(lastWord) && titleWords.length > 2) {
+    // Trim leading qualifiers so dish families like sushi or turkey bowls can reuse a simpler match.
+    queries.push(titleWords.slice(1).join(' '));
+
+    const withoutSuffix = titleWords.slice(0, -1).join(' ');
+    if (withoutSuffix) queries.push(withoutSuffix);
+
+    const coreDish = titleWords.slice(1, -1).join(' ');
+    if (coreDish) queries.push(coreDish);
+  }
+
+  return dedupeStrings(queries, 4);
+};
 const buildImageSearchQueries = (item: any) => {
   const title = normalizeWhitespace(item?.title || item?.food_name || '');
   const originalTitle = normalizeWhitespace(item?.original_title || '');
@@ -305,19 +548,24 @@ const buildImageSearchQueries = (item: any) => {
   const mappedTitle = normalizeWhitespace(item?.mapped_title || '');
   const mappedCanonicalTitle = normalizeWhitespace(item?.mapped_canonical_title || '');
   const brand = normalizeWhitespace(item?.brand_name || item?.brand || '');
-  const stripped = stripBrandPrefix(title, brand);
-  const strippedDecorators = stripTitleDecorators(title);
+  const titleWithoutSize = stripImageLookupServingSizeWords(title);
+  const stripped = stripBrandPrefix(titleWithoutSize, brand);
+  const strippedDecorators = stripImageLookupServingSizeWords(stripTitleDecorators(title));
   const strippedAll = stripBrandPrefix(strippedDecorators, brand);
   const titleWithoutBrandName =
     brand && normalizeLookupKey(title).startsWith(`${normalizeLookupKey(brand)} `)
       ? normalizeWhitespace(title.slice(brand.length).replace(/^[,:-]\s*/, ''))
       : '';
   const categoryFallbackQueries = buildCategoryFallbackQueries(item);
+  const semanticFallbackQueries = buildSemanticImageFallbackQueries(item);
+  const semanticImageOverride = getSemanticImageOverride(item);
   const prioritizedQueries = [
+    ...(semanticImageOverride?.queries || []),
     canonicalTitle,
     mappedCanonicalTitle,
     mappedTitle,
     ...categoryFallbackQueries,
+    ...semanticFallbackQueries,
     title,
     stripped,
     strippedDecorators,
@@ -350,6 +598,10 @@ const buildImageLookupKeys = (rawId: string, queries: string[]) => {
     keys.push(`title:${normalized}`);
   }
   return dedupeStrings(keys, 10);
+};
+const buildGeneratedFoodImageUrl = (item: any) => {
+  // Leave hard misses empty so existing local fallback artwork still renders in the UI.
+  return '';
 };
 const buildFoodDetailFactsCacheKey = (item: any, allowTitleFallback: boolean) => {
   const explicitFatSecretId = cleanId(item?.fatsecret_food_id);
@@ -553,53 +805,117 @@ const logImageResolutionResult = (item: any, result: ResolvedImageLookup) => {
     hasImage: !!String(result.image || '').trim(),
   });
 };
-const resolveImageFromFoodHits = async (hits: any[], targetCalories = 0): Promise<ResolvedImageLookup | null> => {
-  let bestImage = '';
-  let bestId = '';
-  let bestDiff = Number.POSITIVE_INFINITY;
+const resolveImageFromFoodHits = async (
+  hits: any[],
+  targetCalories = 0,
+  targetTitle = '',
+  activeQuery = '',
+  options: { maxDetailChecks?: number } = {}
+): Promise<ResolvedImageLookup | null> => {
+  const normalizedTargetTitle = String(targetTitle || '').trim();
+  const normalizedActiveQuery = String(activeQuery || '').trim();
+  const maxDetailChecks =
+    options.maxDetailChecks ??
+    (
+      normalizedActiveQuery && normalizeLookupKey(normalizedActiveQuery) !== normalizeLookupKey(normalizedTargetTitle)
+        ? 4
+        : 2
+    );
+  let bestResolved: (ResolvedImageLookup & { score: number }) | null = null;
+  let fallbackResolved: ResolvedImageLookup | null = null;
   let detailChecks = 0;
 
   for (const hit of hits.slice(0, 5)) {
     const hitId = cleanId(hit?.id);
+    const hitTitle = String(hit?.title || hit?.food_name || '').trim();
     const hitImage = String(hit?.image || '').trim();
-    if (!bestImage && hitImage) {
-      bestImage = hitImage;
-      bestId = hitId;
+    let candidateTitle = hitTitle;
+    let candidateImage = hitImage;
+    let candidateId = hitId;
+    let candidateCalories = toNumeric(hit?.calories, 0);
+
+    if ((targetCalories > 0 || options.maxDetailChecks) && hitId && detailChecks < maxDetailChecks) {
+      detailChecks += 1;
+      const detail = await getFoodById(hitId, {
+        expectedCalories: targetCalories > 0 ? targetCalories : undefined,
+      });
+      candidateTitle = String(detail?.title || hitTitle).trim();
+      candidateImage = String(detail?.image || hitImage).trim();
+      candidateCalories = toNumeric(detail?.calories, candidateCalories);
+      candidateId = cleanId(detail?.food_id || hitId);
     }
 
-    if (targetCalories > 0 && hitId && detailChecks < 2) {
-      detailChecks += 1;
-      const detail = await getFoodById(hitId, { expectedCalories: targetCalories });
-      const detailImage = String(detail?.image || hitImage).trim();
-      const calories = toNumeric(detail?.calories, 0);
-      const diff = calories > 0 ? Math.abs(calories - targetCalories) / targetCalories : 1;
-      if (detailImage && diff <= 0.35 && diff < bestDiff) {
-        bestDiff = diff;
-        bestImage = detailImage;
-        bestId = cleanId(detail?.food_id || hitId);
+    if (!candidateImage) continue;
+    if (!fallbackResolved && !normalizedTargetTitle) {
+      fallbackResolved = {
+        image: candidateImage,
+        food_id: candidateId || null,
+        lookupState: 'resolved',
+        source: 'food-search',
+      };
+    }
+
+    if (normalizedTargetTitle && hasConflictingProteinMarkers(normalizedTargetTitle, candidateTitle || hitTitle)) {
+      continue;
+    }
+
+    const targetTitleSimilarity = normalizedTargetTitle
+      ? computeTitleSimilarity(normalizedTargetTitle, candidateTitle || hitTitle)
+      : 0;
+    const queryTitleSimilarity = normalizedActiveQuery
+      ? computeTitleSimilarity(normalizedActiveQuery, candidateTitle || hitTitle)
+      : 0;
+    // Let category fallback aliases like Soy Milk participate when they produced the hit.
+    const titleSimilarity = Math.max(targetTitleSimilarity, queryTitleSimilarity);
+    if ((normalizedTargetTitle || normalizedActiveQuery) && titleSimilarity < TITLE_FALLBACK_MIN_SIMILARITY) {
+      continue;
+    }
+
+    const calorieDiff = targetCalories > 0 && candidateCalories > 0
+      ? Math.abs(candidateCalories - targetCalories) / targetCalories
+      : 0.5;
+    const calorieScore = targetCalories > 0
+      ? 1 - Math.min(1, calorieDiff / 0.35)
+      : 0.5;
+    const score = normalizedTargetTitle
+      ? titleSimilarity * 0.75 + calorieScore * 0.25
+      : calorieScore;
+
+    if (!bestResolved || score > bestResolved.score) {
+      bestResolved = {
+        image: candidateImage,
+        food_id: candidateId || null,
+        lookupState: 'resolved',
+        source: 'food-search',
+        score,
+      };
+    }
+  }
+
+  if (!bestResolved && !fallbackResolved) {
+    const firstWithId = hits.find((hit: any) => cleanId(hit?.id)) || hits[0];
+    const firstId = cleanId(firstWithId?.id);
+    if (firstId && !normalizedTargetTitle) {
+      const detail = await getFoodById(firstId, {
+        expectedCalories: targetCalories > 0 ? targetCalories : undefined,
+      });
+      const detailImage = String(detail?.image || '').trim();
+      if (detailImage) {
+        fallbackResolved = {
+          image: detailImage,
+          food_id: cleanId(detail?.food_id || firstId) || null,
+          lookupState: 'resolved',
+          source: 'food-search',
+        };
       }
     }
   }
 
-  if (!bestImage) {
-    const firstWithId = hits.find((hit: any) => cleanId(hit?.id)) || hits[0];
-    const firstId = cleanId(firstWithId?.id);
-    if (firstId) {
-      const detail = await getFoodById(firstId, {
-        expectedCalories: targetCalories > 0 ? targetCalories : undefined,
-      });
-      bestImage = String(detail?.image || '').trim();
-      bestId = cleanId(detail?.food_id || firstId);
-    }
+  if (bestResolved) {
+    const { score: _score, ...resolved } = bestResolved;
+    return resolved;
   }
-
-  if (!bestImage) return null;
-  return {
-    image: bestImage,
-    food_id: bestId || null,
-    lookupState: 'resolved',
-    source: 'food-search',
-  };
+  return fallbackResolved;
 };
 const resolveImageFromRecipeHits = async (hits: any[], targetCalories = 0): Promise<ResolvedImageLookup | null> => {
   let bestImage = '';
@@ -874,12 +1190,14 @@ export const resolveFoodImageFromFatSecret = async (
   const image = String(item?.image || "").trim();
   const preferFatSecretImage = !!options.preferFatSecretImage;
   const hasResolvableFatSecretId = !!rawId && !rawId.startsWith("local-");
-  // Skip direct food_id lookup for relaxed-title-fallback mappings: their food_id may map to a
-  // different food in FatSecret whose image is unrelated to the actual item. Fall through to
-  // title-based search which is more semantically reliable.
+  const hasExplicitFatSecretId = !!explicitFatSecretId && !explicitFatSecretId.startsWith('local-');
+  const semanticImageOverride = getSemanticImageOverride(item);
+  const forceSemanticImageSearch = !!semanticImageOverride?.forceSearch;
+  // Skip direct food_id lookup when the safer image path is a semantic title search instead.
   const isRelaxedTitleFallback =
     String(item?.mapping_acceptance_mode || "").toLowerCase() === "relaxed_title_fallback";
-  const skipDirectIdLookup = isRelaxedTitleFallback && !preferFatSecretImage;
+  const skipDirectIdLookup =
+    forceSemanticImageSearch || (isRelaxedTitleFallback && !preferFatSecretImage && !hasExplicitFatSecretId);
   const targetCalories = toNumber(item?.calories, 0);
   const queries = buildImageSearchQueries(item);
   const cacheKeys = buildImageLookupKeys(rawId, queries);
@@ -889,7 +1207,7 @@ export const resolveFoodImageFromFatSecret = async (
     return result;
   };
 
-  if (image && !preferFatSecretImage) {
+  if (image && !preferFatSecretImage && !forceSemanticImageSearch) {
     return returnResult({
       image,
       food_id: rawId || null,
@@ -937,7 +1255,16 @@ export const resolveFoodImageFromFatSecret = async (
     const hits = await searchFoodItems(query, 5);
     if (!hits.length) continue;
 
-    const resolved = await resolveImageFromFoodHits(hits, targetCalories);
+    const usesSemanticOverrideQuery = !!semanticImageOverride?.queries.some(
+      (overrideQuery) => normalizeLookupKey(overrideQuery) === normalizeLookupKey(query)
+    );
+    const resolved = await resolveImageFromFoodHits(
+      hits,
+      targetCalories,
+      usesSemanticOverrideQuery ? query : item?.title || item?.food_name || '',
+      query,
+      usesSemanticOverrideQuery ? { maxDetailChecks: 5 } : undefined,
+    );
     if (!resolved?.image) continue;
 
     cacheImageLookupResult(
@@ -966,12 +1293,20 @@ export const resolveFoodImageFromFatSecret = async (
     }
   }
 
-  const missResult: ResolvedImageLookup = {
-    image: '',
-    food_id: null,
-    lookupState: 'unavailable',
-    source: 'miss',
-  };
+  const generatedImage = buildGeneratedFoodImageUrl(item);
+  const missResult: ResolvedImageLookup = generatedImage
+    ? {
+        image: generatedImage,
+        food_id: null,
+        lookupState: 'resolved',
+        source: 'generated',
+      }
+    : {
+        image: '',
+        food_id: null,
+        lookupState: 'unavailable',
+        source: 'miss',
+      };
   cacheImageLookupResult(cacheKeys, missResult);
   return returnResult(missResult);
 };
@@ -1210,13 +1545,24 @@ export const fetchFoodDetailForFacts = async (
           continue;
         }
 
-        const titleSimilarity = computeTitleSimilarity(title, candidate?.title || candidate?.food_name || '');
+        const candidateTitle = candidate?.title || candidate?.food_name || '';
+        if (hasConflictingProteinMarkers(title, candidateTitle)) {
+          console.log("[mealAPI] resolveByTitle reject protein mismatch", {
+            title,
+            query,
+            candidateId,
+            candidateTitle,
+          });
+          continue;
+        }
+
+        const titleSimilarity = computeTitleSimilarity(title, candidateTitle);
         if (titleSimilarity < TITLE_FALLBACK_MIN_SIMILARITY) {
           console.log("[mealAPI] resolveByTitle reject low title similarity", {
             title,
             query,
             candidateId,
-            candidateTitle: candidate?.title || candidate?.food_name || '',
+            candidateTitle,
             titleSimilarity,
           });
           continue;

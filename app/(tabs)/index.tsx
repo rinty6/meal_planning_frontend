@@ -295,7 +295,7 @@ const HomeScreen = () => {
                             <Text
                                 numberOfLines={1}
                                 ellipsizeMode="tail"
-                                className="text-2xl font-bold"
+                                className="text-xl font-bold"
                                 style={{ color: '#0B2149' }}
                             >
                                 {getGreeting()}, {dbUserName}
