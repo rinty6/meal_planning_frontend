@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import CircularProgress from '../../components/CircularProgress';
 import ComboCard from '../../components/ComboCard';
-import { searchFoodItemsWithNutrition } from '../../services/mealAPI';
+import { getCurrentFoodSuggestionMealPeriod, searchFoodItemsWithNutrition } from '../../services/mealAPI';
 import {
     getCachedHomeSnapshot,
     setCachedHomeDashboard,
@@ -25,11 +25,27 @@ type MacroSet = {
 const DEFAULT_CALORIE_TARGET = 2000;
 const HOME_DASHBOARD_REFRESH_TTL_MS = 15 * 1000;
 const HOME_FOOD_ITEMS_REFRESH_TTL_MS = 30 * 60 * 1000;
+const THEME_COLORS = {
+    primary: '#007BFF',
+    secondary: '#FF9500',
+    success: '#10B981',
+    error: '#EF4444',
+    textDeep: '#0B2149',
+    textPrimary: '#000000',
+    textSecondary: '#6B7280',
+    borderSoft: '#DAE2EC',
+    macroTrack: '#D1D5DB',
+};
 
 const toNumber = (value: unknown) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
 };
+
+const formatWholeNumber = (value: number) =>
+    Math.round(value).toLocaleString('en-US');
+
+const safeTarget = (value: number) => Math.max(1, toNumber(value));
 
 const firstNumber = (...values: unknown[]) => {
     for (const value of values) {
@@ -205,11 +221,15 @@ const HomeScreen = () => {
     const loadFoodItems = useCallback(async ({ showSpinner = true } = {}) => {
         if (showSpinner) setLoadingFoodItems(true);
         try {
-            // Fetch popular food items with nutritional data
-            const items = await searchFoodItemsWithNutrition('chicken', 5);
+            // Empty query lets mealAPI choose breakfast/lunch/dinner/snack suggestions by current time.
+            const items = await searchFoodItemsWithNutrition('', 5);
             setFoodItems(items);
             if (userId) {
-                setCachedHomeFoodItems(userId, items);
+                setCachedHomeFoodItems(
+                    userId,
+                    items,
+                    items[0]?.recommendationMealPeriod || getCurrentFoodSuggestionMealPeriod()
+                );
             }
         } catch (error) {
             console.error("Error loading food items:", error);
@@ -223,7 +243,9 @@ const HomeScreen = () => {
         hydrateFromCache();
 
         const shouldRefreshDashboard = shouldRefreshHomeDashboard(userId, HOME_DASHBOARD_REFRESH_TTL_MS) || !cached?.macros;
-        const shouldRefreshFoods = shouldRefreshHomeFoodItems(userId, HOME_FOOD_ITEMS_REFRESH_TTL_MS) || !cached?.foodItems?.length;
+        const shouldRefreshFoods =
+            shouldRefreshHomeFoodItems(userId, HOME_FOOD_ITEMS_REFRESH_TTL_MS, getCurrentFoodSuggestionMealPeriod()) ||
+            !cached?.foodItems?.length;
 
         if (shouldRefreshDashboard) {
             void loadDashboardData({ showSpinner: !cached?.macros });
@@ -234,24 +256,31 @@ const HomeScreen = () => {
     }, [hydrateFromCache, loadDashboardData, loadFoodItems, userId]));
 
     const categories = [
-        { name: 'Meal', icon: 'restaurant-outline', route: '/(tabs)/meal/planning' },
-        { name: 'Calorie', icon: 'flame-outline', route: '/(tabs)/calorie/summary' },
-        { name: 'Profile', icon: 'person-outline', route: '/(tabs)/profile' },
-        { name: 'Shopping', icon: 'basket-outline', route: '/(tabs)/meal/shopping' },
-        { name: 'Recipe', icon: 'book-outline', route: '/(tabs)/meal/recipe' },
-        { name: 'Feedback', icon: 'chatbubble-outline', route: '/(tabs)/profile/feedback' },
+        { name: 'Meal', icon: 'restaurant-outline', route: '/(tabs)/meal/planning', iconColor: THEME_COLORS.primary, iconBgClass: 'bg-primarySoft' },
+        { name: 'Calorie', icon: 'flame-outline', route: '/(tabs)/calorie/summary', iconColor: THEME_COLORS.secondary, iconBgClass: 'bg-secondarySoft' },
+        { name: 'Profile', icon: 'person-outline', route: '/(tabs)/profile', iconColor: THEME_COLORS.primary, iconBgClass: 'bg-primarySoft' },
+        { name: 'Shopping', icon: 'basket-outline', route: '/(tabs)/meal/shopping', iconColor: THEME_COLORS.success, iconBgClass: 'bg-successSoft' },
+        { name: 'Recipe', icon: 'book-outline', route: '/(tabs)/meal/recipe', iconColor: THEME_COLORS.secondary, iconBgClass: 'bg-secondarySoft' },
+        { name: 'Feedback', icon: 'chatbubble-outline', route: '/(tabs)/profile/feedback', iconColor: THEME_COLORS.textSecondary, iconBgClass: 'bg-neutralSoft' },
     ];
+
+    const consumedCalories = Math.max(0, toNumber(macros.consumed.calories));
+    const calorieTarget = safeTarget(macros.target.calories);
+    const isCalorieOverTarget = consumedCalories > calorieTarget;
+    const remainingCalories = Math.max(0, calorieTarget - consumedCalories);
+    const exhaustedCalories = Math.max(0, consumedCalories - calorieTarget);
+    const calorieProgressPercent = Math.min(100, Math.max(0, (consumedCalories / calorieTarget) * 100));
 
     if (loading) {
         return (
-            <SafeAreaView className="flex-1 justify-center items-center" style={{ backgroundColor: '#EFF3F7' }}>
-                <ActivityIndicator size="large" color="#3B82F6" />
+            <SafeAreaView className="flex-1 justify-center items-center bg-appBackground">
+                <ActivityIndicator size="large" color={THEME_COLORS.primary} />
             </SafeAreaView>
         );
     }
 
     return (
-        <SafeAreaView className="flex-1" style={{ backgroundColor: '#EFF3F7' }}>
+        <SafeAreaView className="flex-1 bg-appBackground">
             <ScrollView className="px-4 pt-4" showsVerticalScrollIndicator={false}>
                 
                 {/* 1. Hero Image Section */}
@@ -314,13 +343,21 @@ const HomeScreen = () => {
                 </View>
 
                 {/* 3. Calorie Summary Section */}
-                <Text className="text-3xl font-bold mb-3" style={{ color: '#0B2149' }}>Calorie Summary</Text>
+                <View className='flex-row items-center justify-between'>
+                    <Text className="text-2xl font-bold mb-3 text-textDeep">Calorie Summary</Text>
+                    <TouchableOpacity
+                        onPress={() => router.push('/(tabs)/calorie/summary')}
+                        className="flex-row items-center mb-3"
+                        activeOpacity={0.75}
+                    >
+                        <Text className="text-sm font-semibold text-primary mr-1">See details</Text>
+                        <Ionicons name="chevron-forward" size={15} color={THEME_COLORS.primary} />
+                    </TouchableOpacity>
+                </View>
+                
                 <View
-                    className="rounded-2xl p-4 mb-8"
+                    className="rounded-2xl p-4 mb-8 bg-surface border border-borderSoft"
                     style={{
-                        backgroundColor: '#FFFFFF',
-                        borderColor: '#DAE2EC',
-                        borderWidth: 1,
                         shadowColor: '#0F172A',
                         shadowOpacity: 0.08,
                         shadowRadius: 8,
@@ -328,102 +365,128 @@ const HomeScreen = () => {
                         elevation: 2,
                     }}
                 >
-                    <View className="flex-row justify-between items-center mb-4">
+                    <View className="flex-row justify-between items-start mb-3">
                         <View className="flex-1">
-                            <Text className="text-xl font-semibold" style={{ color: '#0F172A' }}>
-                                Calorie Target: {Math.round(macros.target.calories)}
+                            <Text className="text-xs font-medium text-textSecondary mb-1">
+                                Target
                             </Text>
-                            {macros.consumed.calories > macros.target.calories && (
-                                <Text className="text-sm font-semibold mt-1" style={{ color: '#EF4444' }}>
-                                    You cross your daily calorie target
-                                </Text>
-                            )}
+                            <Text className="text-base font-bold text-textPrimary">
+                                {formatWholeNumber(calorieTarget)} kcal / day
+                            </Text>
                         </View>
                         <Ionicons name="ellipsis-horizontal" size={20} color="#A0AEC0" />
+                    </View>
+
+                    <View className="flex-row justify-between items-center mb-2">
+                        <Text className="text-xs text-textSecondary">
+                            {formatWholeNumber(consumedCalories)} consumed
+                        </Text>
+                        <Text className={`text-xs font-bold ${isCalorieOverTarget ? 'text-error' : 'text-success'}`}>
+                            {formatWholeNumber(isCalorieOverTarget ? exhaustedCalories : remainingCalories)} {isCalorieOverTarget ? 'exhausted' : 'remaining'}
+                        </Text>
+                    </View>
+
+                    <View className="h-2 rounded-full bg-macroTrack overflow-hidden mb-4">
+                        <View
+                            className="h-full rounded-full"
+                            style={{
+                                width: `${calorieProgressPercent}%`,
+                                backgroundColor: isCalorieOverTarget ? THEME_COLORS.error : THEME_COLORS.success,
+                            }}
+                        />
                     </View>
                     
                     {/* Centered layout for the 4 key macros */}
                     <View className="flex-row justify-between items-end px-2 pb-1">
                         <CircularProgress 
                             value={macros.consumed.carbs} 
-                            maxValue={macros.target.carbs} 
-                            radius={26}
+                            maxValue={safeTarget(macros.target.carbs)} 
+                            radius={27}
                             strokeWidth={5}
-                            color="#7A879A"
+                            color={THEME_COLORS.secondary}
                             trackColor="#E5EBF2"
-                            valueColor="#1E293B"
-                            labelColor="#334155"
+                            valueColor={THEME_COLORS.textPrimary}
+                            labelColor={THEME_COLORS.textSecondary}
+                            percentColor={THEME_COLORS.secondary}
                             label="Carbs"
                             unit="g"
                             showConsumed={true}
+                            showPercent={true}
+                            animated={true}
                         />
                         <CircularProgress 
                             value={macros.consumed.fats} 
-                            maxValue={macros.target.fats} 
-                            radius={26}
+                            maxValue={safeTarget(macros.target.fats)} 
+                            radius={27}
                             strokeWidth={5}
-                            color="#D2DAE5"
+                            color={THEME_COLORS.error}
                             trackColor="#E5EBF2"
-                            valueColor="#1E293B"
-                            labelColor="#334155"
+                            valueColor={THEME_COLORS.textPrimary}
+                            labelColor={THEME_COLORS.textSecondary}
+                            percentColor={THEME_COLORS.error}
                             label="Fat"
                             unit="g"
                             showConsumed={true}
+                            showPercent={true}
+                            animated={true}
                         />
                         <CircularProgress 
                             value={macros.consumed.protein} 
-                            maxValue={macros.target.protein} 
-                            radius={26}
+                            maxValue={safeTarget(macros.target.protein)} 
+                            radius={27}
                             strokeWidth={5}
-                            color="#63748C"
+                            color={THEME_COLORS.primary}
                             trackColor="#E5EBF2"
-                            valueColor="#1E293B"
-                            labelColor="#334155"
+                            valueColor={THEME_COLORS.textPrimary}
+                            labelColor={THEME_COLORS.textSecondary}
+                            percentColor={THEME_COLORS.primary}
                             label="Protein"
                             unit="g"
                             showConsumed={true}
+                            showPercent={true}
+                            animated={true}
                         />
                         <CircularProgress 
                             value={macros.consumed.calories} 
-                            maxValue={macros.target.calories} 
-                            radius={32}
-                            strokeWidth={6}
-                            color="#7ABC28"
+                            maxValue={calorieTarget} 
+                            radius={27}
+                            strokeWidth={5}
+                            color={THEME_COLORS.success}
                             trackColor="#E5EBF2"
-                            valueColor="#1E293B"
-                            labelColor="#334155"
+                            valueColor={THEME_COLORS.textPrimary}
+                            labelColor={THEME_COLORS.textSecondary}
+                            percentColor={THEME_COLORS.success}
                             label="Calories"
                             unit="cal"
                             showConsumed={true}
+                            showPercent={true}
+                            animated={true}
                         />
                     </View>
                 </View>
 
                 {/* 4. Category Grid Section */}
-                <Text className="text-3xl font-bold mb-3" style={{ color: '#0B2149' }}>Category</Text>
+                <Text className="text-2xl font-bold mb-3 text-textDeep">Category</Text>
                 <View className="flex-row flex-wrap justify-between pb-10">
                     {categories.map((cat, index) => (
                         <TouchableOpacity 
                             key={index}
                             onPress={() => router.push(cat.route as any)}
-                            className="w-[31%] rounded-2xl p-4 items-center mb-4"
-                            style={{ backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DAE2EC' }}
+                            className="w-[31%] rounded-xl py-4 items-center mb-4 bg-surface border border-borderSoft"
                         >
-                            <View className="w-12 h-12 rounded-full items-center justify-center mb-2" style={{ backgroundColor: '#F1F5F9' }}>
-                                <Ionicons name={cat.icon as any} size={24} color="#475569" />
+                            <View className={`w-12 h-12 rounded-xl items-center justify-center mb-2 ${cat.iconBgClass}`}>
+                                <Ionicons name={cat.icon as any} size={24} color={cat.iconColor} />
                             </View>
-                            <Text style={{ color: '#0F172A', fontSize: 15, fontWeight: '500' }}>{cat.name}</Text>
+                            <Text className="text-textPrimary text-xs font-bold">{cat.name}</Text>
                         </TouchableOpacity>
                     ))}
-                    <View className="w-[31%]" />
-                    <View className="w-[31%]" />
                 </View>
 
                 {/* 5. Food Items Section */}
-                <Text className="text-3xl font-bold mb-3" style={{ color: '#0B2149' }}>Recommended Foods</Text>
+                <Text className="text-2xl font-bold mb-3 text-textDeep">Recommended Foods</Text>
                 {loadingFoodItems ? (
                     <View className="items-center py-8">
-                        <ActivityIndicator size="large" color="#3B82F6" />
+                        <ActivityIndicator size="large" color={THEME_COLORS.primary} />
                     </View>
                 ) : foodItems.length > 0 ? (
                     <View className="pb-10">

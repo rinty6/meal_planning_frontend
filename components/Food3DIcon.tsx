@@ -31,7 +31,8 @@ const Food3DIcon = ({ name, size = 60 }: Food3DIconProps) => {
     if (lowerName.includes('rice') || lowerName.includes('pasta') || lowerName.includes('noodle') || lowerName.includes('bread')) return icons.rice;
     if (lowerName.includes('salad') || lowerName.includes('spinach') || lowerName.includes('vegetable')) return icons.salad;
     if (lowerName.includes('apple') || lowerName.includes('banana') || lowerName.includes('fruit') || lowerName.includes('berry')) return icons.fruit;
-    if (lowerName.includes('coffee') || lowerName.includes('tea') || lowerName.includes('latte') || lowerName.includes('water')) return icons.coffee;
+    // Keep cappuccino spellings on the coffee icon path when no remote image is available.
+    if (lowerName.includes('coffee') || lowerName.includes('tea') || lowerName.includes('latte') || lowerName.includes('cappuccino') || lowerName.includes('capuccino') || lowerName.includes('water')) return icons.coffee;
     if (lowerName.includes('cake') || lowerName.includes('chocolate') || lowerName.includes('cookie') || lowerName.includes('ice cream')) return icons.dessert;
 
     return icons.default; // Fallback

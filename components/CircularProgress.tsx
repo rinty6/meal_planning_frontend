@@ -1,8 +1,8 @@
 // This component will draw the progress rings for 
 // my Calories, Carbs, Protein, and Fat without slowing down the app's performance.
 
-import React from 'react';
-import { View, Text } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Easing, View, Text } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
 interface CircularProgressProps {
@@ -16,9 +16,15 @@ interface CircularProgressProps {
     trackColor?: string;
     valueColor?: string;
     labelColor?: string;
+    percentColor?: string;
     showUnit?: boolean;
     showConsumed?: boolean;
+    showPercent?: boolean;
+    animated?: boolean;
+    animationDuration?: number;
 }
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 const CircularProgress: React.FC<CircularProgressProps> = ({
     value,
@@ -31,8 +37,12 @@ const CircularProgress: React.FC<CircularProgressProps> = ({
     trackColor = '#E2E8F0',
     valueColor = '#0F172A',
     labelColor = '#334155',
+    percentColor,
     showUnit = false,
-    showConsumed = false
+    showConsumed = false,
+    showPercent = false,
+    animated = false,
+    animationDuration = 900
 }) => {
     // Convert inputs safely to numbers
     const numValue = Number(value) || 0;
@@ -41,20 +51,41 @@ const CircularProgress: React.FC<CircularProgressProps> = ({
     const circumference = 2 * Math.PI * radius;
     const safeMaxValue = numMax > 0 ? numMax : 1;
     
-    // Progress capped at 1 (100%) so the circle doesn't overdraw itself
-    const progress = Math.min(numValue / safeMaxValue, 1);
+    // Progress is capped for the ring, while the label can still show >100%.
+    const progress = Math.min(Math.max(numValue / safeMaxValue, 0), 1);
+    const percentValue = Math.round((numValue / safeMaxValue) * 100);
     const strokeDashoffset = circumference - progress * circumference;
+    const animatedProgress = useRef(new Animated.Value(animated ? 0 : progress)).current;
 
     const size = (radius + strokeWidth) * 2;
     
     // Display logic: if showConsumed is true, display consumed amount, otherwise display remaining
     const displayValue = showConsumed ? numValue : Math.max(numMax - numValue, 0);
     
-    // Determine color based on whether user exceeded calorie target
-    let displayColor = color;
-    if (showConsumed && label === 'Calories' && numValue > numMax) {
-        displayColor = '#EF4444'; // Red color for exceeded
-    }
+    const displayColor = color;
+
+    useEffect(() => {
+        animatedProgress.stopAnimation();
+
+        if (!animated) {
+            animatedProgress.setValue(progress);
+            return;
+        }
+
+        animatedProgress.setValue(0);
+        Animated.timing(animatedProgress, {
+            toValue: progress,
+            duration: animationDuration,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: false,
+        }).start();
+    }, [animated, animatedProgress, animationDuration, progress]);
+
+    const animatedStrokeDashoffset = animatedProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [circumference, 0],
+        extrapolate: 'clamp',
+    });
 
     return (
         <View className="items-center justify-end">
@@ -70,7 +101,7 @@ const CircularProgress: React.FC<CircularProgressProps> = ({
                         strokeWidth={strokeWidth}
                     />
                     {/* Progress Circle */}
-                    <Circle
+                    <AnimatedCircle
                         stroke={displayColor}
                         fill="none"
                         cx={size / 2}
@@ -78,7 +109,7 @@ const CircularProgress: React.FC<CircularProgressProps> = ({
                         r={radius}
                         strokeWidth={strokeWidth}
                         strokeDasharray={`${circumference} ${circumference}`}
-                        strokeDashoffset={strokeDashoffset}
+                        strokeDashoffset={(animated ? animatedStrokeDashoffset : strokeDashoffset) as any}
                         strokeLinecap="round"
                         rotation="-90"
                         originX={size / 2}
@@ -98,6 +129,11 @@ const CircularProgress: React.FC<CircularProgressProps> = ({
                 </View>
             </View>
             <Text style={{ fontSize: 12, fontWeight: '500', color: labelColor, marginTop: 8 }}>{label}</Text>
+            {showPercent && (
+                <Text style={{ fontSize: 10, fontWeight: '700', color: percentColor || displayColor, marginTop: 2 }}>
+                    {percentValue}%
+                </Text>
+            )}
         </View>
     );
 };

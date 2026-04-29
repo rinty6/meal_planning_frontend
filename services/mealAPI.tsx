@@ -42,8 +42,8 @@ type FoodDetailFactsResult = {
   nutritionFacts: ReturnType<typeof buildNutritionFactsFromFood>;
 };
 
-// Bump the cache version so stale generated placeholders and misses are replayed.
-const IMAGE_LOOKUP_CACHE_STORAGE_KEY = 'meal-app:fatsecret-image-cache:v9';
+// Bump the cache version so stale cappuccino image misses are replayed.
+const IMAGE_LOOKUP_CACHE_STORAGE_KEY = 'meal-app:fatsecret-image-cache:v10';
 const IMAGE_LOOKUP_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const IMAGE_LOOKUP_MISS_TTL_MS = 1000 * 60 * 60 * 12;
 const IMAGE_LOOKUP_CACHE_MAX_ENTRIES = 250;
@@ -458,6 +458,10 @@ const buildCategoryFallbackQueries = (item: any) => {
     }
     if (searchableText.includes('espresso')) {
       fallbacks.push('Espresso');
+    }
+    // Recover branded cappuccino drinks through the generic cappuccino image search path.
+    if (searchableText.includes('cappuccino') || searchableText.includes('capuccino')) {
+      fallbacks.push('Cappuccino');
     }
     if (searchableText.includes('latte')) {
       fallbacks.push('Latte');
@@ -1093,10 +1097,238 @@ export const searchFoodItems = async (query: string, maxResults = 10) => {
 
 // SEARCH FOOD ITEMS WITH NUTRITION DATA (Enriched version)
 // This fetches food items and then enriches each with nutritional data
-export const searchFoodItemsWithNutrition = async (query: string, maxResults = 10) => {
+type FoodSuggestionMealPeriod = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+
+const TIME_BASED_FOOD_SEARCH_QUERIES: Record<FoodSuggestionMealPeriod, string[]> = {
+  breakfast: ['omelette', 'oatmeal banana', 'greek yogurt berries'],
+  lunch: ['chicken rice bowl', 'chicken salad wrap', 'turkey sandwich'],
+  dinner: ['chicken and rice', 'grilled salmon rice', 'beef stir fry'],
+  snack: ['greek yogurt', 'apple peanut butter', 'mixed nuts'],
+};
+const TIME_BASED_IMAGE_LOOKUP_LIMIT = 3;
+const DISH_IMAGE_BASE_PARAMS = 'auto=format&fit=crop&w=900&q=80';
+const TIME_BASED_RECOMMENDATION_IMAGE_FALLBACKS = [
+  {
+    terms: ['oatmeal', 'banana'],
+    image: `https://images.unsplash.com/photo-1517673132405-a56a62b18caf?${DISH_IMAGE_BASE_PARAMS}`,
+  },
+  {
+    terms: ['yogurt', 'berries', 'berry'],
+    image: `https://images.unsplash.com/photo-1488477181946-6428a0291777?${DISH_IMAGE_BASE_PARAMS}`,
+  },
+  {
+    terms: ['omelette', 'omelet', 'egg'],
+    image: `https://images.unsplash.com/photo-1525351484163-7529414344d8?${DISH_IMAGE_BASE_PARAMS}`,
+  },
+  {
+    terms: ['wrap', 'sandwich', 'turkey'],
+    image: `https://images.unsplash.com/photo-1528735602780-2552fd46c7af?${DISH_IMAGE_BASE_PARAMS}`,
+  },
+  {
+    terms: ['salmon'],
+    image: `https://images.unsplash.com/photo-1467003909585-2f8a72700288?${DISH_IMAGE_BASE_PARAMS}`,
+  },
+  {
+    terms: ['stir fry', 'beef'],
+    image: `https://images.unsplash.com/photo-1512058564366-18510be2db19?${DISH_IMAGE_BASE_PARAMS}`,
+  },
+  {
+    terms: ['chicken', 'rice', 'bowl', 'salad'],
+    image: `https://images.unsplash.com/photo-1546069901-ba9599a7e63c?${DISH_IMAGE_BASE_PARAMS}`,
+  },
+  {
+    terms: ['apple', 'peanut butter'],
+    image: `https://images.unsplash.com/photo-1568702846914-96b305d2aaeb?${DISH_IMAGE_BASE_PARAMS}`,
+  },
+  {
+    terms: ['nuts', 'almond'],
+    image: `https://images.unsplash.com/photo-1508061253366-f7da158b6d46?${DISH_IMAGE_BASE_PARAMS}`,
+  },
+];
+const DEFAULT_TIME_BASED_RECOMMENDATION_IMAGE =
+  `https://images.unsplash.com/photo-1504674900247-0877df9cc836?${DISH_IMAGE_BASE_PARAMS}`;
+
+const TIME_BASED_RECOMMENDATION_EXCLUDED_TERMS = [
+  'alcohol',
+  'alcoholic',
+  'beer',
+  'beverage',
+  'candy',
+  'cocktail',
+  'cola',
+  'drink',
+  'flavored punch',
+  'fruit punch',
+  'juice',
+  'lemonade',
+  'liquor',
+  'punch',
+  'soda',
+  'soft drink',
+  'sports drink',
+  'sweet tea',
+  'wine',
+];
+
+const TIME_BASED_RECOMMENDATION_MEAL_TERMS = [
+  ...PREPARED_DISH_KEYWORDS,
+  ...SINGLE_WORD_MAIN_DISH_KEYWORDS,
+  'apple',
+  'banana',
+  'beef',
+  'berries',
+  'chicken',
+  'egg',
+  'eggs',
+  'nuts',
+  'oatmeal',
+  'peanut butter',
+  'salmon',
+  'turkey',
+  'yogurt',
+];
+
+export const getCurrentFoodSuggestionMealPeriod = (date = new Date()): FoodSuggestionMealPeriod => {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 11) return 'breakfast';
+  if (hour >= 11 && hour < 15) return 'lunch';
+  if (hour >= 17 && hour < 22) return 'dinner';
+  return 'snack';
+};
+
+const buildFoodSearchContext = (query: string) => {
+  const explicitQuery = String(query || '').trim();
+  if (explicitQuery) {
+    return {
+      queries: [explicitQuery],
+      mealPeriod: null as FoodSuggestionMealPeriod | null,
+      isTimeBased: false,
+    };
+  }
+
+  const mealPeriod = getCurrentFoodSuggestionMealPeriod();
+  return {
+    queries: TIME_BASED_FOOD_SEARCH_QUERIES[mealPeriod],
+    mealPeriod,
+    isTimeBased: true,
+  };
+};
+
+const getSearchableFoodText = (item: any) =>
+  [
+    item?.title,
+    item?.description,
+    item?.brand,
+    item?.brand_name,
+    item?.food_type,
+    item?.category,
+    item?.food_category,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+const hasAnyTextTerm = (text: string, terms: string[]) =>
+  terms.some((term) => text.includes(term));
+
+const isTimeBasedFoodRecommendationCandidate = (item: any) => {
+  const text = getSearchableFoodText(item);
+  if (!text) return false;
+  if (hasAnyTextTerm(text, TIME_BASED_RECOMMENDATION_EXCLUDED_TERMS)) return false;
+
+  return hasAnyTextTerm(text, TIME_BASED_RECOMMENDATION_MEAL_TERMS);
+};
+
+const withTimeBasedRecommendationMetadata = (
+  item: any,
+  searchContext: ReturnType<typeof buildFoodSearchContext>,
+  resolvedSearchQuery: string
+) => ({
+  ...item,
+  recommendationMealPeriod: searchContext.mealPeriod,
+  recommendationQuery: resolvedSearchQuery,
+  isTimeBasedRecommendation: searchContext.isTimeBased,
+});
+
+const getTimeBasedRecommendationFallbackImage = (item: any) => {
+  const text = getSearchableFoodText(item);
+  const searchQuery = String(item?.recommendationQuery || '').toLowerCase();
+  const searchableText = `${text} ${searchQuery}`;
+  const matchedFallback = TIME_BASED_RECOMMENDATION_IMAGE_FALLBACKS.find((fallback) =>
+    fallback.terms.some((term) => searchableText.includes(term))
+  );
+
+  return matchedFallback?.image || DEFAULT_TIME_BASED_RECOMMENDATION_IMAGE;
+};
+
+const hydrateTimeBasedRecommendationImages = async (items: any[], maxResults: number) => {
+  const output = items.map((item) => ({ ...item }));
+  const missingImageIndexes = output
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !String(item?.image || '').trim())
+    .slice(0, Math.min(maxResults, TIME_BASED_IMAGE_LOOKUP_LIMIT));
+
+  await Promise.allSettled(
+    missingImageIndexes.map(async ({ item, index }) => {
+      const resolved = await resolveFoodImageFromFatSecret(item);
+      const resolvedImage = String(resolved?.image || '').trim();
+      if (!resolvedImage) return;
+
+      output[index] = {
+        ...output[index],
+        image: resolvedImage,
+        image_lookup_state: 'resolved',
+        image_lookup_source: resolved?.source || 'food-image-lookup',
+        ...(resolved?.food_id && !output[index]?.fatsecret_food_id
+          ? { fatsecret_food_id: String(resolved.food_id) }
+          : {}),
+        ...(resolved?.food_id && !output[index]?.food_id
+          ? { food_id: String(resolved.food_id) }
+          : {}),
+      };
+    })
+  );
+
+  return output.map((item) => {
+    if (String(item?.image || '').trim()) return item;
+
+    return {
+      ...item,
+      image: getTimeBasedRecommendationFallbackImage(item),
+      image_lookup_state: 'resolved',
+      image_lookup_source: 'time-based-fallback',
+    };
+  });
+};
+
+export const searchFoodItemsWithNutrition = async (query = '', maxResults = 10) => {
   try {
-    // First, get basic food items
-    const basicItems = await searchFoodItems(query, maxResults);
+    const searchContext = buildFoodSearchContext(query);
+
+    let basicItems: any[] = [];
+    let resolvedSearchQuery = searchContext.queries[0] || 'healthy meal';
+
+    for (const searchQuery of searchContext.queries) {
+      resolvedSearchQuery = searchQuery;
+      const searchResults = await searchFoodItems(searchQuery, maxResults);
+      const filteredResults = searchContext.isTimeBased
+        ? searchResults.filter(isTimeBasedFoodRecommendationCandidate)
+        : searchResults;
+      const resultsWithQuery = filteredResults.map((item: any) => ({
+        ...item,
+        recommendationQuery: searchQuery,
+      }));
+
+      basicItems = [
+        ...basicItems,
+        ...resultsWithQuery.filter((item: any) => {
+          const itemId = String(item?.id || item?.food_id || item?.title || '').trim();
+          return itemId && !basicItems.some((existing: any) => String(existing?.id || existing?.food_id || existing?.title || '').trim() === itemId);
+        }),
+      ].slice(0, maxResults);
+
+      if (basicItems.length >= maxResults || (!searchContext.isTimeBased && basicItems.length > 0)) break;
+    }
     
     if (basicItems.length === 0) return [];
     
@@ -1104,31 +1336,38 @@ export const searchFoodItemsWithNutrition = async (query: string, maxResults = 1
     const enrichedItems = await Promise.all(
       basicItems.map(async (item: any) => {
         try {
+          const itemSearchQuery = item?.recommendationQuery || resolvedSearchQuery;
           const foodId = item.id || item.food_id;
-          if (!foodId) return item;
+          if (!foodId) return withTimeBasedRecommendationMetadata(item, searchContext, itemSearchQuery);
           
           // Fetch detailed nutritional information
           const detailedFood = await getFoodById(String(foodId));
           
           if (detailedFood) {
             // Merge basic info with detailed nutrition data
-            return {
+            return withTimeBasedRecommendationMetadata({
               ...item,
               ...detailedFood,
               // Ensure these fields exist for ComboCard
               grams: detailedFood.metric_serving_amount || 100,
               time: detailedFood.time || '15 min',
-            };
+            }, searchContext, itemSearchQuery);
           }
-          return item;
+          return withTimeBasedRecommendationMetadata(item, searchContext, itemSearchQuery);
         } catch (error) {
           console.error(`Error fetching details for food ${item.id}:`, error);
-          return item;
+          return withTimeBasedRecommendationMetadata(item, searchContext, item?.recommendationQuery || resolvedSearchQuery);
         }
       })
     );
     
-    return enrichedItems;
+    const filteredEnrichedItems = searchContext.isTimeBased
+      ? enrichedItems.filter(isTimeBasedFoodRecommendationCandidate).slice(0, maxResults)
+      : enrichedItems;
+
+    return searchContext.isTimeBased
+      ? hydrateTimeBasedRecommendationImages(filteredEnrichedItems, maxResults)
+      : filteredEnrichedItems;
   } catch (error) {
     console.error("Food Search with Nutrition Error:", error);
     return [];
