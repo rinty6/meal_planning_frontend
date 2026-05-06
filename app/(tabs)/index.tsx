@@ -492,7 +492,7 @@ const HomeScreen = () => {
                     <View className="pb-10">
                         {foodItems.map((item, index) => (
                             <ComboCard
-                                key={index}
+                                key={`${item?.fatsecret_food_id || item?.food_id || item?.id || item?.title || 'food'}-${index}`}
                                 item={item}
                                 onPress={() => {
                                     router.push({

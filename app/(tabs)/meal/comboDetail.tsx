@@ -9,7 +9,7 @@ import IngredientIcon from "../../../components/IngredientIcon";
 import CustomAlert from "../../../components/customAlert";
 import SuccessModal from "../../../components/sucessmodal";
 import FoodFactsCard from "../../../components/FoodFactsCard";
-import { fetchFoodDetailForFacts } from "../../../services/mealAPI";
+import { buildNutritionFactsFromFood, fetchFoodDetailForFacts } from "../../../services/mealAPI";
 import { peekCachedRecommendations } from "../../../services/recommendation";
 
 type ComboDetailItem = Record<string, any>;
@@ -31,6 +31,9 @@ const firstFiniteNumber = (...values: any[]) => {
   }
   return 0;
 };
+
+// Treat only numeric ids as valid FatSecret food identifiers.
+const isNumericFatSecretId = (value: any) => /^\d+$/.test(String(value ?? "").trim());
 
 const hasMeaningfulMacroSnapshot = (item: any) =>
   [item?.calories, item?.protein, item?.carbs, item?.fats, item?.fat].some((value) => Number(value) > 0);
@@ -135,13 +138,19 @@ const FoodDetailScreen = () => {
 
       const requestId = latestNutritionRequestRef.current + 1;
       latestNutritionRequestRef.current = requestId;
-      setLoadingNutrition(true);
+      const snapshotFacts = hasMeaningfulMacroSnapshot(selectedDish)
+        ? buildNutritionFactsFromFood(selectedDish)
+        : null;
+      startTransition(() => {
+        setDetailItem(selectedDish);
+        setNutritionFacts(snapshotFacts);
+      });
+      setLoadingNutrition(!snapshotFacts);
       try {
         const explicitFatSecretId = String(selectedDish?.fatsecret_food_id || "").trim();
         const fallbackFoodId = String(selectedDish?.food_id || selectedDish?.id || "").trim();
         const hasResolvableFatSecretId =
-          !!(explicitFatSecretId || fallbackFoodId) &&
-          !String(explicitFatSecretId || fallbackFoodId).startsWith("local-");
+          isNumericFatSecretId(explicitFatSecretId) || isNumericFatSecretId(fallbackFoodId);
         
         // Attempt to seed from cached recommendation data first
         if (!hasResolvableFatSecretId) {
@@ -162,7 +171,10 @@ const FoodDetailScreen = () => {
               matchingItem &&
               (matchingItem.calories || matchingItem.protein)
             ) {
-              setDetailItem(mergeFoodSnapshot(selectedDish, matchingItem));
+              const cachedSnapshot = mergeFoodSnapshot(selectedDish, matchingItem);
+              setDetailItem(cachedSnapshot);
+              setNutritionFacts(buildNutritionFactsFromFood(cachedSnapshot));
+              setLoadingNutrition(false);
             }
           }
         }

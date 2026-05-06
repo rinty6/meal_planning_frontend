@@ -29,11 +29,13 @@ const Food3DIcon = ({ name, size = 60 }: Food3DIconProps) => {
     if (lowerName.includes('beef') || lowerName.includes('steak') || lowerName.includes('burger') || lowerName.includes('pork')) return icons.beef;
     if (lowerName.includes('fish') || lowerName.includes('salmon') || lowerName.includes('tuna') || lowerName.includes('shrimp')) return icons.fish;
     if (lowerName.includes('rice') || lowerName.includes('pasta') || lowerName.includes('noodle') || lowerName.includes('bread')) return icons.rice;
-    if (lowerName.includes('salad') || lowerName.includes('spinach') || lowerName.includes('vegetable')) return icons.salad;
+    // Keep veggie-ball and hummus-like titles on the plant-forward icon path when no remote image is available.
+    if (lowerName.includes('salad') || lowerName.includes('spinach') || lowerName.includes('vegetable') || lowerName.includes('veggie') || lowerName.includes('jackfruit') || lowerName.includes('hummus') || lowerName.includes('hommus') || lowerName.includes('homos')) return icons.salad;
     if (lowerName.includes('apple') || lowerName.includes('banana') || lowerName.includes('fruit') || lowerName.includes('berry')) return icons.fruit;
     // Keep cappuccino spellings on the coffee icon path when no remote image is available.
     if (lowerName.includes('coffee') || lowerName.includes('tea') || lowerName.includes('latte') || lowerName.includes('cappuccino') || lowerName.includes('capuccino') || lowerName.includes('water')) return icons.coffee;
-    if (lowerName.includes('cake') || lowerName.includes('chocolate') || lowerName.includes('cookie') || lowerName.includes('ice cream')) return icons.dessert;
+    // Keep yogurt and curd-cream spellings on the dessert icon path when no remote image is available.
+    if (lowerName.includes('cake') || lowerName.includes('chocolate') || lowerName.includes('cookie') || lowerName.includes('ice cream') || lowerName.includes('yogurt') || lowerName.includes('yoghurt') || lowerName.includes('yogur') || lowerName.includes('kohupiima')) return icons.dessert;
 
     return icons.default; // Fallback
   };

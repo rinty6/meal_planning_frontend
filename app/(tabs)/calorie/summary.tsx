@@ -1,7 +1,7 @@
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, FlatList, Linking } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, FlatList, Linking, Animated, Easing } from 'react-native';
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -46,6 +46,90 @@ const describePieSlice = (
   return `M ${centerX} ${centerY} L ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${end.x} ${end.y} Z`;
 };
 
+const CHART_ANIMATION_DURATION_MS = 900;
+
+const AnimatedChartContainer = ({
+  animationKey,
+  children,
+  style,
+}: {
+  animationKey: string;
+  children: React.ReactNode;
+  style?: any;
+}) => {
+  const entryProgress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    entryProgress.stopAnimation();
+    entryProgress.setValue(0);
+    Animated.timing(entryProgress, {
+      toValue: 1,
+      duration: CHART_ANIMATION_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [animationKey, entryProgress]);
+
+  const scale = entryProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.94, 1],
+  });
+
+  return (
+    <Animated.View style={[style, { opacity: entryProgress, transform: [{ scale }] }]}>
+      {children}
+    </Animated.View>
+  );
+};
+
+const AnimatedProgressFill = ({ percentage, color }: { percentage: number; color: string }) => {
+  const animatedValue = useRef(new Animated.Value(0)).current;
+  const clampedPercentage = Math.min(100, Math.max(0, toNumber(percentage)));
+
+  useEffect(() => {
+    animatedValue.stopAnimation();
+    animatedValue.setValue(0);
+    Animated.timing(animatedValue, {
+      toValue: clampedPercentage,
+      duration: CHART_ANIMATION_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [animatedValue, clampedPercentage]);
+
+  const width = animatedValue.interpolate({
+    inputRange: [0, 100],
+    outputRange: ['0%', '100%'],
+    extrapolate: 'clamp',
+  });
+
+  return <Animated.View style={{ width, height: '100%', backgroundColor: color, borderRadius: 999 }} />;
+};
+
+const AnimatedVerticalFill = ({ percentage, color }: { percentage: number; color: string }) => {
+  const animatedValue = useRef(new Animated.Value(0)).current;
+  const clampedPercentage = Math.min(100, Math.max(0, toNumber(percentage)));
+
+  useEffect(() => {
+    animatedValue.stopAnimation();
+    animatedValue.setValue(0);
+    Animated.timing(animatedValue, {
+      toValue: clampedPercentage,
+      duration: CHART_ANIMATION_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [animatedValue, clampedPercentage]);
+
+  const height = animatedValue.interpolate({
+    inputRange: [0, 100],
+    outputRange: ['0%', '100%'],
+    extrapolate: 'clamp',
+  });
+
+  return <Animated.View style={{ height, width: '100%', backgroundColor: color, borderRadius: 999 }} />;
+};
+
 const MacroPieChart = ({ protein, carbs, fats }: { protein: number; carbs: number; fats: number }) => {
   const segments = [
     { label: 'Protein', value: Math.max(0, toNumber(protein)), color: '#8B5CF6' },
@@ -56,26 +140,62 @@ const MacroPieChart = ({ protein, carbs, fats }: { protein: number; carbs: numbe
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
   const size = 120;
   const radius = size / 2;
+  const animationKey = segments.map((segment) => `${segment.label}:${Math.round(segment.value)}`).join('|');
+  const drawAnimation = useRef(new Animated.Value(1)).current;
+  const [drawProgress, setDrawProgress] = useState(1);
+
+  useEffect(() => {
+    let isMounted = true;
+    drawAnimation.stopAnimation();
+    drawAnimation.setValue(0);
+    setDrawProgress(0);
+
+    const listenerId = drawAnimation.addListener(({ value }) => {
+      if (isMounted) setDrawProgress(value);
+    });
+
+    Animated.timing(drawAnimation, {
+      toValue: 1,
+      duration: CHART_ANIMATION_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start(({ finished }) => {
+      if (isMounted && finished) setDrawProgress(1);
+    });
+
+    return () => {
+      isMounted = false;
+      drawAnimation.removeListener(listenerId);
+    };
+  }, [animationKey, drawAnimation]);
 
   if (total <= 0) {
     return (
-      <View className="items-center mb-6">
+      <AnimatedChartContainer animationKey={animationKey} style={{ alignItems: 'center', marginBottom: 24 }}>
         <Svg width={size} height={size}>
           <Circle cx={radius} cy={radius} r={radius} fill="#E5E7EB" />
         </Svg>
-      </View>
+      </AnimatedChartContainer>
     );
   }
 
   const positiveSegments = segments.filter((segment) => segment.value > 0);
 
   if (positiveSegments.length === 1) {
+    const visibleSweep = Math.min(359.99, 360 * drawProgress);
     return (
-      <View className="items-center mb-6">
+      <AnimatedChartContainer animationKey={animationKey} style={{ alignItems: 'center', marginBottom: 24 }}>
         <Svg width={size} height={size}>
-          <Circle cx={radius} cy={radius} r={radius} fill={positiveSegments[0].color} />
+          {drawProgress >= 0.999 ? (
+            <Circle cx={radius} cy={radius} r={radius} fill={positiveSegments[0].color} />
+          ) : drawProgress > 0 ? (
+            <Path
+              d={describePieSlice(radius, radius, radius, 0, visibleSweep)}
+              fill={positiveSegments[0].color}
+            />
+          ) : null}
         </Svg>
-      </View>
+      </AnimatedChartContainer>
     );
   }
 
@@ -90,19 +210,25 @@ const MacroPieChart = ({ protein, carbs, fats }: { protein: number; carbs: numbe
     currentAngle += sweepAngle;
     return slice;
   });
+  const visibleSweepLimit = 360 * drawProgress;
 
   return (
-    <View className="items-center mb-6">
+    <AnimatedChartContainer animationKey={animationKey} style={{ alignItems: 'center', marginBottom: 24 }}>
       <Svg width={size} height={size}>
-        {slices.map((slice) => (
-          <Path
-            key={slice.label}
-            d={describePieSlice(radius, radius, radius, slice.startAngle, slice.endAngle)}
-            fill={slice.color}
-          />
-        ))}
+        {slices.map((slice) => {
+          const visibleEndAngle = Math.min(slice.endAngle, visibleSweepLimit);
+          if (visibleEndAngle <= slice.startAngle) return null;
+
+          return (
+            <Path
+              key={slice.label}
+              d={describePieSlice(radius, radius, radius, slice.startAngle, visibleEndAngle)}
+              fill={slice.color}
+            />
+          );
+        })}
       </Svg>
-    </View>
+    </AnimatedChartContainer>
   );
 };
 
@@ -242,6 +368,7 @@ const CalorieSummaryScreen = () => {
   const router = useRouter();
   const { userId } = useAuth();
   const flatListRef = useRef<FlatList>(null);
+  const latestSummaryRequestRef = useRef(0);
 
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [data, setData] = useState<any>(null);
@@ -268,11 +395,34 @@ const CalorieSummaryScreen = () => {
   }, []);
 
   const loadSummary = useCallback(async () => {
-    if (!userId) return;
+    const requestId = latestSummaryRequestRef.current + 1;
+    latestSummaryRequestRef.current = requestId;
+
+    if (!userId) {
+      setData(null);
+      setWeeklyData([]);
+      setInsights(null);
+      setIsRefreshing(false);
+      return;
+    }
+
     setIsRefreshing(true);
     try {
       const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
       const dateStr = formatLocalYYYYMMDD(selectedDate);
+
+      const dashboardResult = await fetchJson(
+        `${apiURL}/api/calorie/dashboard/${userId}/${dateStr}?window=${INSIGHTS_WINDOW_DAYS}`
+      );
+
+      if (latestSummaryRequestRef.current !== requestId) return;
+
+      if (dashboardResult?.ok) {
+        setData(dashboardResult.payload?.summary || null);
+        setWeeklyData(Array.isArray(dashboardResult.payload?.weekly) ? dashboardResult.payload.weekly : []);
+        setInsights(dashboardResult.payload?.insights || null);
+        return;
+      }
 
       const [dailyResult, weeklyResult, insightsResult] = await Promise.all([
         fetchJson(`${apiURL}/api/calorie/summary/${userId}/${dateStr}`),
@@ -280,23 +430,23 @@ const CalorieSummaryScreen = () => {
         fetchJson(`${apiURL}/api/calorie/insights/${userId}/${dateStr}?window=${INSIGHTS_WINDOW_DAYS}`),
       ]);
 
+      if (latestSummaryRequestRef.current !== requestId) return;
+
       if (dailyResult?.ok) setData(dailyResult.payload);
       if (weeklyResult?.ok) setWeeklyData(weeklyResult.payload);
-      if (insightsResult?.ok) {
-        setInsights(insightsResult.payload);
-      } else {
-        setInsights(null);
-      }
+      setInsights(insightsResult?.ok ? insightsResult.payload : null);
     } catch (e) {
       console.error(e);
     } finally {
-      setIsRefreshing(false);
+      if (latestSummaryRequestRef.current === requestId) {
+        setIsRefreshing(false);
+      }
     }
   }, [selectedDate, userId]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     void loadSummary();
-  }, [loadSummary]);
+  }, [loadSummary]));
 
   const handleMacroInfoPress = () => {
     setShowMacroAlert(true);
@@ -324,7 +474,7 @@ const CalorieSummaryScreen = () => {
           </Text>
         </View>
         <View className="h-2 bg-gray-100 rounded-full overflow-hidden">
-          <View style={{ width: `${width}%`, backgroundColor: color }} className="h-full rounded-full" />
+          <AnimatedProgressFill percentage={width} color={color} />
         </View>
       </View>
     );
@@ -432,13 +582,7 @@ const CalorieSummaryScreen = () => {
                       </View>
                     </View>
                     <View className="h-4 bg-gray-100 rounded-full overflow-hidden mb-2">
-                      <View
-                        style={{
-                          width: `${calorieBarPercent}%`,
-                          backgroundColor: isOverTarget ? '#EF4444' : '#3B82F6',
-                        }}
-                        className="h-full rounded-full"
-                      />
+                      <AnimatedProgressFill percentage={calorieBarPercent} color={isOverTarget ? '#EF4444' : '#3B82F6'} />
                     </View>
                   </View>
 
@@ -457,14 +601,14 @@ const CalorieSummaryScreen = () => {
                         return (
                           <TouchableOpacity
                             key={index}
-                            onPress={() => setSelectedDate(new Date(day.date))}
+                            onPress={() => setSelectedDate(new Date(`${day.date}T00:00:00`))}
                             className="items-center flex-1"
                           >
                             <Text className={`text-[10px] mb-2 ${isOverDayTarget ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
                               {dayCalories}
                             </Text>
                             <View className="w-2 bg-gray-100 h-32 rounded-full justify-end overflow-hidden">
-                              <View style={{ height: `${percentage}%`, backgroundColor: barColor }} className="w-full rounded-full" />
+                              <AnimatedVerticalFill percentage={percentage} color={barColor} />
                             </View>
                             <Text className={`text-xs mt-2 ${isSelected ? 'font-bold text-blue-500' : 'text-gray-400'}`}>{day.day}</Text>
                           </TouchableOpacity>

@@ -1,10 +1,11 @@
 /**
  * ADD FOOD MODAL COMPONENT
  *
- * This file handles adding food items through multiple methods:
- * 1. Search API (existing mealAPI)
- * 2. Manual entry (existing)
- * 3. BARCODE SCANNING (new - Open Food Facts integration)
+ * Four view modes rendered inside a single Modal — no nested modals, no overlays:
+ *   'search'      — search bar + results + 3 action buttons
+ *   'manual'      — image, name, macros, save button
+ *   'barcode'     — full-screen camera scanner (own nested Modal, unchanged)
+ *   'recognition' — food recognition result view
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -19,14 +20,17 @@ import {
   Image,
   ScrollView,
   KeyboardAvoidingView,
-  Platform
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { searchFoodItems, getFoodById } from '../services/mealAPI';
 import { fetchBarcodeData } from '../services/barcodeAPI';
-import CustomAlert from '../components/customAlert'; // Ensure this path is correct
+import { recognizeFood } from '../services/foodRecognitionAPI';
+import type { PredictionResult, FoodCandidate } from '../services/foodRecognitionAPI';
+import CustomAlert from '../components/customAlert';
+import FoodRecognitionResultModal from './FoodRecognitionResultModal';
 
 interface AddFoodModalProps {
   visible: boolean;
@@ -36,10 +40,9 @@ interface AddFoodModalProps {
 }
 
 const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalProps) => {
-  // VIEW MODE: 'search' or 'manual' or 'barcode'
-  const [viewMode, setViewMode] = useState<'search' | 'manual' | 'barcode'>('search');
+  const [viewMode, setViewMode] = useState<'search' | 'manual' | 'barcode' | 'recognition'>('search');
 
-  // --- CUSTOM ALERT STATE ---
+  // --- CUSTOM ALERT ---
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState({ title: '', message: '' });
 
@@ -48,7 +51,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setAlertVisible(true);
   };
 
-  // --- SEARCH STATE ---
+  // --- SEARCH ---
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -56,135 +59,158 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   const [addingId, setAddingId] = useState<string | null>(null);
   const latestSearchRequestRef = useRef(0);
 
-  // --- MANUAL ENTRY STATE ---
+  // --- MANUAL ENTRY ---
   const [manualName, setManualName] = useState('');
   const [manualCalories, setManualCalories] = useState('');
   const [manualProtein, setManualProtein] = useState('');
   const [manualCarbs, setManualCarbs] = useState('');
   const [manualFat, setManualFat] = useState('');
-  const [manualImage, setManualImage] = useState<string | null>(null); 
+  const [manualImage, setManualImage] = useState<string | null>(null);
 
-  // --- BARCODE SCANNING STATE ---
+  // --- BARCODE ---
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [barcodeScanning, setBarcodeScanning] = useState(false);
   const [processingBarcode, setProcessingBarcode] = useState(false);
-  const [processingStep, setProcessingStep] = useState(0); // Track which step is displayed (0, 1, 2)
-  
-  // Synchronous lock to prevent camera spam (The 502 Error Fix)
+  const [processingStep, setProcessingStep] = useState(0);
   const isProcessingRef = useRef(false);
 
-  // Sequential step animation during barcode processing
+  // --- FOOD RECOGNITION ---
+  const [recognitionLoading, setRecognitionLoading] = useState(false);
+  const [recognitionResult, setRecognitionResult] = useState<PredictionResult | null>(null);
+  const [recognitionImageUri, setRecognitionImageUri] = useState<string | null>(null);
+
+  // Barcode processing step animation
   useEffect(() => {
-    if (!processingBarcode) {
-      setProcessingStep(0);
-      return;
-    }
-
-    const step1Timer = setTimeout(() => setProcessingStep(1), 800);
-    const step2Timer = setTimeout(() => setProcessingStep(2), 1600);
-
-    return () => {
-      clearTimeout(step1Timer);
-      clearTimeout(step2Timer);
-    };
+    if (!processingBarcode) { setProcessingStep(0); return; }
+    const t1 = setTimeout(() => setProcessingStep(1), 800);
+    const t2 = setTimeout(() => setProcessingStep(2), 1600);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [processingBarcode]);
 
-  // --- REQUEST CAMERA PERMISSION ---
   useEffect(() => {
-    if (barcodeScanning) {
-      if (!cameraPermission?.granted) {
-        requestCameraPermissionHandler();
-      }
-    }
+    if (barcodeScanning && !cameraPermission?.granted) requestCameraPermissionHandler();
   }, [barcodeScanning]);
 
   const requestCameraPermissionHandler = async () => {
-    console.log('🎥 [BARCODE MODAL] Requesting camera permission...');
     const permission = await requestCameraPermission();
-    console.log(`🎥 [BARCODE MODAL] Camera permission status: ${permission?.granted}`);
-
     if (!permission?.granted) {
-      showCustomAlert(
-        'Camera Access Required',
-        'We need camera access to scan barcodes. Please enable camera permissions in your settings.'
-      );
+      showCustomAlert('Camera Access Required', 'Enable camera permissions in your settings to scan barcodes.');
       setBarcodeScanning(false);
     }
   };
 
-  // --- HANDLE BARCODE SCAN ---
+  // --- BARCODE SCAN ---
   const handleBarcodeScan = async (data: any) => {
-    // If the door is locked (already processing a scan), ignore everything else instantly!
     if (isProcessingRef.current) return;
-    
-    // Instantly lock the door
     isProcessingRef.current = true;
     setProcessingBarcode(true);
-    console.log(` [BARCODE MODAL] Barcode detected: ${data.data}`);
 
     try {
-      console.log(' [BARCODE MODAL] Fetching product data from Open Food Facts...');
       const response = await fetchBarcodeData(data.data);
 
       if (!response.success || !response.data) {
-        console.log('[BARCODE MODAL] Product not found, closing scanner...');
-        
-        // Close scanner IMMEDIATELY before alert to avoid modal stacking
         isProcessingRef.current = false;
         setProcessingBarcode(false);
         setBarcodeScanning(false);
-        
-        // Show alert after scanner is completely closed
-        setTimeout(() => {
-          showCustomAlert(
-            'Product Not Found',
-            `We couldn't find the food item for barcode ${data.data} in our database.\n\nTry scanning again or manually enter the food information.`
-          );
-        }, 100);
+        setTimeout(() => showCustomAlert('Product Not Found',
+          `We couldn't find barcode ${data.data}.\n\nTry scanning again or add manually.`), 100);
         return;
       }
 
-      console.log('[BARCODE MODAL] Product found! Auto-filling form fields...');
       const { foodName, calories, protein, carbs, fats, image } = response.data;
-
       setManualName(foodName);
       setManualCalories(calories.toString());
       setManualProtein(protein.toString());
       setManualCarbs(carbs.toString());
       setManualFat(fats.toString());
+      if (image) setManualImage(image);
 
-      if (image) {
-        setManualImage(image);
-        console.log(`[BARCODE MODAL] Set product image`);
-      }
-
+      setBarcodeScanning(false);
+      isProcessingRef.current = false;
+      setProcessingBarcode(false);
       setViewMode('manual');
-      setBarcodeScanning(false);
-      
-      // Unlock for the future
-      isProcessingRef.current = false;
-      setProcessingBarcode(false);
-
-      showCustomAlert('Success!', 'Product data loaded. Review and save the food item.');
-
-    } catch (error) {
-      console.error(' [BARCODE MODAL] Error processing barcode:', error);
-      
+      showCustomAlert('Success!', 'Product data loaded. Review and save.');
+    } catch {
       isProcessingRef.current = false;
       setProcessingBarcode(false);
       setBarcodeScanning(false);
-      
-      // Show alert after scanner is completely closed
-      setTimeout(() => {
-        showCustomAlert(
-          'Error Processing Barcode',
-          'An error occurred while processing the barcode. Please try scanning again or enter the food information manually.'
-        );
-      }, 100);
+      setTimeout(() => showCustomAlert('Error', 'Could not process barcode. Try again.'), 100);
     }
   };
 
-  // 1. HANDLE SEARCH (Existing Logic)
+  // --- FOOD RECOGNITION ---
+  const handleScanFood = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      showCustomAlert('Camera Access Required', 'Enable camera permissions to scan food.');
+      return;
+    }
+
+    const pickerResult = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+
+    if (pickerResult.canceled || !pickerResult.assets?.length) return;
+
+    const uri = pickerResult.assets[0].uri;
+    setRecognitionImageUri(uri);
+    setRecognitionLoading(true);
+
+    try {
+      const prediction = await recognizeFood(uri);
+      setRecognitionResult(prediction);
+      setViewMode('recognition');
+    } catch (error) {
+      showCustomAlert('Recognition Failed',
+        'Could not analyse the image. Check your connection and try again with a clearer, well-lit photo.');
+    } finally {
+      setRecognitionLoading(false);
+    }
+  };
+
+  const handleUseFoodFromRecognition = (candidate: FoodCandidate) => {
+    const newFood = {
+      title: candidate.display_name,
+      calories: candidate.nutrition?.calories != null ? Math.round(candidate.nutrition.calories) : 0,
+      protein: candidate.nutrition?.protein_g != null ? parseFloat(candidate.nutrition.protein_g.toFixed(1)) : 0,
+      carbs: candidate.nutrition?.carbs_g != null ? parseFloat(candidate.nutrition.carbs_g.toFixed(1)) : 0,
+      fats: candidate.nutrition?.fat_g != null ? parseFloat(candidate.nutrition.fat_g.toFixed(1)) : 0,
+      image: recognitionImageUri || '',
+      food_name: candidate.display_name,
+      type: 'recognition',
+    };
+    clearRecognitionState();
+    onAddFood(newFood);
+  };
+
+  const handleEditRecognitionDetails = (candidate: FoodCandidate) => {
+    setManualName(candidate.display_name);
+    if (candidate.nutrition) {
+      setManualCalories(candidate.nutrition.calories != null ? Math.round(candidate.nutrition.calories).toString() : '');
+      setManualProtein(candidate.nutrition.protein_g != null ? candidate.nutrition.protein_g.toFixed(1) : '');
+      setManualCarbs(candidate.nutrition.carbs_g != null ? candidate.nutrition.carbs_g.toFixed(1) : '');
+      setManualFat(candidate.nutrition.fat_g != null ? candidate.nutrition.fat_g.toFixed(1) : '');
+    }
+    if (recognitionImageUri) setManualImage(recognitionImageUri);
+    clearRecognitionState();
+    setViewMode('manual');
+  };
+
+  const handleRecognitionTryAgain = () => {
+    clearRecognitionState();
+    setViewMode('search');
+    setTimeout(() => handleScanFood(), 400);
+  };
+
+  const clearRecognitionState = () => {
+    setRecognitionResult(null);
+    setRecognitionImageUri(null);
+  };
+
+  // --- SEARCH ---
   const handleSearch = async () => {
     const trimmedQuery = query.trim();
     if (!trimmedQuery) return;
@@ -196,8 +222,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
       const items = await searchFoodItems(trimmedQuery);
       if (latestSearchRequestRef.current !== requestId) return;
       setResults(items);
-    } catch (error) {
-      console.error('Search error:', error);
+    } catch {
       if (latestSearchRequestRef.current !== requestId) return;
       setResults([]);
     } finally {
@@ -216,14 +241,11 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setHasCompletedSearch(false);
   };
 
-  // 2. Add from Search
   const handleAddClick = async (id: string) => {
     setAddingId(id);
     try {
       const detailedFood = await getFoodById(id);
-      if (detailedFood) {
-        onAddFood(detailedFood);
-      }
+      if (detailedFood) onAddFood(detailedFood);
     } catch (error) {
       console.error('Error adding food:', error);
     } finally {
@@ -231,15 +253,13 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     }
   };
 
-  // 3. Image Picker Logic
+  // --- MANUAL FORM ---
   const pickImage = async () => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (permissionResult.granted === false) {
-      showCustomAlert("Permission Required", "You need to allow access to your photos to upload an image.");
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      showCustomAlert('Permission Required', 'Allow access to photos to upload an image.');
       return;
     }
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -247,92 +267,88 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
       quality: 0.5,
       base64: true,
     });
-
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      const asset = result.assets[0];
-      const base64Image = `data:image/jpeg;base64,${asset.base64}`;
-      setManualImage(base64Image);
-    }
+    if (!result.canceled && result.assets?.length)
+      setManualImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
   };
 
-  // 4. Save Manual Food
   const handleSaveManual = () => {
     if (!manualName || !manualCalories) {
-      showCustomAlert("Missing Fields", "Please enter at least a Food Name and Calories.");
+      showCustomAlert('Missing Fields', 'Please enter at least a Food Name and Calories.');
       return;
     }
-
-    const newFood = {
+    onAddFood({
       title: manualName,
       calories: parseFloat(manualCalories) || 0,
       protein: parseFloat(manualProtein) || 0,
       carbs: parseFloat(manualCarbs) || 0,
       fats: parseFloat(manualFat) || 0,
-      image: manualImage || "", 
+      image: manualImage || '',
       food_name: manualName,
-      type: 'manual'
-    };
-
-    onAddFood(newFood);
+      type: 'manual',
+    });
     resetManualForm();
   };
 
   const resetManualForm = () => {
-    setManualName('');
-    setManualCalories('');
-    setManualProtein('');
-    setManualCarbs('');
-    setManualFat('');
-    setManualImage(null);
-    setViewMode('search'); 
+    setManualName(''); setManualCalories(''); setManualProtein('');
+    setManualCarbs(''); setManualFat(''); setManualImage(null);
+    setViewMode('search');
   };
 
   const resetSearchState = () => {
-    setQuery('');
-    setResults([]);
-    setLoading(false);
-    setHasCompletedSearch(false);
-    setAddingId(null);
+    setQuery(''); setResults([]); setLoading(false);
+    setHasCompletedSearch(false); setAddingId(null);
     latestSearchRequestRef.current += 1;
   };
 
   const handleClose = () => {
     resetManualForm();
     resetSearchState();
+    clearRecognitionState();
     onClose();
   };
+
+  const handleBackPress = () => {
+    if (viewMode === 'recognition') {
+      clearRecognitionState();
+      setViewMode('search');
+    } else {
+      setViewMode('search');
+    }
+  };
+
+  const headerTitle =
+    viewMode === 'manual' ? 'Add Custom Food' :
+    viewMode === 'recognition' ? 'Food Recognised' :
+    `Add to ${mealType}`;
 
   return (
     <>
       <Modal animationType="slide" transparent={true} visible={visible} onRequestClose={handleClose}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           className="flex-1 bg-black/50 justify-end"
         >
           <View className="h-[90%] bg-white rounded-t-3xl shadow-xl overflow-hidden">
 
-            {/* --- HEADER --- */}
+            {/* HEADER */}
             <View className="px-5 pt-5 pb-2 flex-row justify-between items-center border-b border-gray-100">
-              {viewMode === 'manual' ? (
-                <TouchableOpacity onPress={() => setViewMode('search')} className="p-2">
+              {(viewMode === 'manual' || viewMode === 'recognition') ? (
+                <TouchableOpacity onPress={handleBackPress} className="p-2">
                   <Ionicons name="arrow-back" size={24} color="black" />
                 </TouchableOpacity>
               ) : (
                 <View className="w-8" />
               )}
-
-              <Text className="text-xl font-bold text-black capitalize">
-                {viewMode === 'manual' ? 'Add Custom Food' : `Add to ${mealType}`}
-              </Text>
-
+              <Text className="text-xl font-bold text-black capitalize">{headerTitle}</Text>
               <TouchableOpacity onPress={handleClose} className="bg-gray-100 p-2 rounded-full">
                 <Ionicons name="close" size={20} color="black" />
               </TouchableOpacity>
             </View>
 
-            {/* --- CONTENT --- */}
-            {viewMode === 'search' ? (
-              /* ================= SEARCH VIEW ================= */
+            {/* CONTENT */}
+            {viewMode === 'search' && (
+              /* ── SEARCH VIEW ── */
               <View className="flex-1 p-5">
                 <View className="flex-row items-center bg-gray-100 rounded-xl px-4 py-3 mb-4">
                   <Ionicons name="search" size={20} color="gray" />
@@ -358,46 +374,62 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                     data={results}
                     keyExtractor={(item) => String(item.id)}
                     showsVerticalScrollIndicator={false}
-                    contentContainerStyle={{ paddingBottom: 100 }}
+                    contentContainerStyle={{ paddingBottom: 210 }}
                     renderItem={({ item }) => (
                       <View className="bg-white border border-gray-200 rounded-2xl p-4 mb-3 shadow-sm flex-row justify-between items-center">
                         <View className="flex-1 mr-4">
                           <Text className="text-lg font-bold text-black">{item.title}</Text>
-                          <Text className="text-gray-500 text-xs mt-1" numberOfLines={2}>
-                            {item.description}
-                          </Text>
+                          <Text className="text-gray-500 text-xs mt-1" numberOfLines={2}>{item.description}</Text>
                         </View>
                         <TouchableOpacity
                           onPress={() => handleAddClick(item.id)}
                           disabled={addingId === item.id}
                           className="bg-primary px-5 py-2 rounded-full"
                         >
-                          {addingId === item.id ? (
-                            <ActivityIndicator size="small" color="white" />
-                          ) : (
-                            <Text className="text-white font-bold">Add</Text>
-                          )}
+                          {addingId === item.id
+                            ? <ActivityIndicator size="small" color="white" />
+                            : <Text className="text-white font-bold">Add</Text>}
                         </TouchableOpacity>
                       </View>
                     )}
                     ListEmptyComponent={
-                      hasCompletedSearch && query.trim().length > 0 ? (
-                        <Text className="text-center text-gray-400 mt-10">No foods found.</Text>
-                      ) : null
+                      hasCompletedSearch && query.trim().length > 0
+                        ? <Text className="text-center text-gray-400 mt-10">No foods found.</Text>
+                        : null
                     }
                   />
                 )}
 
-                <TouchableOpacity
-                  onPress={() => setViewMode('manual')}
-                  className="bg-primary w-full py-4 rounded-xl items-center absolute bottom-10 self-center shadow-lg"
-                >
-                  <Text className="text-white font-bold text-lg">+ Add Food Manually</Text>
-                </TouchableOpacity>
+                {/* Bottom action bar */}
+                <View className="absolute bottom-0 left-0 right-0 bg-white px-5 pt-4 pb-10 border-t border-gray-100">
+                  <TouchableOpacity
+                    onPress={() => setViewMode('manual')}
+                    className="bg-primary w-full py-4 rounded-xl items-center mb-3"
+                  >
+                    <Text className="text-white font-bold text-lg">+ Add Food Manually</Text>
+                  </TouchableOpacity>
+                  <View className="flex-row">
+                    <TouchableOpacity
+                      onPress={() => setBarcodeScanning(true)}
+                      className="flex-1 border-2 border-primary py-3 rounded-xl items-center flex-row justify-center mr-2"
+                    >
+                      <Ionicons name="barcode-outline" size={18} color="#007BFF" />
+                      <Text className="text-primary font-bold ml-2">Scan Barcode</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={handleScanFood}
+                      className="flex-1 border-2 border-primary py-3 rounded-xl items-center flex-row justify-center"
+                    >
+                      <Ionicons name="camera-outline" size={18} color="#007BFF" />
+                      <Text className="text-primary font-bold ml-2">Scan Food</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
+            )}
 
-            ) : (
-              /* ================= MANUAL VIEW ================= */
+            {viewMode === 'manual' && (
+              /* ── MANUAL VIEW ── */
               <ScrollView className="flex-1 px-6 pt-4" showsVerticalScrollIndicator={false}>
                 <View className="items-center mb-6">
                   <TouchableOpacity
@@ -425,97 +457,78 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                     placeholderTextColor="#9CA3AF"
                     className="bg-gray-50 p-4 rounded-xl text-base mb-6 border border-gray-100"
                   />
-
                   <View className="flex-row flex-wrap justify-between">
-                    <View className="w-[48%] mb-4">
-                      <Text className="text-gray-700 font-bold mb-2">Calories</Text>
-                      <View className="flex-row items-center bg-gray-50 rounded-xl border border-gray-100 px-4">
-                        <TextInput
-                          value={manualCalories}
-                          onChangeText={setManualCalories}
-                          placeholder="0"
-                          keyboardType="numeric"
-                          className="flex-1 py-4 text-base"
-                        />
-                        <Text className="text-gray-400 text-sm">kcal</Text>
+                    {[
+                      { label: 'Calories', value: manualCalories, setter: setManualCalories, unit: 'kcal' },
+                      { label: 'Protein',  value: manualProtein,  setter: setManualProtein,  unit: 'g' },
+                      { label: 'Carbs',    value: manualCarbs,    setter: setManualCarbs,    unit: 'g' },
+                      { label: 'Fat',      value: manualFat,      setter: setManualFat,      unit: 'g' },
+                    ].map(({ label, value, setter, unit }) => (
+                      <View key={label} className="w-[48%] mb-4">
+                        <Text className="text-gray-700 font-bold mb-2">{label}</Text>
+                        <View className="flex-row items-center bg-gray-50 rounded-xl border border-gray-100 px-4">
+                          <TextInput
+                            value={value}
+                            onChangeText={setter}
+                            placeholder="0"
+                            keyboardType="numeric"
+                            className="flex-1 py-4 text-base"
+                          />
+                          <Text className="text-gray-400 text-sm">{unit}</Text>
+                        </View>
                       </View>
-                    </View>
-
-                    <View className="w-[48%] mb-4">
-                      <Text className="text-gray-700 font-bold mb-2">Protein</Text>
-                      <View className="flex-row items-center bg-gray-50 rounded-xl border border-gray-100 px-4">
-                        <TextInput
-                          value={manualProtein}
-                          onChangeText={setManualProtein}
-                          placeholder="0"
-                          keyboardType="numeric"
-                          className="flex-1 py-4 text-base"
-                        />
-                        <Text className="text-gray-400 text-sm">g</Text>
-                      </View>
-                    </View>
-
-                    <View className="w-[48%] mb-4">
-                      <Text className="text-gray-700 font-bold mb-2">Carbs</Text>
-                      <View className="flex-row items-center bg-gray-50 rounded-xl border border-gray-100 px-4">
-                        <TextInput
-                          value={manualCarbs}
-                          onChangeText={setManualCarbs}
-                          placeholder="0"
-                          keyboardType="numeric"
-                          className="flex-1 py-4 text-base"
-                        />
-                        <Text className="text-gray-400 text-sm">g</Text>
-                      </View>
-                    </View>
-
-                    <View className="w-[48%] mb-4">
-                      <Text className="text-gray-700 font-bold mb-2">Fat</Text>
-                      <View className="flex-row items-center bg-gray-50 rounded-xl border border-gray-100 px-4">
-                        <TextInput
-                          value={manualFat}
-                          onChangeText={setManualFat}
-                          placeholder="0"
-                          keyboardType="numeric"
-                          className="flex-1 py-4 text-base"
-                        />
-                        <Text className="text-gray-400 text-sm">g</Text>
-                      </View>
-                    </View>
+                    ))}
                   </View>
-
                   <TouchableOpacity
                     onPress={handleSaveManual}
                     className="bg-primary w-full py-4 rounded-xl items-center mt-4"
                   >
-                    <Text className="text-white font-bold text-lg flex-row items-center">
-                      <Ionicons name="checkmark" size={20} color="white" /> Save Food
-                    </Text>
+                    <Text className="text-white font-bold text-lg">Save Food</Text>
                   </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => setBarcodeScanning(true)}
-                    className="border-2 border-primary w-full py-4 rounded-xl items-center mt-3"
-                  >
-                    <View className="flex-row items-center">
-                      <Ionicons name="barcode" size={20} color="#007BFF" />
-                      <Text className="text-primary font-bold text-lg ml-2">Scan Barcode</Text>
-                    </View>
-                    <Text className="text-textSecondary text-xs mt-1 text-center">
-                      Some dishes may not be recognised by the app.
-                    </Text>
-                  </TouchableOpacity>
-
                 </View>
               </ScrollView>
+            )}
+
+            {viewMode === 'recognition' && recognitionResult && (
+              /* ── RECOGNITION RESULT VIEW ── */
+              <FoodRecognitionResultModal
+                result={recognitionResult}
+                imageUri={recognitionImageUri}
+                onUseFood={handleUseFoodFromRecognition}
+                onEditDetails={handleEditRecognitionDetails}
+                onTryAgain={handleRecognitionTryAgain}
+                onSearchManually={() => { clearRecognitionState(); setViewMode('search'); }}
+              />
+            )}
+
+            {/* Recognition loading overlay */}
+            {recognitionLoading && (
+              <View
+                style={{
+                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                  backgroundColor: 'rgba(0,0,0,0.55)',
+                  justifyContent: 'center', alignItems: 'center', zIndex: 10,
+                }}
+              >
+                <View style={{
+                  backgroundColor: 'white', borderRadius: 20, padding: 28,
+                  alignItems: 'center', marginHorizontal: 40,
+                }}>
+                  <ActivityIndicator size="large" color="#007BFF" />
+                  <Text style={{ fontWeight: 'bold', fontSize: 16, marginTop: 16, color: '#111' }}>
+                    Analysing your food...
+                  </Text>
+                  <Text style={{ color: '#9CA3AF', fontSize: 14, marginTop: 4, textAlign: 'center' }}>
+                    This may take a few seconds
+                  </Text>
+                </View>
+              </View>
             )}
 
           </View>
         </KeyboardAvoidingView>
 
-        {/* ============================================
-        BARCODE SCANNER MODAL
-        ============================================ */}
+        {/* BARCODE SCANNER MODAL */}
         {barcodeScanning && (
           <Modal
             animationType="slide"
@@ -534,7 +547,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   <Ionicons name="alert-circle" size={60} color="white" />
                   <Text className="text-white text-xl font-bold mt-4 text-center">Camera Access Denied</Text>
                   <Text className="text-gray-300 text-center mt-2">
-                    Please enable camera permissions in your settings to scan barcodes.
+                    Enable camera permissions in settings to scan barcodes.
                   </Text>
                 </View>
               ) : processingBarcode ? (
@@ -542,21 +555,9 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   <ActivityIndicator size="large" color="white" />
                   <Text className="text-white mt-8 text-lg font-bold text-center">Processing Barcode...</Text>
                   <View className="mt-6 h-24 justify-center">
-                    {processingStep >= 1 && (
-                      <Text className="text-gray-300 text-center text-base leading-6 mb-3">
-                        🔍 Scanning product database
-                      </Text>
-                    )}
-                    {processingStep >= 2 && (
-                      <Text className="text-gray-300 text-center text-base leading-6 mb-3">
-                        📊 Retrieving nutritional information
-                      </Text>
-                    )}
-                    {processingStep >= 2 && (
-                      <Text className="text-gray-300 text-center text-base leading-6">
-                        ⏳ Please wait a moment...
-                      </Text>
-                    )}
+                    {processingStep >= 1 && <Text className="text-gray-300 text-center text-base leading-6 mb-3">🔍 Scanning product database</Text>}
+                    {processingStep >= 2 && <Text className="text-gray-300 text-center text-base leading-6 mb-3">📊 Retrieving nutritional information</Text>}
+                    {processingStep >= 2 && <Text className="text-gray-300 text-center text-base leading-6">⏳ Please wait a moment...</Text>}
                   </View>
                 </View>
               ) : (
@@ -564,16 +565,12 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   <CameraView
                     style={{ flex: 1 }}
                     onBarcodeScanned={handleBarcodeScan}
-                    barcodeScannerSettings={{
-                      barcodeTypes: ['ean13', 'ean8', 'upc_e', 'code128', 'code39'],
-                    }}
+                    barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_e', 'code128', 'code39'] }}
                   />
-
                   <View className="absolute top-0 left-0 right-0 bottom-0 justify-center items-center pointer-events-none">
                     <View className="w-64 h-64 border-2 border-green-400 rounded-lg" />
                     <Text className="text-white text-center mt-12 text-lg">Align barcode within frame</Text>
                   </View>
-
                   <TouchableOpacity
                     onPress={() => setBarcodeScanning(false)}
                     className="absolute top-12 left-6 bg-primary rounded-full p-4"
@@ -587,7 +584,6 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
         )}
       </Modal>
 
-      {/* Render the Custom Alert on top of everything */}
       <CustomAlert
         visible={alertVisible}
         title={alertConfig.title}

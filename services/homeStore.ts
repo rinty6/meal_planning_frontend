@@ -72,7 +72,35 @@ const cloneMacros = (macros: HomeMacroState | null) =>
       }
     : null;
 
-const cloneItems = (items: any[]) => items.map((item) => ({ ...item }));
+const normalizeFoodTitleKey = (value: any) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
+const getFoodItemDedupeKey = (item: any) => {
+  const titleKey = normalizeFoodTitleKey(item?.title || item?.food_name);
+  if (titleKey) return `title:${titleKey}`;
+
+  const idKey = String(item?.fatsecret_food_id || item?.food_id || item?.id || '').trim();
+  return idKey ? `id:${idKey}` : '';
+};
+
+const dedupeFoodItems = (items: any[] = []) => {
+  const output: any[] = [];
+  const seen = new Set<string>();
+
+  for (const item of items) {
+    const key = getFoodItemDedupeKey(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(item);
+  }
+
+  return output;
+};
+
+const cloneItems = (items: any[]) => dedupeFoodItems(items).map((item) => ({ ...item }));
 
 export const getCachedHomeSnapshot = (userId?: string | null): HomeSnapshot | null => {
   if (!userId) return null;

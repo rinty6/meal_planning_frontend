@@ -10,6 +10,14 @@ interface TermsOfServiceProps {
 
 const FATSECRET_ATTRIBUTION_URL = 'https://platform.fatsecret.com';
 const FATSECRET_BADGE_URL = 'https://platform.fatsecret.com/api/static/images/powered_by_fatsecret_horizontal_brand.png';
+const OPEN_FOOD_FACTS_URL = 'https://world.openfoodfacts.org/';
+const FOOD_101_DATASET_URL = 'https://data.vision.ee.ethz.ch/cvl/datasets_extra/food-101/';
+const FOOD_101_REFERENCE_URL = 'https://data.vision.ee.ethz.ch/cvl/datasets_extra/food-101/static/bossard_eccv14_food-101.pdf';
+const FRUITS_360_DATASET_URL = 'https://github.com/Horea94/Fruit-Images-Dataset';
+const FRUITS_360_REFERENCE_URL = 'https://www.researchgate.net/publication/321475443_Fruit_recognition_from_images_using_deep_learning';
+const VEGETABLE_DATASET_URL = 'https://www.kaggle.com/datasets/misrakahmed/vegetable-image-dataset';
+const VEGETABLE_OWNER_URL = 'https://www.kaggle.com/misrakahmed';
+const VEGETABLE_REFERENCE_URL = 'https://www.researchgate.net/publication/352846889_DCNN-Based_Vegetable_Image_Classification_Using_Transfer_Learning_A_Comparative_Study';
 
 const TermsOfService: React.FC<TermsOfServiceProps> = ({ visible, onClose }) => {
   // Open attribution links from the legal screen without duplicating inline handlers.
@@ -153,10 +161,111 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ visible, onClose }) => 
             <Text className="text-sm text-textSecondary leading-6">
               Open Food Facts content is provided on an "as is" basis by its contributors. We do not guarantee that third-party food data is accurate, complete, or suitable for any medical purpose, and you should independently verify product information when it matters to your health, allergies, or dietary restrictions.
             </Text>
+            <TouchableOpacity
+              accessibilityRole="link"
+              className="mt-3 self-start"
+              onPress={() => handleOpenExternalLink(OPEN_FOOD_FACTS_URL)}
+            >
+              <Text className="text-sm font-semibold text-primary underline">
+                Open Food Facts project and licensing information
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View className="mb-4">
+            <Text className="text-base font-semibold text-gray-800 mb-2">4.4. Food recognition datasets</Text>
+            <Text className="text-sm text-textSecondary leading-6 mb-3">
+              Our food recognition features are trained and evaluated with third-party image datasets, including Food-101, Fruits-360, and the Vegetable Image Dataset. We acknowledge their owners and follow the published attribution, citation, and license terms for each source.
+            </Text>
+
+            {/* Provide direct owner and reference links for each dataset used in food recognition. */}
+            <View className="mb-3">
+              <Text className="text-sm font-semibold text-gray-800 mb-1">Food-101</Text>
+              <Text className="text-sm text-textSecondary leading-6 mb-2">
+                Food-101 was introduced by Lukas Bossard, Matthieu Guillaumin, and Luc Van Gool through the ETH Zurich Computer Vision Laboratory. We reference the official dataset page and the original ECCV 2014 publication published by the dataset owners.
+              </Text>
+              <TouchableOpacity
+                accessibilityRole="link"
+                className="self-start mb-2"
+                onPress={() => handleOpenExternalLink(FOOD_101_DATASET_URL)}
+              >
+                <Text className="text-sm font-semibold text-primary underline">
+                  Food-101 dataset owner page
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="link"
+                className="self-start"
+                onPress={() => handleOpenExternalLink(FOOD_101_REFERENCE_URL)}
+              >
+                <Text className="text-sm font-semibold text-primary underline">
+                  Food-101 reference paper
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View className="mb-3">
+              <Text className="text-sm font-semibold text-gray-800 mb-1">Fruits-360</Text>
+              <Text className="text-sm text-textSecondary leading-6 mb-2">
+                Fruits-360 was created by Horea Muresan and Mihai Oltean. The dataset repository publishes the dataset under the MIT License and includes the original fruit recognition reference paper.
+              </Text>
+              <TouchableOpacity
+                accessibilityRole="link"
+                className="self-start mb-2"
+                onPress={() => handleOpenExternalLink(FRUITS_360_DATASET_URL)}
+              >
+                <Text className="text-sm font-semibold text-primary underline">
+                  Fruits-360 owner page and MIT license
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="link"
+                className="self-start"
+                onPress={() => handleOpenExternalLink(FRUITS_360_REFERENCE_URL)}
+              >
+                <Text className="text-sm font-semibold text-primary underline">
+                  Fruits-360 reference paper
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View>
+              <Text className="text-sm font-semibold text-gray-800 mb-1">Vegetable Image Dataset</Text>
+              <Text className="text-sm text-textSecondary leading-6 mb-2">
+                The Vegetable Image Dataset is provided by M Israk Ahmed on Kaggle. The dataset page lists a Creative Commons Attribution-ShareAlike 4.0 license and asks users to cite the related 2021 vegetable classification paper.
+              </Text>
+              <TouchableOpacity
+                accessibilityRole="link"
+                className="self-start mb-2"
+                onPress={() => handleOpenExternalLink(VEGETABLE_DATASET_URL)}
+              >
+                <Text className="text-sm font-semibold text-primary underline">
+                  Vegetable Image Dataset page
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="link"
+                className="self-start mb-2"
+                onPress={() => handleOpenExternalLink(VEGETABLE_OWNER_URL)}
+              >
+                <Text className="text-sm font-semibold text-primary underline">
+                  Vegetable dataset owner page
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="link"
+                className="self-start"
+                onPress={() => handleOpenExternalLink(VEGETABLE_REFERENCE_URL)}
+              >
+                <Text className="text-sm font-semibold text-primary underline">
+                  Vegetable dataset reference paper
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View className="mb-6">
-            <Text className="text-base font-semibold text-gray-800 mb-2">4.4. FatSecret Attribution</Text>
+            <Text className="text-base font-semibold text-gray-800 mb-2">4.5. FatSecret Attribution</Text>
             <Text className="text-sm text-textSecondary leading-6">
               Nutritional information in portions of the Service is provided by the FatSecret Platform API. The attribution badge and attribution link below are displayed to comply with FatSecret Platform API attribution requirements.
             </Text>

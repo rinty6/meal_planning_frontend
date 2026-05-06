@@ -1,4 +1,5 @@
 import { Image as RNImage } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { resolveFoodImageFromFatSecret } from "./mealAPI";
 
@@ -30,6 +31,11 @@ type RecommendationResult = {
   source: RecommendationSource;
   usedCachedFallback: boolean;
   cacheAgeMs: number;
+};
+
+type CachedRecommendationEntry = {
+  savedAt: number;
+  value: RecommendationResult;
 };
 
 type RecommendationFetchArgs = {
@@ -87,10 +93,14 @@ export type PrimeWarmupResult = {
 const MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner"];
 const RECOMMENDATION_FETCH_TIMEOUT_MS = 2000;
 const RECOMMENDATION_IMAGE_PREFETCH_LIMIT = 5;
+const MOST_CONSUMED_IMAGE_HYDRATION_LIMIT = 3;
+const RECOMMENDATION_CACHE_STORAGE_KEY = "meal-app:recommendation-cache:v1";
+const RECOMMENDATION_CACHE_MAX_ENTRIES = 12;
+const RECOMMENDATION_CACHE_MAX_AGE_MS = 1000 * 60 * 30;
 const FETCH_TIMEOUT_SENTINEL = Symbol("recommendation-fetch-timeout");
 const PRIME_SUCCESS_REASONS = new Set(["queued", "ttl_active", "already_priming"]);
 
-const recommendationCache = new Map<string, { savedAt: number; value: RecommendationResult }>();
+const recommendationCache = new Map<string, CachedRecommendationEntry>();
 const inFlightRecommendationRequests = new Map<string, Promise<RecommendationResult | null>>();
 const inFlightRecommendationHydrations = new Map<
   string,
@@ -98,6 +108,9 @@ const inFlightRecommendationHydrations = new Map<
 >();
 const inFlightPrimeStatusRequests = new Map<string, Promise<PrimeWarmupResult | null>>();
 const inFlightPrimeRequests = new Map<string, Promise<PrimeWarmupResult | null>>();
+let hasLoadedRecommendationCache = false;
+let recommendationCacheReadyPromise: Promise<void> | null = null;
+let recommendationCachePersistTimer: ReturnType<typeof setTimeout> | null = null;
 
 const FRONTEND_SAFETY_FALLBACKS: Record<
   MealType,
@@ -185,6 +198,12 @@ const isNumericId = (value: string) => /^\d+$/.test(value);
 
 const cloneValue = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
+// Normalize known sushi aliases before recommendation cards are rendered.
+const normalizeDisplayFoodTitle = (value: any, fallback: string) => {
+  const title = String(value ?? "").trim() || fallback;
+  return title.replace(/\b(?:hosomaki|hosomakis|hossomakis|homosakis)\b/gi, "Sushi");
+};
+
 const buildPrimeIdentityKey = ({
   clerkId,
   userId,
@@ -261,6 +280,96 @@ const buildRecommendationCacheKey = (
   forceExploration = false,
 ) => `${apiURL}|${userId}|${mealType}|force:${forceExploration ? "1" : "0"}`;
 
+const isCachedRecommendationEntry = (value: any): value is CachedRecommendationEntry =>
+  !!value &&
+  typeof value === "object" &&
+  typeof value.savedAt === "number" &&
+  !!value.value &&
+  typeof value.value === "object";
+
+const canUseRecommendationCacheStorage = () =>
+  typeof window !== "undefined" ||
+  (typeof navigator !== "undefined" && navigator.product === "ReactNative");
+
+const pruneRecommendationCacheEntries = () => {
+  const minSavedAt = Date.now() - RECOMMENDATION_CACHE_MAX_AGE_MS;
+  const validEntries = Array.from(recommendationCache.entries())
+    .filter(([, entry]) => entry.savedAt >= minSavedAt)
+    .sort((left, right) => right[1].savedAt - left[1].savedAt)
+    .slice(0, RECOMMENDATION_CACHE_MAX_ENTRIES);
+
+  recommendationCache.clear();
+  for (const [key, entry] of validEntries) {
+    recommendationCache.set(key, entry);
+  }
+
+  return validEntries;
+};
+
+// Keep a small persisted cache so cold app restarts can reuse the latest recommendations.
+const persistRecommendationCache = async () => {
+  if (!canUseRecommendationCacheStorage()) return;
+
+  try {
+    const payload = JSON.stringify(Object.fromEntries(pruneRecommendationCacheEntries()));
+    await AsyncStorage.setItem(RECOMMENDATION_CACHE_STORAGE_KEY, payload);
+  } catch (error) {
+    console.warn("[recommendation.ts] failed to persist recommendation cache", error);
+  }
+};
+
+const scheduleRecommendationCachePersist = () => {
+  if (recommendationCachePersistTimer !== null) return;
+
+  recommendationCachePersistTimer = setTimeout(() => {
+    recommendationCachePersistTimer = null;
+    void persistRecommendationCache();
+  }, 200);
+};
+
+const ensureRecommendationCacheReady = async () => {
+  if (hasLoadedRecommendationCache) return;
+  if (!canUseRecommendationCacheStorage()) {
+    hasLoadedRecommendationCache = true;
+    return;
+  }
+
+  if (!recommendationCacheReadyPromise) {
+    recommendationCacheReadyPromise = (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(RECOMMENDATION_CACHE_STORAGE_KEY);
+        if (!raw) return;
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return;
+
+        const minSavedAt = Date.now() - RECOMMENDATION_CACHE_MAX_AGE_MS;
+        for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+          if (!isCachedRecommendationEntry(value) || value.savedAt < minSavedAt) continue;
+          const existingEntry = recommendationCache.get(key);
+          if (existingEntry && existingEntry.savedAt >= value.savedAt) continue;
+          recommendationCache.set(key, {
+            savedAt: value.savedAt,
+            value: cloneValue(value.value),
+          });
+        }
+
+        pruneRecommendationCacheEntries();
+      } catch (error) {
+        console.warn("[recommendation.ts] failed to load persisted recommendation cache", error);
+      } finally {
+        hasLoadedRecommendationCache = true;
+      }
+    })().finally(() => {
+      recommendationCacheReadyPromise = null;
+    });
+  }
+
+  await recommendationCacheReadyPromise;
+};
+
+void ensureRecommendationCacheReady();
+
 const buildFrontendSafetyResult = (mealType: MealType | "all", reason: string): RecommendationResult => {
   const recommendationsByMeal = createEmptyRecommendationsByMeal();
   for (const currentMealType of MEAL_TYPES) {
@@ -314,6 +423,11 @@ const buildFrontendSafetyResult = (mealType: MealType | "all", reason: string): 
 const getCachedRecommendationResult = (cacheKey: string): { result: RecommendationResult; cacheAgeMs: number } | null => {
   const payload = recommendationCache.get(cacheKey);
   if (!payload) return null;
+  if (payload.savedAt < Date.now() - RECOMMENDATION_CACHE_MAX_AGE_MS) {
+    recommendationCache.delete(cacheKey);
+    scheduleRecommendationCachePersist();
+    return null;
+  }
   const cacheAgeMs = Math.max(0, Date.now() - payload.savedAt);
   return {
     result: cloneValue(payload.value),
@@ -328,6 +442,7 @@ export const peekCachedRecommendations = ({
   forceExploration = false,
 }: RecommendationFetchArgs = {}) => {
   if (!apiURL || !userId) return null;
+  void ensureRecommendationCacheReady();
   return getCachedRecommendationResult(
     buildRecommendationCacheKey(apiURL, userId, mealType, forceExploration)
   );
@@ -335,6 +450,8 @@ export const peekCachedRecommendations = ({
 
 const setCachedRecommendationResult = (cacheKey: string, result: RecommendationResult) => {
   recommendationCache.set(cacheKey, { savedAt: Date.now(), value: cloneValue(result) });
+  pruneRecommendationCacheEntries();
+  scheduleRecommendationCachePersist();
 };
 
 const getOrStartRecommendationRequest = ({
@@ -481,6 +598,8 @@ export const normalizeRecommendedItem = (item: any, mealType: MealType, index: n
   const recipeId = toCleanId(item?.recipe_id);
   const rawFoodId = toCleanId(item?.food_id || item?.id || `${mealType}-item-${index}`);
   const fatsecretFoodId = toCleanId(item?.fatsecret_food_id || "");
+  const originalTitle = item?.original_title || item?.title || item?.food_name || `Food Item ${index + 1}`;
+  const displayTitle = normalizeDisplayFoodTitle(item?.title || item?.food_name, `Food Item ${index + 1}`);
   const recipeAnchoredId =
     !!recipeId &&
     (rawFoodId === recipeId ||
@@ -502,8 +621,8 @@ export const normalizeRecommendedItem = (item: any, mealType: MealType, index: n
     food_id: canonicalFoodId,
     fatsecret_food_id: fatsecretFoodId,
     mealType,
-    title: item?.title || item?.food_name || `Food Item ${index + 1}`,
-    original_title: item?.original_title || item?.title || item?.food_name || `Food Item ${index + 1}`,
+    title: displayTitle,
+    original_title: originalTitle,
     canonical_title: item?.canonical_title || item?.title || item?.food_name || "",
     mapped_title: item?.mapped_title || null,
     mapped_canonical_title: item?.mapped_canonical_title || null,
@@ -551,8 +670,11 @@ const normalizeRecommendedCombo = (combo: any, mealType: MealType, index: number
   const totalFats = normalizedItems.reduce((sum: number, item: any) => sum + toNumber(item?.fats, 0), 0);
 
   const title =
-    combo?.title ||
-    `Combo: ${normalizedItems.map((item: any) => item.title).filter(Boolean).join(" + ") || `Meal ${index + 1}`}`;
+    normalizeDisplayFoodTitle(
+      combo?.title ||
+        `Combo: ${normalizedItems.map((item: any) => item.title).filter(Boolean).join(" + ") || `Meal ${index + 1}`}`,
+      `Combo: Meal ${index + 1}`,
+    );
 
   return {
     id: toCleanId(combo?.combo_id || combo?.id || `${mealType}-combo-${index}`),
@@ -617,14 +739,18 @@ export const normalizeRecommendationsByMeal = (payload: any = {}) => {
   return normalized;
 };
 
-const normalizeMostConsumedItem = (item: any) => ({
+const normalizeMostConsumedItem = (item: any) => {
+  const originalTitle = item?.original_title || item?.title || item?.food_name || "Food Item";
+  const displayTitle = normalizeDisplayFoodTitle(item?.title || item?.food_name, "Food Item");
+
+  return ({
   id: String(item?.id || item?.food_id || "").trim(),
   food_id: String(item?.food_id || item?.id || "").trim(),
   fatsecret_food_id: String(item?.fatsecret_food_id || "").trim(),
-  title: item?.title || item?.food_name || "Food Item",
-  original_title: item?.original_title || item?.title || item?.food_name || "Food Item",
+  title: displayTitle,
+  original_title: originalTitle,
   canonical_title: item?.canonical_title || item?.title || item?.food_name || "Food Item",
-  food_name: item?.food_name || item?.title || "Food Item",
+  food_name: displayTitle,
   meal_type: item?.meal_type || "",
   count: Math.max(0, Math.round(toNumber(item?.count ?? item?.number_appearance, 0))),
   number_appearance: Math.max(0, Math.round(toNumber(item?.number_appearance ?? item?.count, 0))),
@@ -669,7 +795,8 @@ const normalizeMostConsumedItem = (item: any) => ({
   image: item?.image || "",
   image_lookup_state: (String(item?.image || "").trim() ? "resolved" : "pending") as ImageLookupState,
   image_lookup_source: String(item?.image || "").trim() ? "payload" : null,
-});
+  });
+};
 
 const createEmptyImageHydrationStats = (): ImageHydrationStats => ({
   totalCount: 0,
@@ -870,7 +997,7 @@ const enrichCombosWithImages = async (combos: any[]) => {
   );
 };
 
-const enrichRecommendationImages = async (recommendationsByMeal: Record<MealType, any[]>, mostConsumedItems: any[]) => {
+const enrichRecommendationMealImages = async (recommendationsByMeal: Record<MealType, any[]>) => {
   const resolveMeal = async (items: any[]) => {
     const first = ensureArray(items)[0];
     if (first && Array.isArray(first?.items)) {
@@ -879,19 +1006,27 @@ const enrichRecommendationImages = async (recommendationsByMeal: Record<MealType
     return enrichItemsWithImages(ensureArray(items), 10);
   };
 
-  const [breakfast, lunch, dinner, enrichedMostConsumed] = await Promise.all([
+  const [breakfast, lunch, dinner] = await Promise.all([
     resolveMeal(recommendationsByMeal?.breakfast),
     resolveMeal(recommendationsByMeal?.lunch),
     resolveMeal(recommendationsByMeal?.dinner),
-    enrichItemsWithImages(ensureArray(mostConsumedItems), 10),
   ]);
 
   return {
-    recommendationsByMeal: {
-      breakfast,
-      lunch,
-      dinner,
-    },
+    breakfast,
+    lunch,
+    dinner,
+  };
+};
+
+const enrichRecommendationImages = async (recommendationsByMeal: Record<MealType, any[]>, mostConsumedItems: any[]) => {
+  const [enrichedRecommendationsByMeal, enrichedMostConsumed] = await Promise.all([
+    enrichRecommendationMealImages(recommendationsByMeal),
+    enrichItemsWithImages(ensureArray(mostConsumedItems), MOST_CONSUMED_IMAGE_HYDRATION_LIMIT),
+  ]);
+
+  return {
+    recommendationsByMeal: enrichedRecommendationsByMeal,
     mostConsumedItems: enrichedMostConsumed,
   };
 };
@@ -1023,11 +1158,29 @@ const scheduleImageHydration = (
     const hydrationStartedAt = Date.now();
     hydrationPromise = (async () => {
       try {
-        const enriched = await enrichRecommendationImages(baseResult.recommendationsByMeal, baseResult.mostConsumedItems);
+        const enrichedRecommendationsByMeal = await enrichRecommendationMealImages(baseResult.recommendationsByMeal);
+        const hasPendingMostConsumed = summarizeImageLookupItems(baseResult.mostConsumedItems).pendingCount > 0;
+
+        if (hasPendingMostConsumed && onUpdate) {
+          // Push visible meal-card images first so slower strip hydration does not hold back the main screen.
+          onUpdate(buildRecommendationResult({
+            ...baseResult,
+            recommendationsByMeal: enrichedRecommendationsByMeal,
+            mostConsumedItems: baseResult.mostConsumedItems,
+            source: baseResult.source,
+            usedCachedFallback: baseResult.usedCachedFallback,
+            cacheAgeMs: baseResult.cacheAgeMs,
+            imageHydrationState: "running",
+          }));
+        }
+
+        const enrichedMostConsumed = hasPendingMostConsumed
+          ? await enrichItemsWithImages(ensureArray(baseResult.mostConsumedItems), MOST_CONSUMED_IMAGE_HYDRATION_LIMIT)
+          : baseResult.mostConsumedItems;
         const hydratedResult = buildRecommendationResult({
           ...baseResult,
-          recommendationsByMeal: enriched.recommendationsByMeal,
-          mostConsumedItems: enriched.mostConsumedItems,
+          recommendationsByMeal: enrichedRecommendationsByMeal,
+          mostConsumedItems: enrichedMostConsumed,
           source: baseResult.source,
           usedCachedFallback: baseResult.usedCachedFallback,
           cacheAgeMs: baseResult.cacheAgeMs,
@@ -1109,16 +1262,17 @@ export const fetchRecommendations = async ({
   const query = params.toString();
   const url = `${apiURL}/api/recommendation/${userId}${query ? `?${query}` : ""}`;
   const cacheKey = buildRecommendationCacheKey(apiURL, userId, mealType, forceExploration);
-  const cachedPayload = getCachedRecommendationResult(cacheKey);
   const callStartedAt = Date.now();
+  const cacheReadyPromise = ensureRecommendationCacheReady();
+  const networkPromise = getOrStartRecommendationRequest({ url, cacheKey });
+  await cacheReadyPromise;
+  const cachedPayload = getCachedRecommendationResult(cacheKey);
 
   console.log("[recommendation.ts] starting recommendation fetch", {
     mealType,
     forceExploration,
     hasCache: !!cachedPayload,
   });
-
-  const networkPromise = getOrStartRecommendationRequest({ url, cacheKey });
 
   if (!cachedPayload) {
     const timeoutPromise = new Promise<typeof FETCH_TIMEOUT_SENTINEL>((resolve) => {

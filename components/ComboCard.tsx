@@ -23,6 +23,7 @@ const ComboCard = ({ item, onAdd, onPress, onSkip, onLove }: RecommendedFoodCard
   const { userId } = useAuth();
   const [isFavorite, setIsFavorite] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [failedImageKeys, setFailedImageKeys] = useState<Record<string, true>>({});
 
   if (!item) return null;
 
@@ -100,21 +101,35 @@ const ComboCard = ({ item, onAdd, onPress, onSkip, onLove }: RecommendedFoodCard
     }
   };
 
+  const markImageFailed = (imageKey: string) => {
+    setFailedImageKeys((current) => {
+      if (current[imageKey]) return current;
+      return { ...current, [imageKey]: true };
+    });
+  };
+
   return (
     <View className="mb-4 bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-sm">
       <TouchableOpacity onPress={onPress} activeOpacity={0.9}>
         <View className="h-44 bg-gray-100">
           <View className="flex-row w-full h-full">
-            {comboItems.slice(0, 3).map((comboItem: any, index: number) => (
-              <View key={`${comboItem?.id || comboItem?.food_id}-${index}`} className="flex-1">
-                {comboItem?.image ? (
+            {comboItems.slice(0, 3).map((comboItem: any, index: number) => {
+              const comboImageKey = `${comboItem?.id || comboItem?.food_id || comboItem?.title || "item"}-${index}`;
+              const comboImageUri = typeof comboItem?.image === "string" ? comboItem.image.trim() : "";
+              // Fall back to the local icon when a remote combo image URL fails on device.
+              const showRemoteImage = !!comboImageUri && !failedImageKeys[comboImageKey];
+
+              return (
+              <View key={comboImageKey} className="flex-1">
+                {showRemoteImage ? (
                   <ExpoImage
-                    source={{ uri: comboItem.image }}
+                    source={{ uri: comboImageUri }}
                     style={{ width: "100%", height: "100%" }}
                     contentFit="cover"
                     cachePolicy="disk"
                     transition={150}
                     placeholder={FOOD_IMAGE_BLURHASH}
+                    onError={() => markImageFailed(comboImageKey)}
                   />
                 ) : (
                   <View className="w-full h-full items-center justify-center">
@@ -122,7 +137,7 @@ const ComboCard = ({ item, onAdd, onPress, onSkip, onLove }: RecommendedFoodCard
                   </View>
                 )}
               </View>
-            ))}
+            )})}
           </View>
         </View>
 

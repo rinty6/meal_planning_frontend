@@ -42,8 +42,8 @@ type FoodDetailFactsResult = {
   nutritionFacts: ReturnType<typeof buildNutritionFactsFromFood>;
 };
 
-// Bump the cache version so stale cappuccino image misses are replayed.
-const IMAGE_LOOKUP_CACHE_STORAGE_KEY = 'meal-app:fatsecret-image-cache:v10';
+// Bump the cache version so stale sushi miss entries cannot short-circuit the newer semantic path.
+const IMAGE_LOOKUP_CACHE_STORAGE_KEY = 'meal-app:fatsecret-image-cache:v12';
 const IMAGE_LOOKUP_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const IMAGE_LOOKUP_MISS_TTL_MS = 1000 * 60 * 60 * 12;
 const IMAGE_LOOKUP_CACHE_MAX_ENTRIES = 250;
@@ -52,6 +52,7 @@ const FOOD_IMAGE_QUERY_LIMIT = 3;
 const RECIPE_IMAGE_QUERY_LIMIT = 2;
 // Guard title fallback so local items do not hydrate detail facts from unrelated foods.
 const TITLE_FALLBACK_MIN_SIMILARITY = 0.34;
+const TITLE_FALLBACK_DETAIL_LIMIT = 3;
 const BRAND_PREFIXES = new Set([
   'mcdonald',
   'mcdonalds',
@@ -147,7 +148,68 @@ const PREPARED_DISH_FALLBACK_SUFFIXES = new Set([
   'wrap',
 ]);
 // Use simple representative image concepts when an exact FatSecret dish image is missing or misleading.
+const GENERATED_IMAGE_BASE_PARAMS = 'auto=format&fit=crop&w=900&q=80';
 const SEMANTIC_IMAGE_OVERRIDES = [
+  // Translate recurring live misses into generic dish queries that actually return recipe images.
+  {
+    key: 'jackfruit-veggie-balls',
+    markers: ['jackfruit', 'veggie', 'balls'],
+    queries: ['Veggie Balls', 'Vegetarian Meatballs'],
+    forceSearch: true,
+    preferRecipeSearch: true,
+  },
+  {
+    key: 'sweetened-natural-yogurt',
+    markers: ['yogur', 'natural'],
+    queries: ['Greek Yogurt', 'Yogurt'],
+    forceSearch: true,
+    preferRecipeSearch: true,
+  },
+  {
+    key: 'greek-curd-cream',
+    markers: ['kreeka', 'kohupiima'],
+    queries: ['Greek Yogurt', 'Quark'],
+    forceSearch: true,
+    preferRecipeSearch: true,
+  },
+  {
+    key: 'hosomaki-sushi',
+    markers: ['hosomakis'],
+    queries: ['Sushi'],
+    forceSearch: true,
+  },
+  {
+    key: 'hossomaki-sushi',
+    markers: ['hossomakis'],
+    queries: ['Sushi'],
+    forceSearch: true,
+  },
+  {
+    key: 'hosomaki-singular-sushi',
+    markers: ['hosomaki'],
+    queries: ['Sushi'],
+    forceSearch: true,
+  },
+  {
+    key: 'hossomaki-singular-sushi',
+    markers: ['hossomaki'],
+    queries: ['Sushi'],
+    forceSearch: true,
+  },
+  {
+    key: 'homosakis-sushi',
+    markers: ['homosakis'],
+    queries: ['Sushi'],
+    forceSearch: true,
+  },
+  {
+    key: 'breadcrumbs-pantry',
+    markers: ['bread', 'crumbs'],
+    queries: ['Seasoned Breadcrumbs', 'Breadcrumbs'],
+    forceSearch: true,
+    preferGeneratedImage: true,
+    generatedImage: `https://images.unsplash.com/photo-1509440159596-0249088772ff?${GENERATED_IMAGE_BASE_PARAMS}`,
+  },
   {
     key: 'breakfast-sammy',
     markers: ['breakfast sammy'],
@@ -211,6 +273,8 @@ const cleanId = (value: any) => {
   if (value === null || value === undefined) return "";
   return String(value).trim();
 };
+// Only numeric ids are valid for direct FatSecret food detail lookups.
+const isNumericFatSecretId = (value: any) => /^\d+$/.test(cleanId(value));
 const toNumeric = (value: any, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -488,11 +552,24 @@ const buildCategoryFallbackQueries = (item: any) => {
     if (
       searchableText.includes('yogurt') ||
       searchableText.includes('yoghurt') ||
+      searchableText.includes('yogur') ||
       searchableText.includes('jogurt') ||
-      searchableText.includes('joghurt')
+      searchableText.includes('joghurt') ||
+      searchableText.includes('kohupiima') ||
+      searchableText.includes('quark')
     ) {
       fallbacks.push('Greek Yogurt');
       fallbacks.push('Yogurt');
+      fallbacks.push('Quark');
+    }
+    if (
+      searchableText.includes('hummus') ||
+      searchableText.includes('hommus') ||
+      searchableText.includes('homos') ||
+      searchableText.includes('chickpea')
+    ) {
+      fallbacks.push('Hummus');
+      fallbacks.push('Garlic Hummus');
     }
   }
 
@@ -591,9 +668,10 @@ const buildImageSearchQueries = (item: any) => {
     shouldKeepOriginalTitle ? originalTitle : '',
   ], 6);
 };
-const buildImageLookupKeys = (rawId: string, queries: string[]) => {
+const buildImageLookupKeys = (rawId: string, queries: string[], options: { includeIdKey?: boolean } = {}) => {
+  const includeIdKey = options.includeIdKey !== false;
   const keys: string[] = [];
-  if (rawId && !rawId.startsWith('local-')) {
+  if (includeIdKey && rawId && !rawId.startsWith('local-')) {
     keys.push(`id:${rawId}`);
   }
   for (const query of queries) {
@@ -604,6 +682,12 @@ const buildImageLookupKeys = (rawId: string, queries: string[]) => {
   return dedupeStrings(keys, 10);
 };
 const buildGeneratedFoodImageUrl = (item: any) => {
+  const semanticImageOverride = getSemanticImageOverride(item);
+  const configuredGeneratedImage = normalizeWhitespace(semanticImageOverride?.generatedImage || '');
+  if (configuredGeneratedImage) {
+    return configuredGeneratedImage;
+  }
+
   // Leave hard misses empty so existing local fallback artwork still renders in the UI.
   return '';
 };
@@ -1250,6 +1334,29 @@ const withTimeBasedRecommendationMetadata = (
   isTimeBasedRecommendation: searchContext.isTimeBased,
 });
 
+const getFoodRecommendationDedupeKey = (item: any) => {
+  const normalizedTitle = normalizeLookupKey(item?.title || item?.food_name || '');
+  if (normalizedTitle) return `title:${normalizedTitle}`;
+
+  const normalizedId = cleanId(item?.fatsecret_food_id || item?.food_id || item?.id);
+  return normalizedId ? `id:${normalizedId}` : '';
+};
+
+const dedupeFoodRecommendations = (items: any[], limit = Number.POSITIVE_INFINITY) => {
+  const deduped: any[] = [];
+  const seen = new Set<string>();
+
+  for (const item of ensureArray(items)) {
+    const key = getFoodRecommendationDedupeKey(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+    if (deduped.length >= limit) break;
+  }
+
+  return deduped;
+};
+
 const getTimeBasedRecommendationFallbackImage = (item: any) => {
   const text = getSearchableFoodText(item);
   const searchQuery = String(item?.recommendationQuery || '').toLowerCase();
@@ -1304,28 +1411,23 @@ const hydrateTimeBasedRecommendationImages = async (items: any[], maxResults: nu
 export const searchFoodItemsWithNutrition = async (query = '', maxResults = 10) => {
   try {
     const searchContext = buildFoodSearchContext(query);
+    const candidateSearchLimit = Math.min(25, Math.max(maxResults * 2, maxResults + 3));
 
     let basicItems: any[] = [];
     let resolvedSearchQuery = searchContext.queries[0] || 'healthy meal';
 
     for (const searchQuery of searchContext.queries) {
       resolvedSearchQuery = searchQuery;
-      const searchResults = await searchFoodItems(searchQuery, maxResults);
+      const searchResults = await searchFoodItems(searchQuery, candidateSearchLimit);
       const filteredResults = searchContext.isTimeBased
         ? searchResults.filter(isTimeBasedFoodRecommendationCandidate)
         : searchResults;
       const resultsWithQuery = filteredResults.map((item: any) => ({
         ...item,
-        recommendationQuery: searchQuery,
+          recommendationQuery: searchQuery,
       }));
 
-      basicItems = [
-        ...basicItems,
-        ...resultsWithQuery.filter((item: any) => {
-          const itemId = String(item?.id || item?.food_id || item?.title || '').trim();
-          return itemId && !basicItems.some((existing: any) => String(existing?.id || existing?.food_id || existing?.title || '').trim() === itemId);
-        }),
-      ].slice(0, maxResults);
+      basicItems = dedupeFoodRecommendations([...basicItems, ...resultsWithQuery], maxResults);
 
       if (basicItems.length >= maxResults || (!searchContext.isTimeBased && basicItems.length > 0)) break;
     }
@@ -1361,9 +1463,12 @@ export const searchFoodItemsWithNutrition = async (query = '', maxResults = 10) 
       })
     );
     
-    const filteredEnrichedItems = searchContext.isTimeBased
-      ? enrichedItems.filter(isTimeBasedFoodRecommendationCandidate).slice(0, maxResults)
-      : enrichedItems;
+    const filteredEnrichedItems = dedupeFoodRecommendations(
+      searchContext.isTimeBased
+        ? enrichedItems.filter(isTimeBasedFoodRecommendationCandidate)
+        : enrichedItems,
+      maxResults
+    );
 
     return searchContext.isTimeBased
       ? hydrateTimeBasedRecommendationImages(filteredEnrichedItems, maxResults)
@@ -1382,9 +1487,13 @@ export const getFoodById = async (
     expectedCalories?: number;
   } = {}
 ) => {
-  if (String(foodId || "").startsWith("local-")) return null;
+  const normalizedFoodId = cleanId(foodId);
+  // Skip proxy calls when the app is holding a local or non-FatSecret identifier.
+  if (!normalizedFoodId || normalizedFoodId.startsWith("local-") || !isNumericFatSecretId(normalizedFoodId)) {
+    return null;
+  }
   try {
-    const data = await requestFatSecretProxy(`/api/fatsecret/foods/${encodeURIComponent(foodId)}`, {
+    const data = await requestFatSecretProxy(`/api/fatsecret/foods/${encodeURIComponent(normalizedFoodId)}`, {
       requestLabel: 'food.get.v5',
       params: {
         expectedCalories: options.expectedCalories,
@@ -1432,6 +1541,8 @@ export const resolveFoodImageFromFatSecret = async (
   const hasExplicitFatSecretId = !!explicitFatSecretId && !explicitFatSecretId.startsWith('local-');
   const semanticImageOverride = getSemanticImageOverride(item);
   const forceSemanticImageSearch = !!semanticImageOverride?.forceSearch;
+  const preferSemanticRecipeSearch = !!semanticImageOverride?.preferRecipeSearch;
+  const preferGeneratedImage = !!semanticImageOverride?.preferGeneratedImage;
   // Skip direct food_id lookup when the safer image path is a semantic title search instead.
   const isRelaxedTitleFallback =
     String(item?.mapping_acceptance_mode || "").toLowerCase() === "relaxed_title_fallback";
@@ -1439,11 +1550,31 @@ export const resolveFoodImageFromFatSecret = async (
     forceSemanticImageSearch || (isRelaxedTitleFallback && !preferFatSecretImage && !hasExplicitFatSecretId);
   const targetCalories = toNumber(item?.calories, 0);
   const queries = buildImageSearchQueries(item);
-  const cacheKeys = buildImageLookupKeys(rawId, queries);
+  // Keep semantic title recovery from being blocked by stale direct-id cache misses.
+  const cacheKeys = buildImageLookupKeys(rawId, queries, {
+    includeIdKey: !skipDirectIdLookup,
+  });
 
   const returnResult = (result: ResolvedImageLookup) => {
     logImageResolutionResult(item, result);
     return result;
+  };
+  const resolveFromRecipeQueries = async () => {
+    for (const query of queries.slice(0, RECIPE_IMAGE_QUERY_LIMIT)) {
+      const hits = await searchRecipes(query, 4);
+      if (!hits.length) continue;
+
+      const resolved = await resolveImageFromRecipeHits(hits, targetCalories);
+      if (!resolved?.image) continue;
+
+      cacheImageLookupResult(cacheKeys, resolved);
+      return returnResult({
+        ...resolved,
+        food_id: null,
+      });
+    }
+
+    return null;
   };
 
   if (image && !preferFatSecretImage && !forceSemanticImageSearch) {
@@ -1487,6 +1618,28 @@ export const resolveFoodImageFromFatSecret = async (
         ...resolved,
         food_id: preferFatSecretImage ? null : resolved.food_id,
       });
+    }
+  }
+
+  if (preferGeneratedImage) {
+    const generatedImage = buildGeneratedFoodImageUrl(item);
+    if (generatedImage) {
+      const resolved: ResolvedImageLookup = {
+        image: generatedImage,
+        food_id: null,
+        lookupState: 'resolved',
+        source: 'generated',
+      };
+      cacheImageLookupResult(cacheKeys, resolved);
+      return returnResult(resolved);
+    }
+  }
+
+  // Prioritize recipe-style recovery when the semantic override is intentionally dish-shaped.
+  if (preferSemanticRecipeSearch) {
+    const recipeResolved = await resolveFromRecipeQueries();
+    if (recipeResolved?.image) {
+      return recipeResolved;
     }
   }
 
@@ -1577,6 +1730,11 @@ const toNumber = (value: any, fallback = 0) => {
 const hasMeaningfulMacroSnapshot = (item: any) =>
   ["calories", "protein", "carbs", "fats", "fat"].some((key) => toNumber(item?.[key], 0) > 0);
 
+// Preserve existing serving data when recommendation snapshots already contain usable portion info.
+const hasMeaningfulServingSnapshot = (item: any) =>
+  ["grams", "metric_serving_amount", "serving_amount", "number_of_units"].some((key) => toNumber(item?.[key], 0) > 0) ||
+  !!normalizeWhitespace(item?.serving_description || item?.metric_serving_unit || item?.measurement_description || "");
+
 const calculateDV = (value: number, dv: number) => (dv > 0 ? Math.round((value / dv) * 100) : 0);
 
 export const buildNutritionFactsFromFood = (food: any) => {
@@ -1640,11 +1798,15 @@ export const fetchFoodDetailForFacts = async (
 ) => {
   if (!item) return null;
 
-  const explicitFatSecretId = cleanId(item?.fatsecret_food_id);
-  const fallbackFoodId = cleanId(item?.food_id || item?.id);
+  const explicitFatSecretId = isNumericFatSecretId(item?.fatsecret_food_id)
+    ? cleanId(item?.fatsecret_food_id)
+    : "";
+  const fallbackFoodId = isNumericFatSecretId(item?.food_id || item?.id)
+    ? cleanId(item?.food_id || item?.id)
+    : "";
   const primaryId = explicitFatSecretId || fallbackFoodId;
-  const hasResolvableId = !!primaryId && !primaryId.startsWith("local-");
-  const hasExplicitFatSecretId = !!explicitFatSecretId && !explicitFatSecretId.startsWith("local-");
+  const hasResolvableId = !!primaryId;
+  const hasExplicitFatSecretId = !!explicitFatSecretId;
   const isRelaxedTitleFallback =
     String(item?.mapping_acceptance_mode || "").toLowerCase() === "relaxed_title_fallback";
   const shouldSkipFallbackIdLookup = isRelaxedTitleFallback && !hasExplicitFatSecretId;
@@ -1653,7 +1815,8 @@ export const fetchFoodDetailForFacts = async (
   const targetCalories = toNumber(item?.calories, 0);
   let foodId = hasResolvableId && !shouldSkipFallbackIdLookup ? primaryId : "";
   const title = String(item?.title || item?.food_name || "").trim();
-  const allowTitleFallback = options.allowTitleFallback ?? !foodId;
+  // Always allow title fallback when no safe numeric FatSecret id is available.
+  const allowTitleFallback = (options.allowTitleFallback ?? !foodId) || !foodId;
   const cacheKey = buildFoodDetailFactsCacheKey(item, allowTitleFallback);
   const cachedResult = getCachedFoodDetailFactsResult(cacheKey);
   if (cachedResult) {
@@ -1683,23 +1846,15 @@ export const fetchFoodDetailForFacts = async (
     allowTitleFallback,
     isRelaxedTitleFallback,
     shouldSkipFallbackIdLookup,
-    preserveRecommendedCore,
-    preserveOriginalMacros,
-    title,
-    targetCalories,
   });
 
-  const fallbackServingAmount = toNumber(item?.metric_serving_amount, 0) || toNumber(item?.grams, 0);
-  const fallbackServingText =
-    fallbackServingAmount > 0 ? `${Math.round(fallbackServingAmount)} ${item?.metric_serving_unit || "g"}` : "";
-  const preserveOriginalServing =
-    preserveRecommendedCore &&
-    !!(
-      String(item?.serving_description || "").trim() ||
-      fallbackServingAmount > 0 ||
+  const preserveOriginalServing = preserveRecommendedCore && hasMeaningfulServingSnapshot(item);
+  const fallbackServingText = normalizeWhitespace(
+    item?.serving_description ||
+      item?.metric_serving_unit ||
       item?.measurement_description ||
       item?.number_of_units
-    );
+  );
 
   const mergeResolvedFood = (source: any | null) => {
     const merged = source ? { ...item, ...source } : { ...item };
@@ -1762,13 +1917,22 @@ export const fetchFoodDetailForFacts = async (
 
     for (const query of titleQueries) {
       const hits = await searchFoodItems(query, 6);
-      const candidateIds = ensureArray(hits).map((hit: any) => cleanId(hit?.id)).filter(Boolean).slice(0, 6);
+      const candidateIds = ensureArray(hits)
+        .map((hit: any) => cleanId(hit?.id))
+        .filter(Boolean)
+        .slice(0, TITLE_FALLBACK_DETAIL_LIMIT);
       if (candidateIds.length === 0) continue;
 
-      for (const candidateId of candidateIds) {
-        const candidate = await getFoodById(candidateId, {
-          expectedCalories: targetCalories > 0 ? targetCalories : undefined,
-        });
+      const candidates = await Promise.all(
+        candidateIds.map(async (candidateId) => ({
+          candidateId,
+          candidate: await getFoodById(candidateId, {
+            expectedCalories: targetCalories > 0 ? targetCalories : undefined,
+          }),
+        }))
+      );
+
+      for (const { candidateId, candidate } of candidates) {
         if (!candidate) continue;
         const cals = toNumber(candidate?.calories, 0);
         const diff = targetCalories > 0 ? Math.abs(cals - targetCalories) / targetCalories : 0;

@@ -4,7 +4,7 @@
     "slug": "meal_app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/login_image.png",
+    "icon": "./assets/images/GoodHealthMate_logo.png",
     "scheme": "mealapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -18,18 +18,15 @@
     "android": {
       "package": "com.goodhealthmate.app",
       "adaptiveIcon": {
-        "backgroundColor": "#FFFFFF",
-        "foregroundImage": "./assets/images/login_image.png",
-        "backgroundImage": "./assets/images/login_image.png",
-        "monochromeImage": "./assets/images/login_image.png"
+        "backgroundColor": "#13519C",
+        "foregroundImage": "./assets/images/GoodHealthMate_logo.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
-      "usesCleartextTraffic": true
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/login_image.png",
+      "favicon": "./assets/images/GoodHealthMate_logo.png",
       "bundler": "metro"
     },
     "plugins": [
@@ -38,12 +35,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/login_image.png",
+          "image": "./assets/images/GoodHealthMate_logo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#13519C",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#13519C"
           }
         }
       ],
