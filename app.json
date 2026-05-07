@@ -7,7 +7,7 @@
     "icon": "./assets/images/GoodHealthMate_logo.png",
     "scheme": "mealapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.goodhealthmate.app",
@@ -64,8 +64,7 @@
     },
     "updates": {
       "url": "https://u.expo.dev/b01bf15a-f4fe-457c-bcd4-c6737ab47587",
-      "fallbackToCacheTimeout": 0,
-      "checkAutomatically": "ON_LOAD"
+      "enabled": false
     }
   }
 }
