@@ -16,6 +16,8 @@ const cleanText = (value: unknown) => String(value ?? "").trim();
 
 const normalizeApiUrl = (value: unknown) => cleanText(value).replace(/\/$/, "");
 
+const BOOTSTRAP_REQUEST_TIMEOUT_MS = 12_000;
+
 const parseResponsePayload = async (response: Response) => {
   try {
     const text = await response.text();
@@ -78,16 +80,29 @@ export const bootstrapBackendUser = async ({
       "Content-Type": "application/json",
       "x-clerk-id": normalizedClerkId,
     };
+    // Bound the startup bootstrap request so the app cannot spin forever.
+    const abortController =
+      typeof AbortController === "function" ? new AbortController() : null;
+    const timeoutId = setTimeout(() => {
+      abortController?.abort();
+    }, BOOTSTRAP_REQUEST_TIMEOUT_MS);
 
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${normalizedApiUrl}/api/users/bootstrap`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({}),
-    });
+    let response: Response;
+
+    try {
+      response = await fetch(`${normalizedApiUrl}/api/users/bootstrap`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+        signal: abortController?.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const payload = await parseResponsePayload(response);
 
@@ -104,6 +119,17 @@ export const bootstrapBackendUser = async ({
           }),
     };
   } catch (error: any) {
+    if (error?.name === "AbortError") {
+      return {
+        ok: false,
+        status: 0,
+        payload: null,
+        code: "BOOTSTRAP_TIMEOUT",
+        error:
+          "The app could not finish account setup because the backend did not respond within 12 seconds.",
+      };
+    }
+
     return {
       ok: false,
       status: 0,

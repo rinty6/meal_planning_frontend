@@ -7,6 +7,11 @@ import { Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim()
+const CLERK_PUBLISHABLE_KEY_MODE = CLERK_PUBLISHABLE_KEY?.startsWith('pk_live_')
+  ? 'live'
+  : CLERK_PUBLISHABLE_KEY?.startsWith('pk_test_')
+    ? 'test'
+    : 'unknown'
 
 export default function RootLayout() {
   // Show a readable configuration failure instead of crashing on startup.
@@ -49,6 +54,9 @@ export default function RootLayout() {
       </SafeAreaProvider>
     );
   }
+
+  // Log only the key mode so release builds can confirm live vs test config safely.
+  console.log('[clerk] publishable key mode', CLERK_PUBLISHABLE_KEY_MODE)
 
   return (
       // Provide stable safe-area insets for screens and modal content.
