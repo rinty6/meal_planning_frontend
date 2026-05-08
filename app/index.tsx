@@ -7,6 +7,8 @@ import { primeRecommendations } from '../services/recommendation';
 import { bootstrapBackendUser } from '../services/userSync';
 
 const ML_PRIME_TTL_MS = 5 * 60 * 1000;
+const PRIVATE_NETWORK_URL_PATTERN =
+  /^http:\/\/(?:localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/i;
 
 const StartScreen = () => {
   const router = useRouter();
@@ -33,7 +35,19 @@ const StartScreen = () => {
       const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
       if (!apiURL) {
         if (!cancelled) {
-          setBootstrapError('The backend URL is missing from the app configuration.');
+          setBootstrapError(
+            'EXPO_PUBLIC_BACKEND_URL is missing from this build. Add it to the EAS production environment before creating the next TestFlight build.'
+          );
+        }
+        return;
+      }
+
+      // Block release builds that still point at a local development backend.
+      if (!__DEV__ && PRIVATE_NETWORK_URL_PATTERN.test(apiURL)) {
+        if (!cancelled) {
+          setBootstrapError(
+            'EXPO_PUBLIC_BACKEND_URL points to a private HTTP address. TestFlight builds need a public HTTPS backend URL in the EAS production environment.'
+          );
         }
         return;
       }
