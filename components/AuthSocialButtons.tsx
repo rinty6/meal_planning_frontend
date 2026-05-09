@@ -3,6 +3,7 @@ import { Text, TouchableOpacity, View } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useOAuth } from '@clerk/clerk-expo';
+import { makeRedirectUri } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -105,6 +106,7 @@ const AuthSocialButtons = ({
 
       const authFlow = getAuthFlow(provider);
       const { createdSessionId, setActive } = await authFlow({
+        redirectUrl: makeRedirectUri({ scheme: 'mealapp' }),
         unsafeMetadata: normalizedUnsafeMetadata,
       });
 
