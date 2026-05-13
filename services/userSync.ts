@@ -16,7 +16,14 @@ const cleanText = (value: unknown) => String(value ?? "").trim();
 
 const normalizeApiUrl = (value: unknown) => cleanText(value).replace(/\/$/, "");
 
-const BOOTSTRAP_REQUEST_TIMEOUT_MS = 12_000;
+const BOOTSTRAP_REQUEST_TIMEOUT_MS = 60_000;
+const BOOTSTRAP_REQUEST_TIMEOUT_SECONDS = Math.round(
+  BOOTSTRAP_REQUEST_TIMEOUT_MS / 1000
+);
+const inFlightBootstrapRequests = new Map<
+  string,
+  Promise<BootstrapBackendUserResult>
+>();
 
 const parseResponsePayload = async (response: Response) => {
   try {
@@ -56,7 +63,7 @@ export const getBootstrapErrorMessage = ({
   }
 };
 
-export const bootstrapBackendUser = async ({
+const runBootstrapBackendUserRequest = async ({
   apiURL,
   clerkId,
   getToken,
@@ -126,7 +133,7 @@ export const bootstrapBackendUser = async ({
         payload: null,
         code: "BOOTSTRAP_TIMEOUT",
         error:
-          "The app could not finish account setup because the backend did not respond within 12 seconds.",
+          `The app could not finish account setup because the backend did not respond within ${BOOTSTRAP_REQUEST_TIMEOUT_SECONDS} seconds.`,
       };
     }
 
@@ -137,5 +144,46 @@ export const bootstrapBackendUser = async ({
       code: "BOOTSTRAP_NETWORK_ERROR",
       error: error?.message || "Failed to contact the backend.",
     };
+  }
+};
+
+export const bootstrapBackendUser = async ({
+  apiURL,
+  clerkId,
+  getToken,
+}: BootstrapBackendUserArgs): Promise<BootstrapBackendUserResult> => {
+  const normalizedApiUrl = normalizeApiUrl(apiURL);
+  const normalizedClerkId = cleanText(clerkId);
+
+  if (!normalizedApiUrl || !normalizedClerkId) {
+    return {
+      ok: false,
+      status: 0,
+      payload: null,
+      code: "INVALID_BOOTSTRAP_REQUEST",
+      error: "Missing backend URL or Clerk user id.",
+    };
+  }
+
+  const requestKey = `${normalizedApiUrl}|${normalizedClerkId}`;
+  const existingRequest = inFlightBootstrapRequests.get(requestKey);
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  // Reuse the same in-flight bootstrap request so startup retries do not duplicate work.
+  const pendingRequest = runBootstrapBackendUserRequest({
+    apiURL: normalizedApiUrl,
+    clerkId: normalizedClerkId,
+    getToken,
+  });
+  inFlightBootstrapRequests.set(requestKey, pendingRequest);
+
+  try {
+    return await pendingRequest;
+  } finally {
+    if (inFlightBootstrapRequests.get(requestKey) === pendingRequest) {
+      inFlightBootstrapRequests.delete(requestKey);
+    }
   }
 };

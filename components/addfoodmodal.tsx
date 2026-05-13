@@ -355,6 +355,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   <TextInput
                     className="flex-1 ml-2 text-base text-black"
                     placeholder="Search (e.g., Chicken)"
+                    placeholderTextColor="#9CA3AF"
                     value={query}
                     onChangeText={handleSearchTextChange}
                     onSubmitEditing={handleSearch}

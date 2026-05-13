@@ -811,7 +811,7 @@ const PlanningScreen = () => {
         <View className="flex-row justify-between items-center mb-6">
           <View className="flex-row items-center">
             <Text className="text-xl font-bold">Recommended</Text>
-            <InfoButton onPress={() => showCustomAlert("How it works", "These foods are recommended based on your goal and eating behaviors.")} />
+            <InfoButton onPress={() => showCustomAlert("How it works", "These foods are recommended based on your goal and eating behaviors.\n\nNote: Some dishes may be displayed without images. We will improve this issue as soon as possible.")} />
             {hasAnyRecommendations && usingCachedRecommendations && (
               <View
                 className="ml-2 px-2 py-1 rounded-full border bg-blue-50 border-blue-200"

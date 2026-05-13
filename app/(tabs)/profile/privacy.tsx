@@ -1,12 +1,13 @@
 // This function helps users to change their password
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, TextInput, ActivityIndicator, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '@clerk/clerk-expo';
 import CustomAlert from '../../../components/customAlert';
 import TermsOfService from '../../../components/TermsOfService';
+import { PRIVACY_POLICY_URL } from '../../../utils/config';
 
 const PrivacyScreen = () => {
     const router = useRouter();
@@ -25,6 +26,28 @@ const PrivacyScreen = () => {
     const [showNewPassword, setShowNewPassword] = useState(false);
 
     const [pwdAlertConfig, setPwdAlertConfig] = useState({ title: "", message: "", onConfirm: () => {} });
+
+    // Open the public privacy policy page from the profile legal menu.
+    const handleOpenPrivacyPolicy = () => {
+        if (!PRIVACY_POLICY_URL) {
+            setPwdAlertConfig({
+                title: 'Missing Configuration',
+                message: 'Privacy policy URL is missing from this build configuration.',
+                onConfirm: () => setAlertVisible(false),
+            });
+            setAlertVisible(true);
+            return;
+        }
+
+        Linking.openURL(PRIVACY_POLICY_URL).catch(() => {
+            setPwdAlertConfig({
+                title: 'Link Error',
+                message: 'Could not open the privacy policy link right now.',
+                onConfirm: () => setAlertVisible(false),
+            });
+            setAlertVisible(true);
+        });
+    };
 
     const handleChangePassword = async () => {
         if (!currentPassword || !newPassword) {
@@ -77,6 +100,11 @@ const PrivacyScreen = () => {
 
                 <TouchableOpacity onPress={() => setTermsModalVisible(true)} className="flex-row items-center justify-between bg-gray-50 p-4 rounded-xl mt-4">
                     <Text className="text-base font-bold text-gray-800">Terms of Service</Text>
+                    <Ionicons name="open-outline" size={20} color="#9CA3AF" />
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={handleOpenPrivacyPolicy} className="flex-row items-center justify-between bg-gray-50 p-4 rounded-xl mt-4">
+                    <Text className="text-base font-bold text-gray-800">Privacy Policy</Text>
                     <Ionicons name="open-outline" size={20} color="#9CA3AF" />
                 </TouchableOpacity>
             </View>

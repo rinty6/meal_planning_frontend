@@ -168,11 +168,12 @@ const RecipeScreen = () => {
         <View className="flex-1 flex-row items-center bg-gray-100 rounded-2xl px-4 py-3">
             <Ionicons name="search" size={20} color="gray" />
             <TextInput 
-                className="flex-1 ml-2 text-base"
+              className="flex-1 ml-2 text-base text-black"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 onSubmitEditing={handleSearch}
                 placeholder="Search recipes..."
+              placeholderTextColor="#9CA3AF"
             />
         </View>
         <TouchableOpacity 

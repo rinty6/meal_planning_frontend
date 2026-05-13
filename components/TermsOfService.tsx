@@ -11,6 +11,7 @@ interface TermsOfServiceProps {
 const FATSECRET_ATTRIBUTION_URL = 'https://platform.fatsecret.com';
 const FATSECRET_BADGE_URL = 'https://platform.fatsecret.com/api/static/images/powered_by_fatsecret_horizontal_brand.png';
 const OPEN_FOOD_FACTS_URL = 'https://world.openfoodfacts.org/';
+const USDA_FOODDATA_CENTRAL_URL = 'https://fdc.nal.usda.gov/';
 const FOOD_101_DATASET_URL = 'https://data.vision.ee.ethz.ch/cvl/datasets_extra/food-101/';
 const FOOD_101_REFERENCE_URL = 'https://data.vision.ee.ethz.ch/cvl/datasets_extra/food-101/static/bossard_eccv14_food-101.pdf';
 const FRUITS_360_DATASET_URL = 'https://github.com/Horea94/Fruit-Images-Dataset';
@@ -151,7 +152,23 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ visible, onClose }) => 
           </View>
 
           <View className="mb-4">
-            <Text className="text-base font-semibold text-gray-800 mb-2">4.3. Open Food Facts</Text>
+            <Text className="text-base font-semibold text-gray-800 mb-2">4.3. USDA FoodData Central</Text>
+            <Text className="text-sm text-textSecondary leading-6 mb-3">
+              For certain food recognition nutrient detail flows, the Service uses USDA FoodData Central, a food and nutrient data system provided by the U.S. Department of Agriculture. We use this source to help populate nutrient details for foods when available.
+            </Text>
+            <TouchableOpacity
+              accessibilityRole="link"
+              className="self-start"
+              onPress={() => handleOpenExternalLink(USDA_FOODDATA_CENTRAL_URL)}
+            >
+              <Text className="text-sm font-semibold text-primary underline">
+                USDA FoodData Central
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View className="mb-4">
+            <Text className="text-base font-semibold text-gray-800 mb-2">4.4. Open Food Facts</Text>
             <Text className="text-sm text-textSecondary leading-6 mb-3">
               We use Open Food Facts to help populate certain food product information in the Service, including community-contributed product details, ingredients, nutrition facts, and related images when available.
             </Text>
@@ -173,7 +190,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ visible, onClose }) => 
           </View>
 
           <View className="mb-4">
-            <Text className="text-base font-semibold text-gray-800 mb-2">4.4. Food recognition datasets</Text>
+            <Text className="text-base font-semibold text-gray-800 mb-2">4.5. Food recognition datasets</Text>
             <Text className="text-sm text-textSecondary leading-6 mb-3">
               Our food recognition features are trained and evaluated with third-party image datasets, including Food-101, Fruits-360, and the Vegetable Image Dataset. We acknowledge their owners and follow the published attribution, citation, and license terms for each source.
             </Text>
@@ -265,7 +282,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ visible, onClose }) => 
           </View>
 
           <View className="mb-6">
-            <Text className="text-base font-semibold text-gray-800 mb-2">4.5. FatSecret Attribution</Text>
+            <Text className="text-base font-semibold text-gray-800 mb-2">4.6. FatSecret Attribution</Text>
             <Text className="text-sm text-textSecondary leading-6">
               Nutritional information in portions of the Service is provided by the FatSecret Platform API. The attribution badge and attribution link below are displayed to comply with FatSecret Platform API attribution requirements.
             </Text>

@@ -167,8 +167,8 @@ const OnboardingScreen = () => {
       if (!data.age) {
         return 'Please enter your age.';
       }
-      if (!Number.isInteger(ageValue) || ageValue < 13 || ageValue > 120) {
-        return 'Please enter a valid age between 13 and 120.';
+      if (!Number.isInteger(ageValue) || ageValue < 16 || ageValue > 120) {
+        return 'Please enter a valid age between 16 and 120.';
       }
     }
 
