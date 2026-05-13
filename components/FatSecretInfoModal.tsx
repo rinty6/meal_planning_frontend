@@ -1,0 +1,60 @@
+import React from 'react';
+import { Image, Linking, Modal, Text, TouchableOpacity, View } from 'react-native';
+
+interface FatSecretInfoModalProps {
+  visible: boolean;
+  title: string;
+  description: string;
+  note: string;
+  onClose: () => void;
+}
+
+const FATSECRET_ATTRIBUTION_URL = 'https://platform.fatsecret.com';
+const FATSECRET_BADGE_URL = 'https://platform.fatsecret.com/api/static/images/powered_by_fatsecret_horizontal_brand.png';
+
+const FatSecretInfoModal = ({
+  visible,
+  title,
+  description,
+  note,
+  onClose,
+}: FatSecretInfoModalProps) => {
+  const handleOpenFatSecret = () => {
+    Linking.openURL(FATSECRET_ATTRIBUTION_URL).catch(() => {
+      // Ignore link-open failures on this informational modal.
+    });
+  };
+
+  return (
+    <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
+      <View className="flex-1 bg-black/50 justify-center items-center px-6">
+        <View className="bg-white w-full max-w-sm p-6 rounded-3xl shadow-xl">
+          <Text className="text-2xl font-bold text-center text-gray-900 mb-3">{title}</Text>
+          <Text className="text-gray-500 text-center mb-4 leading-6">{description}</Text>
+
+          {/* Show the FatSecret badge here so users can open the attribution page directly. */}
+          <TouchableOpacity
+            accessibilityRole="link"
+            accessibilityLabel="Open the FatSecret attribution page"
+            className="self-center mb-4"
+            onPress={handleOpenFatSecret}
+          >
+            <Image
+              source={{ uri: FATSECRET_BADGE_URL }}
+              className="w-44 h-8"
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+
+          <Text className="text-xs text-gray-400 text-center leading-5 mb-6">{note}</Text>
+
+          <TouchableOpacity onPress={onClose} className="bg-primary py-3 rounded-xl items-center">
+            <Text className="text-white font-bold">OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+export default FatSecretInfoModal;

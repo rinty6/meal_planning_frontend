@@ -11,6 +11,7 @@ import AddFoodModal from "../../../components/addfoodmodal";
 import ComboCard from "../../../components/ComboCard";
 import InfoButton from "../../../components/InforButton";
 import CustomAlert from "../../../components/customAlert";
+import FatSecretInfoModal from "../../../components/FatSecretInfoModal";
 import RecentMealsModal from "../../../components/RecentMealModal";
 import MostConsumedFoodsStrip from "../../../components/MostConsumedFoodsStrip";
 import {
@@ -130,6 +131,7 @@ const PlanningScreen = () => {
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState({ title: "", message: "", onConfirm: () => setAlertVisible(false) });
   const [isRecentModalVisible, setIsRecentModalVisible] = useState(false);
+  const [isRecommendationInfoVisible, setIsRecommendationInfoVisible] = useState(false);
 
   const displayedItems = itemsByMeal[selectedMealType] || [];
   const isSelectedMealLoading = loadingMeals[selectedMealType];
@@ -811,14 +813,7 @@ const PlanningScreen = () => {
         <View className="flex-row justify-between items-center mb-6">
           <View className="flex-row items-center">
             <Text className="text-xl font-bold">Recommended</Text>
-            <InfoButton onPress={() => showCustomAlert("How it works", "These foods are recommended based on your goal and eating behaviors.\n\nNote: Some dishes may be displayed without images. We will improve this issue as soon as possible.")} />
-            {hasAnyRecommendations && usingCachedRecommendations && (
-              <View
-                className="ml-2 px-2 py-1 rounded-full border bg-blue-50 border-blue-200"
-              >
-                <Text className="text-[11px] font-sans font-semibold text-blue-700">Updating</Text>
-              </View>
-            )}
+            <InfoButton onPress={() => setIsRecommendationInfoVisible(true)} />
           </View>
           <TouchableOpacity
             onPress={() => setIsRecentModalVisible(true)}
@@ -902,6 +897,14 @@ const PlanningScreen = () => {
       {alertVisible && (
         <CustomAlert visible={alertVisible} title={alertConfig.title} message={alertConfig.message} onConfirm={alertConfig.onConfirm} onCancel={undefined} />
       )}
+
+      <FatSecretInfoModal
+        visible={isRecommendationInfoVisible}
+        title="How it works"
+        description="These foods are recommended based on your goal and eating behaviors. Some food images are provided by the FatSecret Platform API."
+        note="Note: Some dishes may be displayed without images. We are working to improve image coverage."
+        onClose={() => setIsRecommendationInfoVisible(false)}
+      />
       
       {isRecentModalVisible && (
         <RecentMealsModal visible={isRecentModalVisible} onClose={() => setIsRecentModalVisible(false)} onAddSelected={handleAddRecentMeals} />

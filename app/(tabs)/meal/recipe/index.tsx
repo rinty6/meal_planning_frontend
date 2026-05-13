@@ -9,6 +9,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { searchRecipes } from '../../../../services/mealAPI';
 import Food3DIcon from '../../../../components/Food3DIcon';
+import InfoButton from '../../../../components/InforButton';
+import FatSecretInfoModal from '../../../../components/FatSecretInfoModal';
 
 type FilterRange = {
   id: string;
@@ -55,6 +57,7 @@ const RecipeScreen = () => {
   // SORT STATE
   const [isSortVisible, setIsSortVisible] = useState(false);
   const [sortOption, setSortOption] = useState<'default' | 'calories_low' | 'calories_high'>('default');
+  const [isRecipeInfoVisible, setIsRecipeInfoVisible] = useState(false);
 
   // FILTER STATE
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -213,6 +216,10 @@ const RecipeScreen = () => {
              )}
          </TouchableOpacity>
 
+                 <View className="justify-center">
+                  <InfoButton onPress={() => setIsRecipeInfoVisible(true)} />
+                 </View>
+
          <TouchableOpacity className="ml-auto justify-center" onPress={() => router.push('/(tabs)/meal/favorites')}>
              <Text className="text-primary font-bold">To My Favorites {'>'}</Text>
          </TouchableOpacity>
@@ -301,6 +308,14 @@ const RecipeScreen = () => {
             </View>
          </View>
       </Modal>
+
+      <FatSecretInfoModal
+        visible={isRecipeInfoVisible}
+        title="Recipe images"
+        description="Some recipe images are provided by the FatSecret Platform API."
+        note="Note: Some recipes may be displayed without images."
+        onClose={() => setIsRecipeInfoVisible(false)}
+      />
 
     </SafeAreaView>
   );
