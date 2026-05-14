@@ -1,11 +1,13 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import CircularProgress from '../../components/CircularProgress';
 import ComboCard from '../../components/ComboCard';
+import AddFoodModal from '../../components/addfoodmodal';
+import SuccessModal from '../../components/sucessmodal';
 import { getCurrentFoodSuggestionMealPeriod, searchFoodItemsWithNutrition } from '../../services/mealAPI';
 import {
     getCachedHomeSnapshot,
@@ -21,6 +23,8 @@ type MacroSet = {
     carbs: number;
     fats: number;
 };
+
+type MealLogType = 'breakfast' | 'lunch' | 'dinner';
 
 const DEFAULT_CALORIE_TARGET = 2000;
 const HOME_DASHBOARD_REFRESH_TTL_MS = 15 * 1000;
@@ -112,6 +116,18 @@ const getGreeting = () => {
     return 'Good evening';
 };
 
+const getDefaultMealLogType = (): MealLogType => {
+    const currentPeriod = getCurrentFoodSuggestionMealPeriod();
+    if (currentPeriod === 'breakfast' || currentPeriod === 'lunch' || currentPeriod === 'dinner') {
+        return currentPeriod;
+    }
+
+    const hour = new Date().getHours();
+    if (hour < 5) return 'breakfast';
+    if (hour < 17) return 'lunch';
+    return 'dinner';
+};
+
 const HomeScreen = () => {
     const router = useRouter();
     const { userId } = useAuth(); // Clerk ID
@@ -129,6 +145,9 @@ const HomeScreen = () => {
     // Food Items State
     const [foodItems, setFoodItems] = useState<any[]>([]);
     const [loadingFoodItems, setLoadingFoodItems] = useState(false);
+    const [isAddFoodModalVisible, setIsAddFoodModalVisible] = useState(false);
+    const [activeMealType, setActiveMealType] = useState<MealLogType>('breakfast');
+    const [showSuccess, setShowSuccess] = useState(false);
 
     const hydrateFromCache = useCallback(() => {
         if (!userId) return;
@@ -255,7 +274,51 @@ const HomeScreen = () => {
         }
     }, [hydrateFromCache, loadDashboardData, loadFoodItems, userId]));
 
+    const handleOpenHomeAddFood = () => {
+        setActiveMealType(getDefaultMealLogType());
+        setIsAddFoodModalVisible(true);
+    };
+
+    const handleAddHomeFood = async (foodItem: any) => {
+        if (!userId) {
+            Alert.alert('Error', 'You must be logged in to save meals.');
+            return;
+        }
+
+        try {
+            const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
+            if (!apiURL) throw new Error('Missing backend URL');
+
+            const response = await fetch(`${apiURL}/api/meals/add`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    clerkId: userId,
+                    date: getTodayFormatted(),
+                    mealType: activeMealType,
+                    foodName: foodItem.title || foodItem.food_name || 'Unknown Item',
+                    calories: toNumber(foodItem.calories),
+                    protein: toNumber(foodItem.protein),
+                    carbs: toNumber(foodItem.carbs),
+                    fats: firstNumber(foodItem.fats, foodItem.fat),
+                    image: foodItem.image || '',
+                }),
+            });
+
+            if (!response.ok) throw new Error('Could not save food');
+
+            setIsAddFoodModalVisible(false);
+            setShowSuccess(true);
+            void loadDashboardData({ showSpinner: false });
+        } catch (error) {
+            console.error('Home add food error:', error);
+            Alert.alert('Error', 'Failed to add food item.');
+        }
+    };
+
     const categories = [
+        { name: 'Guide', icon: 'help-circle-outline', route: '/(tabs)/profile/guidance', iconColor: THEME_COLORS.primary, iconBgClass: 'bg-primarySoft' },
+        { name: 'Add Food', icon: 'add-circle-outline', onPress: handleOpenHomeAddFood, iconColor: THEME_COLORS.secondary, iconBgClass: 'bg-secondarySoft' },
         { name: 'Meal', icon: 'restaurant-outline', route: '/(tabs)/meal/planning', iconColor: THEME_COLORS.primary, iconBgClass: 'bg-primarySoft' },
         { name: 'Calorie', icon: 'flame-outline', route: '/(tabs)/calorie/summary', iconColor: THEME_COLORS.secondary, iconBgClass: 'bg-secondarySoft' },
         { name: 'Profile', icon: 'person-outline', route: '/(tabs)/profile', iconColor: THEME_COLORS.primary, iconBgClass: 'bg-primarySoft' },
@@ -467,12 +530,13 @@ const HomeScreen = () => {
 
                 {/* 4. Category Grid Section */}
                 <Text className="text-2xl font-bold mb-3 text-textDeep">Category</Text>
-                <View className="flex-row flex-wrap justify-between pb-10">
+                <View className="flex-row flex-wrap pb-10">
                     {categories.map((cat, index) => (
                         <TouchableOpacity 
                             key={index}
-                            onPress={() => router.push(cat.route as any)}
+                            onPress={() => cat.onPress ? cat.onPress() : router.push(cat.route as any)}
                             className="w-[31%] rounded-xl py-4 items-center mb-4 bg-surface border border-borderSoft"
+                            style={{ marginRight: (index + 1) % 3 === 0 ? 0 : '3.5%' }}
                         >
                             <View className={`w-12 h-12 rounded-xl items-center justify-center mb-2 ${cat.iconBgClass}`}>
                                 <Ionicons name={cat.icon as any} size={24} color={cat.iconColor} />
@@ -516,6 +580,23 @@ const HomeScreen = () => {
                 )}
 
             </ScrollView>
+
+            {showSuccess && (
+                <SuccessModal
+                    visible={showSuccess}
+                    message="Meal added successfully!"
+                    onClose={() => setShowSuccess(false)}
+                />
+            )}
+
+            {isAddFoodModalVisible && (
+                <AddFoodModal
+                    visible={isAddFoodModalVisible}
+                    onClose={() => setIsAddFoodModalVisible(false)}
+                    mealType={activeMealType}
+                    onAddFood={handleAddHomeFood}
+                />
+            )}
         </SafeAreaView>
     );
 };

@@ -12,6 +12,7 @@ export default function ProfileLayout() {
             <Stack.Screen name="notifications" />
             <Stack.Screen name="feedback" />
             <Stack.Screen name="privacy" />
+            <Stack.Screen name="guidance" />
         </Stack>
     );
 }
