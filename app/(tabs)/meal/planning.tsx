@@ -912,7 +912,7 @@ const PlanningScreen = () => {
         visible={isRecommendationInfoVisible}
         title="How it works"
         description="These foods are recommended based on your goal and eating behaviors. Some food images are provided by the FatSecret Platform API."
-        note="Note: Some dishes may be displayed without images. We are working to improve image coverage."
+        note="Note: Food images are symbolic illustrations and may not match the exact dish. Some dishes may also be displayed without images while we improve image coverage."
         onClose={() => setIsRecommendationInfoVisible(false)}
       />
       

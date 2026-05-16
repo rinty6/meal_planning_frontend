@@ -216,13 +216,15 @@ const RecipeScreen = () => {
              )}
          </TouchableOpacity>
 
-                 <View className="justify-center">
-                  <InfoButton onPress={() => setIsRecipeInfoVisible(true)} />
-                 </View>
-
-         <TouchableOpacity className="ml-auto justify-center" onPress={() => router.push('/(tabs)/meal/favorites')}>
-             <Text className="text-primary font-bold">To My Favorites {'>'}</Text>
-         </TouchableOpacity>
+         {/* Right-side group: info icon paired with the favorites link so both
+             secondary actions sit together at the end of the row. Info comes
+             first, then the navigation arrow lives at the natural end of the row. */}
+         <View className="ml-auto flex-row items-center">
+            <InfoButton onPress={() => setIsRecipeInfoVisible(true)} />
+            <TouchableOpacity className="ml-3 justify-center" onPress={() => router.push('/(tabs)/meal/favorites')}>
+               <Text className="text-primary font-bold">To My Favorites {'>'}</Text>
+            </TouchableOpacity>
+         </View>
       </View>
 
       {/* RECIPE GRID */}
@@ -313,7 +315,7 @@ const RecipeScreen = () => {
         visible={isRecipeInfoVisible}
         title="Recipe images"
         description="Some recipe images are provided by the FatSecret Platform API."
-        note="Note: Some recipes may be displayed without images."
+        note="Note: Recipe images are symbolic illustrations and may not match the exact dish. Some recipes may also be displayed without images."
         onClose={() => setIsRecipeInfoVisible(false)}
       />
 

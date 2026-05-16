@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Modal, ScrollView, Image, Linking } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 
 interface TermsOfServiceProps {
   visible: boolean;
@@ -29,9 +29,16 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ visible, onClose }) => 
   };
 
   return (
-    <Modal visible={visible} animationType="slide" statusBarTranslucent transparent={false}>
-      {/* Keep the modal header below the system status bar on first open. */}
-      <SafeAreaView className="flex-1 bg-white" edges={["top", "left", "right"]}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={false}
+      presentationStyle="fullScreen"
+      statusBarTranslucent={false}
+      onRequestClose={onClose}
+    >
+      <StatusBar style="dark" />
+      <SafeAreaView className="flex-1 bg-white" edges={['top', 'right', 'bottom', 'left']}>
         {/* Header */}
         <View className="flex-row items-center justify-between px-5 py-4 border-b border-gray-200 bg-gray-50">
           <Text className="text-xl font-bold text-textPrimary flex-1">Terms of Service</Text>

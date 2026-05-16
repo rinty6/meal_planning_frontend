@@ -100,6 +100,21 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   // --- BARCODE SCAN ---
+  // CustomAlert is a sibling Modal of the AddFoodModal. On iOS, presenting it
+  // while the scanner Modal is still dismissing produces a race where the alert
+  // never appears ("nothing happens" on Not Found). The dismiss animation is
+  // ~300 ms, so the alert has to wait at least that long before opening.
+  const SCANNER_DISMISS_MS = 450;
+
+  const closeScannerThenAlert = (title: string, message: string) => {
+    isProcessingRef.current = false;
+    setProcessingBarcode(false);
+    setBarcodeScanning(false);
+    // Defer the alert until the scanner Modal has fully unmounted, so the
+    // CustomAlert Modal can present without colliding with the dismissing one.
+    setTimeout(() => showCustomAlert(title, message), SCANNER_DISMISS_MS);
+  };
+
   const handleBarcodeScan = async (data: any) => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
@@ -109,11 +124,10 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
       const response = await fetchBarcodeData(data.data);
 
       if (!response.success || !response.data) {
-        isProcessingRef.current = false;
-        setProcessingBarcode(false);
-        setBarcodeScanning(false);
-        setTimeout(() => showCustomAlert('Product Not Found',
-          `We couldn't find barcode ${data.data}.\n\nTry scanning again or add manually.`), 100);
+        closeScannerThenAlert(
+          'Product Not Found',
+          `We couldn't find barcode ${data.data} in the food database.\n\nTry scanning again or add the item manually.`
+        );
         return;
       }
 
@@ -129,12 +143,15 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
       isProcessingRef.current = false;
       setProcessingBarcode(false);
       setViewMode('manual');
-      showCustomAlert('Success!', 'Product data loaded. Review and save.');
+      setTimeout(
+        () => showCustomAlert('Success', 'Product details loaded. Review the values and save when ready.'),
+        SCANNER_DISMISS_MS
+      );
     } catch {
-      isProcessingRef.current = false;
-      setProcessingBarcode(false);
-      setBarcodeScanning(false);
-      setTimeout(() => showCustomAlert('Error', 'Could not process barcode. Try again.'), 100);
+      closeScannerThenAlert(
+        'Scan Failed',
+        'We could not process this barcode. Please try scanning again or add the item manually.'
+      );
     }
   };
 
@@ -554,11 +571,18 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
               ) : processingBarcode ? (
                 <View className="flex-1 justify-center items-center px-6">
                   <ActivityIndicator size="large" color="white" />
-                  <Text className="text-white mt-8 text-lg font-bold text-center">Processing Barcode...</Text>
+                  <Text className="text-white mt-8 text-lg font-bold text-center">Looking up product…</Text>
                   <View className="mt-6 h-24 justify-center">
-                    {processingStep >= 1 && <Text className="text-gray-300 text-center text-base leading-6 mb-3">🔍 Scanning product database</Text>}
-                    {processingStep >= 2 && <Text className="text-gray-300 text-center text-base leading-6 mb-3">📊 Retrieving nutritional information</Text>}
-                    {processingStep >= 2 && <Text className="text-gray-300 text-center text-base leading-6">⏳ Please wait a moment...</Text>}
+                    {processingStep >= 1 && (
+                      <Text className="text-gray-300 text-center text-base leading-6 mb-2">
+                        Reading the barcode and matching it against the food database.
+                      </Text>
+                    )}
+                    {processingStep >= 2 && (
+                      <Text className="text-gray-300 text-center text-sm leading-5">
+                        This usually takes a few seconds — please hold the camera steady.
+                      </Text>
+                    )}
                   </View>
                 </View>
               ) : (

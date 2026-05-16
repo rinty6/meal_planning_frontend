@@ -149,7 +149,7 @@ function extractNutritionData(
   
   let calories = Math.round(nutriments.energy_kcal_100g || nutriments.energy_kcal || 0);
 
-  // 🛠️ FIX: Calculate calories manually using 4-4-9 if the database is missing them
+  // Calculate calories manually using 4-4-9 if the database is missing them
   if (calories === 0 && (protein > 0 || carbs > 0 || fats > 0)) {
     calories = Math.round((fats * 9) + (protein * 4) + (carbs * 4));
     console.log(`🧮 [BARCODE API] Calories were 0. Calculated manually: ${calories} kcal`);
