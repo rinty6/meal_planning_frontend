@@ -11,6 +11,7 @@ import SuccessModal from "../../../components/sucessmodal";
 import FoodFactsCard from "../../../components/FoodFactsCard";
 import { buildNutritionFactsFromFood, fetchFoodDetailForFacts } from "../../../services/mealAPI";
 import { peekCachedRecommendations } from "../../../services/recommendation";
+import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
 
 type ComboDetailItem = Record<string, any>;
 type ComboDetailPayload = ComboDetailItem & { items?: ComboDetailItem[] };
@@ -270,6 +271,7 @@ const FoodDetailScreen = () => {
         }
       }
 
+      markMealsSummaryDirty(userId, dateStr);
       setShowSuccess(true);
     } catch {
       showAlert("Error", "Could not save this food item.");

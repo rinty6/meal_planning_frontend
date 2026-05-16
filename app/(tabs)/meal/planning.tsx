@@ -30,6 +30,10 @@ import {
 } from "../../../services/planning.types";
 import type { ItemsByMeal, MealType } from "../../../services/planning.types";
 import { addMealsBatch } from "../../../services/planning.network";
+import {
+  fetchMealsSummaryWithCache,
+  markMealsSummaryDirty,
+} from "../../../services/mealsSummaryStore";
 
 const RecommendationSkeletonList = ({ count = 3 }) => (
   <View className="mt-2 mb-2">
@@ -263,11 +267,15 @@ const PlanningScreen = () => {
     if (!userId) return;
     try {
       const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
+      if (!apiURL) return;
       const dateKey = formatLocalYYYYMMDD(selectedDate);
-      const response = await fetch(`${apiURL}/api/meals/summary/${userId}/${dateKey}`);
-      if (!response.ok) return;
-      const meals = await response.json();
-      const total = (Array.isArray(meals) ? meals : []).reduce((sum: number, item: any) => sum + Number(item?.calories || 0), 0);
+      const meals = await fetchMealsSummaryWithCache({
+        apiURL,
+        userId,
+        date: dateKey,
+      });
+      if (!meals) return;
+      const total = meals.reduce((sum: number, item: any) => sum + Number(item?.calories || 0), 0);
       setConsumedCalories(Math.round(total));
     } catch {
       // keep previous value
@@ -652,9 +660,10 @@ const PlanningScreen = () => {
 
       if (!response.ok) throw new Error("Could not save food");
       const payload = await response.json();
+      markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories + Number(foodItem?.calories || 0))));
       setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
-      
+
       setIsModalVisible(false);
       
       setTimeout(() => {
@@ -693,6 +702,7 @@ const PlanningScreen = () => {
         }))
       );
 
+      markMealsSummaryDirty(userId, date);
       const totalCalories = mealsToAdd.reduce((sum: number, meal: any) => sum + Number(meal?.calories || 0), 0);
       if (isMountedRef.current) {
         setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories + totalCalories)));

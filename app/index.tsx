@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 
 import { primeRecommendations } from '../services/recommendation';
-import { bootstrapBackendUser } from '../services/userSync';
+import { bootstrapBackendUser, clearBackendBootstrapCache } from '../services/userSync';
 
 const ML_PRIME_TTL_MS = 5 * 60 * 1000;
 const STARTUP_STALL_WARNING_MS = 8_000;
@@ -151,6 +151,7 @@ const StartScreen = () => {
   };
 
   const handleSignOut = async () => {
+    await clearBackendBootstrapCache();
     await signOut();
     router.replace('/(auth)/sign-in');
   };

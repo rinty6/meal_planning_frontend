@@ -1,3 +1,5 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 type BootstrapBackendUserArgs = {
   apiURL?: string;
   clerkId?: string | null;
@@ -24,6 +26,65 @@ const inFlightBootstrapRequests = new Map<
   string,
   Promise<BootstrapBackendUserResult>
 >();
+
+// Cache only positive (`hasOnboarded === true`) bootstrap results so re-opens skip
+// the network entirely. Onboarding completion is monotonic, so a stale `true`
+// cannot mis-route a returning user.
+const BOOTSTRAP_CACHE_STORAGE_KEY = "meal-app:bootstrap-cache:v1";
+const BOOTSTRAP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+type BootstrapCacheEntry = {
+  clerkId: string;
+  user: unknown;
+  hasOnboarded: true;
+  cachedAt: number;
+};
+
+const readBootstrapCacheEntry = async (
+  clerkId: string
+): Promise<BootstrapCacheEntry | null> => {
+  try {
+    const raw = await AsyncStorage.getItem(BOOTSTRAP_CACHE_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as BootstrapCacheEntry | null;
+    if (
+      !parsed ||
+      parsed.clerkId !== clerkId ||
+      parsed.hasOnboarded !== true ||
+      typeof parsed.cachedAt !== "number"
+    ) {
+      return null;
+    }
+
+    if (Date.now() - parsed.cachedAt > BOOTSTRAP_CACHE_TTL_MS) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const writeBootstrapCacheEntry = async (entry: BootstrapCacheEntry) => {
+  try {
+    await AsyncStorage.setItem(
+      BOOTSTRAP_CACHE_STORAGE_KEY,
+      JSON.stringify(entry)
+    );
+  } catch {
+    // Cache writes are best-effort.
+  }
+};
+
+export const clearBackendBootstrapCache = async () => {
+  try {
+    await AsyncStorage.removeItem(BOOTSTRAP_CACHE_STORAGE_KEY);
+  } catch {
+    // Cache clears are best-effort.
+  }
+};
 
 const parseResponsePayload = async (response: Response) => {
   try {
@@ -165,6 +226,20 @@ export const bootstrapBackendUser = async ({
     };
   }
 
+  const cachedEntry = await readBootstrapCacheEntry(normalizedClerkId);
+  if (cachedEntry) {
+    return {
+      ok: true,
+      status: 200,
+      payload: {
+        success: true,
+        action: "cached",
+        user: cachedEntry.user,
+        hasOnboarded: true,
+      },
+    };
+  }
+
   const requestKey = `${normalizedApiUrl}|${normalizedClerkId}`;
   const existingRequest = inFlightBootstrapRequests.get(requestKey);
   if (existingRequest) {
@@ -180,7 +255,16 @@ export const bootstrapBackendUser = async ({
   inFlightBootstrapRequests.set(requestKey, pendingRequest);
 
   try {
-    return await pendingRequest;
+    const result = await pendingRequest;
+    if (result.ok && result.payload?.hasOnboarded === true) {
+      await writeBootstrapCacheEntry({
+        clerkId: normalizedClerkId,
+        user: result.payload.user,
+        hasOnboarded: true,
+        cachedAt: Date.now(),
+      });
+    }
+    return result;
   } finally {
     if (inFlightBootstrapRequests.get(requestKey) === pendingRequest) {
       inFlightBootstrapRequests.delete(requestKey);

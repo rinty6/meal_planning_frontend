@@ -16,6 +16,10 @@ import {
     shouldRefreshHomeDashboard,
     shouldRefreshHomeFoodItems,
 } from '../../services/homeStore';
+import {
+    fetchMealsSummaryWithCache,
+    markMealsSummaryDirty,
+} from '../../services/mealsSummaryStore';
 
 type MacroSet = {
     calories: number;
@@ -212,10 +216,13 @@ const HomeScreen = () => {
 
             // Fallback: if summary payload is empty/zero, compute from today's meal logs directly.
             if (!hasMacros(consumedMacros)) {
-                const mealsRes = await fetch(`${apiURL}/api/meals/summary/${userId}/${today}`);
-                if (mealsRes.ok) {
-                    const meals = await mealsRes.json();
-                    consumedMacros = aggregateMeals(Array.isArray(meals) ? meals : []);
+                const meals = await fetchMealsSummaryWithCache({
+                    apiURL,
+                    userId,
+                    date: today,
+                });
+                if (meals) {
+                    consumedMacros = aggregateMeals(meals);
                 }
             }
 
@@ -307,6 +314,7 @@ const HomeScreen = () => {
 
             if (!response.ok) throw new Error('Could not save food');
 
+            markMealsSummaryDirty(userId, getTodayFormatted());
             setIsAddFoodModalVisible(false);
             setShowSuccess(true);
             void loadDashboardData({ showSpinner: false });

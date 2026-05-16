@@ -10,6 +10,7 @@ import { useAuth, useUser } from '@clerk/clerk-expo';
 import * as ImagePicker from 'expo-image-picker';
 import CustomAlert from '../../../components/customAlert';
 import { getCachedProfileDemographics, setCachedProfileDemographics, shouldRefreshProfile } from '../../../services/profileStore';
+import { clearBackendBootstrapCache } from '../../../services/userSync';
 
 const PROFILE_REFRESH_TTL_MS = 60 * 1000;
 
@@ -113,6 +114,7 @@ const ProfileScreen = () => {
             isConfirm: true,
             onConfirm: async () => {
                 setAlertVisible(false);
+                await clearBackendBootstrapCache();
                 await signOut();
                 router.replace('/(auth)/sign-in');
             }

@@ -5,6 +5,11 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import AddFoodModal from '../../../components/addfoodmodal';
+import {
+  fetchMealsSummaryWithCache,
+  getCachedMealsSummary,
+  markMealsSummaryDirty,
+} from '../../../services/mealsSummaryStore';
 
 // ---------------------------------------------------------
 // 1. HELPER: Date Formatter (Local Time)
@@ -140,14 +145,25 @@ export default function SummaryScreen() {
   // --- FETCH DATA ---
   const fetchMeals = useCallback(async () => {
     if (!userId) return;
-    setLoading(true);
-    try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      const dateStr = formatLocalYYYYMMDD(selectedDate);
-      const response = await fetch(`${apiURL}/api/meals/summary/${userId}/${dateStr}`);
-      const data = await response.json();
+    const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
+    if (!apiURL) return;
 
-      if (response.ok) setMeals(data);
+    const dateStr = formatLocalYYYYMMDD(selectedDate);
+    const cached = getCachedMealsSummary(userId, dateStr);
+    if (cached && !cached.dirty) {
+      setMeals(cached.meals);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
+    try {
+      const meals = await fetchMealsSummaryWithCache({
+        apiURL,
+        userId,
+        date: dateStr,
+      });
+      if (meals) setMeals(meals);
     } catch (error) {
       console.error("Fetch error:", error);
     } finally {
@@ -173,6 +189,7 @@ export default function SummaryScreen() {
     try {
       const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
       await fetch(`${apiURL}/api/meals/delete/${id}`, { method: 'DELETE' });
+      markMealsSummaryDirty(userId, formatLocalYYYYMMDD(selectedDate));
     } catch (e) { console.error(e); }
   };
 
@@ -211,12 +228,13 @@ export default function SummaryScreen() {
       };
       // We don't need to await the fetch for the UI to update, 
       // but waiting ensures data consistency if user leaves page.
-      await fetch(`${apiURL}/api/meals/add`, { 
-          method: 'POST', 
-          headers: { 'Content-Type': 'application/json' }, 
-          body: JSON.stringify(payload) 
+      await fetch(`${apiURL}/api/meals/add`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
       });
-      
+      markMealsSummaryDirty(userId, newTempMeal.date);
+
       // Note: We DO NOT call fetchMeals() here to avoid spinner/reload.
       // The local state is already correct.
     } catch (e) { 
@@ -245,12 +263,13 @@ export default function SummaryScreen() {
         image: foodItem.image || ""
       };
       
-      await fetch(`${apiURL}/api/meals/add`, { 
-          method: 'POST', 
+      await fetch(`${apiURL}/api/meals/add`, {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload) 
+          body: JSON.stringify(payload)
       });
-      
+      markMealsSummaryDirty(userId, formattedDate);
+
       setIsAddModalVisible(false);
       fetchMeals(); // Keep fetchMeals here as Modal closing transition hides the reload well enough
     } catch (e) { console.error(e); }
