@@ -29,7 +29,9 @@ import { searchFoodItems, getFoodById } from '../services/mealAPI';
 import { fetchBarcodeData } from '../services/barcodeAPI';
 import { recognizeFood } from '../services/foodRecognitionAPI';
 import type { PredictionResult, FoodCandidate } from '../services/foodRecognitionAPI';
-import CustomAlert from '../components/customAlert';
+// CustomAlert was used previously, but it relies on a top-level Modal that
+// stacks unreliably on top of AddFoodModal on iOS. The alert is now rendered
+// as an in-modal overlay View near the bottom of this file.
 import FoodRecognitionResultModal from './FoodRecognitionResultModal';
 
 interface AddFoodModalProps {
@@ -100,28 +102,48 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   // --- BARCODE SCAN ---
-  // CustomAlert is a sibling Modal of the AddFoodModal. On iOS, presenting it
-  // while the scanner Modal is still dismissing produces a race where the alert
-  // never appears ("nothing happens" on Not Found). The dismiss animation is
-  // ~300 ms, so the alert has to wait at least that long before opening.
+  // The result alert is now an in-modal overlay (see the JSX near the bottom of
+  // this file), so it no longer races with the scanner Modal's dismiss animation.
+  // The 450 ms delay is kept as a deliberate visual pause: scanner slides away,
+  // the modal content is briefly visible, then the result is announced. Without
+  // any pause the transition feels too abrupt.
   const SCANNER_DISMISS_MS = 450;
+
+  // After the FatSecret OAuth + apiCache warmup landed, fetchBarcodeData now
+  // returns in 200–400 ms when the cache is warm. Without a floor, the "Looking
+  // up product…" view flashes by faster than the user can read it, the scanner
+  // dismisses, the alert pops up, and the user reflexively taps it away before
+  // registering the message. Holding the processing view for at least 1.5 s
+  // guarantees the user sees what is happening before the result is announced
+  // and also gives the progressive status lines (at 800 ms / 1600 ms) a chance
+  // to render. The user perceives the flow as deliberate instead of frantic.
+  const MIN_PROCESSING_DISPLAY_MS = 1500;
 
   const closeScannerThenAlert = (title: string, message: string) => {
     isProcessingRef.current = false;
     setProcessingBarcode(false);
     setBarcodeScanning(false);
-    // Defer the alert until the scanner Modal has fully unmounted, so the
-    // CustomAlert Modal can present without colliding with the dismissing one.
+    // Brief pause after dismissing the scanner so the user perceives a
+    // deliberate scanner-→-result transition, not an abrupt flash.
     setTimeout(() => showCustomAlert(title, message), SCANNER_DISMISS_MS);
+  };
+
+  const waitForMinProcessingDisplay = async (startedAt: number) => {
+    const remainingMs = MIN_PROCESSING_DISPLAY_MS - (Date.now() - startedAt);
+    if (remainingMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, remainingMs));
+    }
   };
 
   const handleBarcodeScan = async (data: any) => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
     setProcessingBarcode(true);
+    const processingStartedAt = Date.now();
 
     try {
       const response = await fetchBarcodeData(data.data);
+      await waitForMinProcessingDisplay(processingStartedAt);
 
       if (!response.success || !response.data) {
         closeScannerThenAlert(
@@ -143,11 +165,8 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
       isProcessingRef.current = false;
       setProcessingBarcode(false);
       setViewMode('manual');
-      setTimeout(
-        () => showCustomAlert('Success', 'Product details loaded. Review the values and save when ready.'),
-        SCANNER_DISMISS_MS
-      );
     } catch {
+      await waitForMinProcessingDisplay(processingStartedAt);
       closeScannerThenAlert(
         'Scan Failed',
         'We could not process this barcode. Please try scanning again or add the item manually.'
@@ -607,15 +626,38 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
             </View>
           </Modal>
         )}
-      </Modal>
 
-      <CustomAlert
-        visible={alertVisible}
-        title={alertConfig.title}
-        message={alertConfig.message}
-        confirmText="Close"
-        onConfirm={() => setAlertVisible(false)}
-      />
+        {/* In-modal alert overlay.
+            Previously this was rendered as a sibling <CustomAlert/> Modal. On
+            iOS, presenting a second top-level Modal while AddFoodModal is still
+            presented is unreliable — the OS silently dropped the alert and the
+            user saw nothing on "Product Not Found". Rendering the alert as a
+            non-Modal absolute overlay inside the outer Modal sidesteps the
+            stacking issue entirely: the overlay is just another View inside
+            the already-presented Modal, so it always paints on top of the
+            modal content without any native window juggling. */}
+        {alertVisible && (
+          <View
+            className="absolute inset-0 bg-black/50 justify-center items-center px-6"
+            style={{ zIndex: 9999, elevation: 9999 }}
+          >
+            <View className="bg-white w-full max-w-sm p-6 rounded-3xl shadow-xl">
+              <Text className="text-xl font-bold text-center text-gray-900 mb-2">
+                {alertConfig.title}
+              </Text>
+              <Text className="text-gray-500 text-center mb-6 leading-5">
+                {alertConfig.message}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setAlertVisible(false)}
+                className="bg-primary py-3 rounded-xl items-center w-full"
+              >
+                <Text className="text-white font-bold">Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </Modal>
     </>
   );
 };

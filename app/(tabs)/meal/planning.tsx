@@ -29,7 +29,7 @@ import {
   MEAL_TYPES,
 } from "../../../services/planning.types";
 import type { ItemsByMeal, MealType } from "../../../services/planning.types";
-import { addMealsBatch } from "../../../services/planning.network";
+import { addMealsBatch, fetchMostConsumedFromMealLogs } from "../../../services/planning.network";
 import {
   fetchMealsSummaryWithCache,
   markMealsSummaryDirty,
@@ -221,6 +221,20 @@ const PlanningScreen = () => {
   useEffect(() => {
     mostConsumedItemsCountRef.current = mostConsumedItems.length;
   }, [mostConsumedItems.length]);
+
+  const loadMostConsumedFallback = useCallback(async () => {
+    if (!userId || !configuredApiURL) return;
+    if (mostConsumedItemsCountRef.current > 0) return;
+    const items = await fetchMostConsumedFromMealLogs({
+      apiURL: configuredApiURL,
+      clerkId: userId,
+      limit: 10,
+    });
+    if (!isMountedRef.current) return;
+    if (mostConsumedItemsCountRef.current > 0) return;
+    if (items.length === 0) return;
+    setMostConsumedItems(items.slice(0, 10));
+  }, [configuredApiURL, userId]);
 
   const queueBackgroundMealPrefetches = useCallback((anchorMealType: MealType) => {
     const hasUnloadedMeal = MEAL_TYPES.some(
@@ -428,6 +442,10 @@ const PlanningScreen = () => {
             updateStatus: shouldUpdateStatusForResult(),
           });
 
+          if (mostConsumedItemsCountRef.current === 0) {
+            void loadMostConsumedFallback();
+          }
+
           if (
             requestedMealType !== "all" &&
             requestedMealType === selectedMealTypeRef.current &&
@@ -463,7 +481,7 @@ const PlanningScreen = () => {
         }
       }
     },
-    [applyRecommendationResult, configuredApiURL, maybeAwaitPrimeWarmup, queueBackgroundMealPrefetches, userId]
+    [applyRecommendationResult, configuredApiURL, loadMostConsumedFallback, maybeAwaitPrimeWarmup, queueBackgroundMealPrefetches, userId]
   );
 
   useEffect(() => {

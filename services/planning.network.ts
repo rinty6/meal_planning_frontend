@@ -46,6 +46,32 @@ export const addMealLog = async (payload: AddMealPayload) => {
   return data;
 };
 
+// Fallback for the "Most consumed foods" strip: when the ML service can't
+// produce a history-based list (empty history_df / missing DB connectivity),
+// Node can derive the same shape directly from meal_logs.
+export const fetchMostConsumedFromMealLogs = async ({
+  apiURL,
+  clerkId,
+  limit = 10,
+}: {
+  apiURL: string;
+  clerkId: string;
+  limit?: number;
+}): Promise<any[]> => {
+  if (!apiURL || !clerkId) return [];
+  try {
+    const response = await fetch(
+      `${apiURL}/api/meals/most-consumed/${clerkId}?limit=${limit}`
+    );
+    if (!response.ok) return [];
+    const data = await readResponseJson(response);
+    const items = Array.isArray(data?.items) ? data.items : [];
+    return items;
+  } catch {
+    return [];
+  }
+};
+
 export const addMealsBatch = async (inputs: AddMealPayload[]): Promise<AddMealResponse> => {
   if (inputs.length === 0) {
     throw new Error("No meals to add");
