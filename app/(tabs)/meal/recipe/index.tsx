@@ -3,7 +3,7 @@
 // They can explore the recipe that they want to cook or eat
 
 import { View, Text, TouchableOpacity, FlatList, TextInput, ActivityIndicator, Image, Modal } from 'react-native';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -51,8 +51,10 @@ const RecipeScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
+  const [lastSubmittedQuery, setLastSubmittedQuery] = useState('');
   const [recipes, setRecipes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
   
   // SORT STATE
   const [isSortVisible, setIsSortVisible] = useState(false);
@@ -64,15 +66,29 @@ const RecipeScreen = () => {
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const activeFilterSet = useMemo(() => new Set(activeFilters), [activeFilters]);
 
-  useEffect(() => {
-    handleSearch();
+  const runRecipeSearch = useCallback(async (query: string) => {
+    const submittedQuery = query.trim();
+    setLastSubmittedQuery(submittedQuery);
+    setSearchError('');
+    setLoading(true);
+    try {
+      const results = await searchRecipes(submittedQuery);
+      setRecipes(Array.isArray(results) ? results : []);
+    } catch (error) {
+      console.error('Failed to search recipes:', error);
+      setRecipes([]);
+      setSearchError('We could not search recipes right now. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const handleSearch = async () => {
-    setLoading(true);
-    const results = await searchRecipes(searchQuery);
-    setRecipes(results);
-    setLoading(false);
+  useEffect(() => {
+    void runRecipeSearch('');
+  }, [runRecipeSearch]);
+
+  const handleSearch = () => {
+    void runRecipeSearch(searchQuery);
   };
 
   const selectedCalorieRange = useMemo(
@@ -106,6 +122,36 @@ const RecipeScreen = () => {
     }
     return list; // Default (Relevance)
   }, [filteredRecipes, sortOption]);
+
+  const renderEmptyState = () => {
+    const filteredOut = recipes.length > 0 && sortedRecipes.length === 0;
+    const title = searchError ? 'Could not load recipes' : filteredOut ? 'No matching recipes' : 'No results';
+    const message = searchError
+      ? searchError
+      : filteredOut
+        ? 'No recipes match these filters. Try clearing filters or searching for another food.'
+        : 'No results. Please try again, for example banana.';
+
+    const handleExampleSearch = () => {
+      setSearchQuery('banana');
+      void runRecipeSearch('banana');
+    };
+
+    return (
+      <View className="items-center justify-center px-8 py-20">
+        <View className="w-16 h-16 rounded-full bg-blue-50 items-center justify-center mb-4">
+          <Ionicons name="search" size={28} color="#007BFF" />
+        </View>
+        <Text className="text-xl font-bold text-gray-900 text-center mb-2">{title}</Text>
+        <Text className="text-gray-500 text-center leading-5">{message}</Text>
+        {!searchError && !filteredOut && lastSubmittedQuery.length > 0 && (
+          <TouchableOpacity onPress={handleExampleSearch} className="mt-5 bg-primary rounded-full px-6 py-3">
+            <Text className="text-white font-bold">Try banana</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
 
   const toggleFilter = (filterId: string) => {
     setActiveFilters((prev) => {
@@ -236,7 +282,8 @@ const RecipeScreen = () => {
           numColumns={2}
           keyExtractor={(item) => String(item.id)}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingHorizontal: 15 }}
+          ListEmptyComponent={renderEmptyState}
+          contentContainerStyle={{ paddingHorizontal: 15, paddingBottom: 24, flexGrow: 1 }}
           showsVerticalScrollIndicator={false}
         />
       )}

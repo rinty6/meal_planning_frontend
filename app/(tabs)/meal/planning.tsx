@@ -843,7 +843,7 @@ const PlanningScreen = () => {
       markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
       setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
-      showMealLogOutcome(payload);
+      showMealLogOutcome(payload, { successModal: true });
     } catch {
       showCustomAlert("Error", "Network error while adding recent meals.");
     } finally {
