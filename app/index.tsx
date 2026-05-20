@@ -3,10 +3,8 @@ import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 
-import { primeRecommendations } from '../services/recommendation';
 import { bootstrapBackendUser, clearBackendBootstrapCache } from '../services/userSync';
 
-const ML_PRIME_TTL_MS = 5 * 60 * 1000;
 const STARTUP_STALL_WARNING_MS = 8_000;
 const PRIVATE_NETWORK_URL_PATTERN =
   /^http:\/\/(?:localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/i;
@@ -114,25 +112,6 @@ const StartScreen = () => {
       updateStartupPhase(
         hasOnboarded ? 'Opening the main app' : 'Opening onboarding'
       );
-
-      if (hasOnboarded) {
-        const now = Date.now();
-        const appGlobals = globalThis as typeof globalThis & {
-          __mlPrimeInFlight?: boolean;
-          __mlPrimeLastAt?: number;
-        };
-        const lastPrimeAt = Number(appGlobals.__mlPrimeLastAt || 0);
-        const primeInFlight = Boolean(appGlobals.__mlPrimeInFlight);
-
-        if (!primeInFlight && now - lastPrimeAt >= ML_PRIME_TTL_MS) {
-          appGlobals.__mlPrimeInFlight = true;
-          void primeRecommendations({ apiURL, clerkId: user.id }).then((ok) => {
-            appGlobals.__mlPrimeLastAt = ok ? Date.now() : 0;
-          }).finally(() => {
-            appGlobals.__mlPrimeInFlight = false;
-          });
-        }
-      }
 
       if (!cancelled) {
         router.replace(hasOnboarded ? '/(tabs)' : '/(onboarding)');

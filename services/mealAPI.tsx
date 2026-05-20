@@ -42,10 +42,20 @@ type FoodDetailFactsResult = {
   nutritionFacts: ReturnType<typeof buildNutritionFactsFromFood>;
 };
 
+type CachedRecipeSearchEntry = {
+  items: any[];
+  savedAt: number;
+  expiresAt: number;
+};
+
 // Bump the cache version so stale sushi miss entries cannot short-circuit the newer semantic path.
 const IMAGE_LOOKUP_CACHE_STORAGE_KEY = 'meal-app:fatsecret-image-cache:v12';
+const RECIPE_SEARCH_CACHE_STORAGE_KEY = 'meal-app:recipe-search-cache:v1';
 const IMAGE_LOOKUP_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const IMAGE_LOOKUP_MISS_TTL_MS = 1000 * 60 * 60 * 12;
+const RECIPE_SEARCH_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
+const RECIPE_SEARCH_REFRESH_MS = 1000 * 60 * 15;
+const RECIPE_SEARCH_CACHE_MAX_ENTRIES = 20;
 const IMAGE_LOOKUP_CACHE_MAX_ENTRIES = 250;
 const FOOD_DETAIL_FACTS_CACHE_TTL_MS = 1000 * 60 * 10;
 const FOOD_IMAGE_QUERY_LIMIT = 3;
@@ -264,9 +274,14 @@ const IMAGE_LOOKUP_SERVING_SIZE_WORDS = new Set([
 let hasLoadedImageLookupCache = false;
 let imageLookupCacheReadyPromise: Promise<void> | null = null;
 let imageLookupCachePersistTimer: ReturnType<typeof setTimeout> | null = null;
+let hasLoadedRecipeSearchCache = false;
+let recipeSearchCacheReadyPromise: Promise<void> | null = null;
+let recipeSearchCachePersistTimer: ReturnType<typeof setTimeout> | null = null;
 
 const ensureArray = (value: any) => (Array.isArray(value) ? value : value ? [value] : []);
 const imageLookupCache = new Map<string, CachedImageLookupEntry>();
+const recipeSearchCache = new Map<string, CachedRecipeSearchEntry>();
+const recipeSearchRefreshInFlight = new Set<string>();
 const foodDetailFactsCache = new Map<string, { savedAt: number; value: FoodDetailFactsResult }>();
 const inFlightFoodDetailFactsRequests = new Map<string, Promise<FoodDetailFactsResult | null>>();
 const cleanId = (value: any) => {
@@ -281,6 +296,117 @@ const toNumeric = (value: any, fallback = 0) => {
 };
 const normalizeWhitespace = (value: any) => String(value || '').replace(/\s+/g, ' ').trim();
 const normalizeLookupKey = (value: any) => normalizeWhitespace(value).toLowerCase();
+
+const buildRecipeSearchCacheKey = (query: string, maxResults: number) =>
+  `${normalizeLookupKey(query) || DEFAULT_RECIPE_SEARCH_QUERY}:${maxResults}`;
+
+const cloneRecipeItems = (items: any[] = []) => items.map((item) => ({ ...item }));
+
+const isCachedRecipeSearchEntry = (value: any): value is CachedRecipeSearchEntry =>
+  !!value &&
+  Array.isArray(value.items) &&
+  Number.isFinite(Number(value.savedAt)) &&
+  Number.isFinite(Number(value.expiresAt));
+
+const pruneRecipeSearchCacheEntries = () => {
+  const now = Date.now();
+  const validEntries = Array.from(recipeSearchCache.entries())
+    .filter(([, entry]) => entry.expiresAt > now)
+    .sort((left, right) => right[1].savedAt - left[1].savedAt)
+    .slice(0, RECIPE_SEARCH_CACHE_MAX_ENTRIES);
+
+  recipeSearchCache.clear();
+  validEntries.forEach(([key, entry]) => recipeSearchCache.set(key, entry));
+  return validEntries;
+};
+
+const persistRecipeSearchCache = async () => {
+  try {
+    const payload = JSON.stringify(Object.fromEntries(pruneRecipeSearchCacheEntries()));
+    await AsyncStorage.setItem(RECIPE_SEARCH_CACHE_STORAGE_KEY, payload);
+  } catch {
+    // Cache writes are best-effort.
+  }
+};
+
+const scheduleRecipeSearchCachePersist = () => {
+  if (recipeSearchCachePersistTimer !== null) return;
+  recipeSearchCachePersistTimer = setTimeout(() => {
+    recipeSearchCachePersistTimer = null;
+    void persistRecipeSearchCache();
+  }, 350);
+};
+
+const ensureRecipeSearchCacheReady = async () => {
+  if (hasLoadedRecipeSearchCache) return;
+  if (!recipeSearchCacheReadyPromise) {
+    recipeSearchCacheReadyPromise = (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(RECIPE_SEARCH_CACHE_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        const now = Date.now();
+        Object.entries(parsed || {}).forEach(([key, value]) => {
+          if (!isCachedRecipeSearchEntry(value) || value.expiresAt <= now) return;
+          recipeSearchCache.set(key, {
+            items: cloneRecipeItems(value.items),
+            savedAt: Number(value.savedAt),
+            expiresAt: Number(value.expiresAt),
+          });
+        });
+        pruneRecipeSearchCacheEntries();
+      } catch {
+        // Bad cache data should not block recipe search.
+      } finally {
+        hasLoadedRecipeSearchCache = true;
+        recipeSearchCacheReadyPromise = null;
+      }
+    })();
+  }
+
+  await recipeSearchCacheReadyPromise;
+};
+
+const getCachedRecipeSearchEntry = async (cacheKey: string) => {
+  await ensureRecipeSearchCacheReady();
+  const entry = recipeSearchCache.get(cacheKey);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    recipeSearchCache.delete(cacheKey);
+    scheduleRecipeSearchCachePersist();
+    return null;
+  }
+  return {
+    ...entry,
+    items: cloneRecipeItems(entry.items),
+  };
+};
+
+const setCachedRecipeSearchEntry = (cacheKey: string, items: any[]) => {
+  const entry: CachedRecipeSearchEntry = {
+    items: cloneRecipeItems(items),
+    savedAt: Date.now(),
+    expiresAt: Date.now() + RECIPE_SEARCH_CACHE_TTL_MS,
+  };
+  recipeSearchCache.set(cacheKey, entry);
+  scheduleRecipeSearchCachePersist();
+  return cloneRecipeItems(items);
+};
+
+const refreshRecipeSearchCacheInBackground = (cacheKey: string, fetcher: () => Promise<any[]>) => {
+  if (recipeSearchRefreshInFlight.has(cacheKey)) return;
+  recipeSearchRefreshInFlight.add(cacheKey);
+  void fetcher()
+    .then((items) => {
+      if (Array.isArray(items) && items.length > 0) setCachedRecipeSearchEntry(cacheKey, items);
+    })
+    .catch(() => {
+      // Keep serving the existing cached recipes if refresh fails.
+    })
+    .finally(() => {
+      recipeSearchRefreshInFlight.delete(cacheKey);
+    });
+};
 const hasAnyLookupMarker = (text: string, markers: string[]) =>
   markers.some((marker) => text.includes(marker));
 const isEnglishLikeLookupTitle = (value: any) => {
@@ -1110,33 +1236,47 @@ const requestFatSecretProxy = async (
 export const searchRecipes = async (query: string, maxResults = 15) => {
   try {
     const recipeQuery = normalizeWhitespace(query) || DEFAULT_RECIPE_SEARCH_QUERY;
-    const data = await requestFatSecretProxy('/api/fatsecret/recipes/search', {
-      requestLabel: 'recipes.search',
-      params: {
-        query: recipeQuery,
-        maxResults,
-      },
-    });
-    if (!data) return [];
- 
-    const rawRecipes = data?.items || [];
-    const recipeList = Array.isArray(rawRecipes) ? rawRecipes : [rawRecipes];
+    const cacheKey = buildRecipeSearchCacheKey(recipeQuery, maxResults);
+    const cached = await getCachedRecipeSearchEntry(cacheKey);
+
+    const fetchFromNetwork = async () => {
+      const data = await requestFatSecretProxy('/api/fatsecret/recipes/search', {
+        requestLabel: 'recipes.search',
+        params: {
+          query: recipeQuery,
+          maxResults,
+        },
+      });
+      if (!data) return [];
+   
+      const rawRecipes = data?.items || [];
+      const recipeList = Array.isArray(rawRecipes) ? rawRecipes : [rawRecipes];
+
+      return recipeList.map((item: any) => ({
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        image: item.image,
+       
+        calories: parseInt(item?.calories, 10) || 0,
+        protein: parseFloat(item?.protein) || 0,
+        carbs: parseFloat(item?.carbs ?? item?.carbohydrate) || 0,
+        fats: parseFloat(item?.fats ?? item?.fat) || 0,
 
 
-    return recipeList.map((item: any) => ({
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      image: item.image,
-     
-      calories: parseInt(item?.calories, 10) || 0,
-      protein: parseFloat(item?.protein) || 0,
-      carbs: parseFloat(item?.carbs) || 0,
-      fats: parseFloat(item?.fats) || 0,
+        time: item?.time || '15 min',
+      }));
+    };
 
+    if (cached) {
+      if (Date.now() - cached.savedAt > RECIPE_SEARCH_REFRESH_MS) {
+        refreshRecipeSearchCacheInBackground(cacheKey, fetchFromNetwork);
+      }
+      return cached.items;
+    }
 
-      time: item?.time || '15 min',
-    }));
+    const recipes = await fetchFromNetwork();
+    return recipes.length > 0 ? setCachedRecipeSearchEntry(cacheKey, recipes) : recipes;
 
 
   } catch (error) {
@@ -1169,6 +1309,14 @@ export const searchFoodItems = async (query: string, maxResults = 10) => {
       food_type: item.food_type || "Generic",
       food_url: item.food_url || null,
       image: item.image || null,
+      calories: parseFloat(item?.calories) || 0,
+      protein: parseFloat(item?.protein) || 0,
+      carbs: parseFloat(item?.carbs ?? item?.carbohydrate) || 0,
+      fats: parseFloat(item?.fats ?? item?.fat) || 0,
+      serving_id: item.serving_id || null,
+      serving_description: item.serving_description || null,
+      metric_serving_amount: parseFloat(item?.metric_serving_amount) || 0,
+      metric_serving_unit: item.metric_serving_unit || null,
     }));
 
 

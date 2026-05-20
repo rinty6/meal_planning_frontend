@@ -1,527 +1,459 @@
-import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Image,
+  Modal,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@clerk/clerk-expo";
-import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+import { useFocusEffect } from "@react-navigation/native";
 
-import SuccessModal from "../../../components/sucessmodal";
 import AddFoodModal from "../../../components/addfoodmodal";
-import ComboCard from "../../../components/ComboCard";
-import InfoButton from "../../../components/InforButton";
 import CustomAlert from "../../../components/customAlert";
 import FatSecretInfoModal from "../../../components/FatSecretInfoModal";
-import RecentMealsModal from "../../../components/RecentMealModal";
+import Food3DIcon from "../../../components/Food3DIcon";
+import InfoButton from "../../../components/InforButton";
 import MostConsumedFoodsStrip from "../../../components/MostConsumedFoodsStrip";
+import RecentMealsModal from "../../../components/RecentMealModal";
+import SuccessModal from "../../../components/sucessmodal";
 import {
-  fetchRecommendations,
-  getPrimeRecommendationStatus,
-  peekCachedRecommendations,
-  primeRecommendations,
-  primeRecommendationsDetailed,
-  sendRecommendationFeedback,
-} from "../../../services/recommendation";
+  addMealsBatch,
+  fetchMealPlanPreferences,
+  fetchMealPlanRecommendations,
+  fetchMostConsumedFromMealLogs,
+  saveMealPlanPreferences,
+  sendMealPlanEvent,
+} from "../../../services/planning.network";
+import type { MealPlanPreferences } from "../../../services/planning.network";
 import {
   createEmptyItemsByMeal,
   formatLocalYYYYMMDD,
-  LOADING_MESSAGES,
   MEAL_TYPES,
 } from "../../../services/planning.types";
 import type { ItemsByMeal, MealType } from "../../../services/planning.types";
-import { addMealsBatch, fetchMostConsumedFromMealLogs } from "../../../services/planning.network";
 import {
   fetchMealsSummaryWithCache,
   markMealsSummaryDirty,
 } from "../../../services/mealsSummaryStore";
+import { markFavoritesDirty } from "../../../services/favoritesStore";
 
-const RecommendationSkeletonList = ({ count = 3 }) => (
-  <View className="mt-2 mb-2">
-    {Array.from({ length: count }, (_, index) => (
-      <View key={index} className="mb-4 bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-sm">
-        <View className="h-44 bg-gray-200" />
-        <View className="p-4">
-          <View className="h-5 w-2/3 bg-gray-200 rounded-full mb-3" />
-          <View className="h-3 w-1/3 bg-gray-200 rounded-full mb-4" />
-          <View className="flex-row gap-2">
-            <View className="h-6 w-20 bg-orange-100 rounded-full" />
-            <View className="h-6 w-20 bg-blue-100 rounded-full" />
-            <View className="h-6 w-20 bg-green-100 rounded-full" />
-          </View>
-        </View>
-        <View className="px-4 pb-4">
-          <View className="border-t border-gray-100 pt-3 flex-row justify-end gap-2">
-            <View className="h-9 w-20 bg-gray-200 rounded-full" />
-            <View className="h-9 w-20 bg-[#FFD8C7] rounded-full" />
-          </View>
-        </View>
-      </View>
-    ))}
-  </View>
-);
+const ALLERGEN_OPTIONS = [
+  "Egg",
+  "Fish",
+  "Gluten",
+  "Lactose",
+  "Milk",
+  "Nuts",
+  "Peanuts",
+  "Sesame",
+  "Shellfish",
+  "Soy",
+];
 
-const PRIME_WARMUP_WAIT_TIMEOUT_MS = 20_000;
-const PRIME_WARMUP_LOADING_MESSAGE = "Finishing your personalized warm-up...";
-const createEmptyMealLoadingState = (): Record<MealType, boolean> => ({
-  breakfast: false,
-  lunch: false,
-  dinner: false,
+const DIET_DETAILS = [
+  {
+    value: "Vegan",
+    description: "No animal products",
+    icon: "leaf-outline",
+    iconColor: "#16A34A",
+    iconBgClass: "bg-green-50",
+  },
+  {
+    value: "Vegetarian",
+    description: "No meat or fish",
+    icon: "nutrition-outline",
+    iconColor: "#007BFF",
+    iconBgClass: "bg-primarySoft",
+  },
+];
+
+const NUTRIENT_OPTIONS = [
+  { key: "calories", label: "Calories", unit: "kcal" },
+  { key: "protein", label: "Protein", unit: "g" },
+  { key: "carbs", label: "Carbs", unit: "g" },
+  { key: "fat", label: "Fat", unit: "g" },
+  { key: "fiber", label: "Fiber", unit: "g" },
+  { key: "sugar", label: "Sugar", unit: "g" },
+  { key: "sodium", label: "Sodium", unit: "mg" },
+  { key: "cholesterol", label: "Cholesterol", unit: "mg" },
+];
+
+const emptyPreferences = (): MealPlanPreferences => ({
+  allergens: [],
+  diets: [],
+  nutrientLimits: {},
 });
 
-const getMealLoadingMessage = (mealType: MealType) => `Finding ${mealType} ideas...`;
-const createItemsByMealFromRecommendationResult = (result?: any): ItemsByMeal => ({
-  breakfast: (result?.recommendationsByMeal?.breakfast || []).slice(0, 5),
-  lunch: (result?.recommendationsByMeal?.lunch || []).slice(0, 5),
-  dinner: (result?.recommendationsByMeal?.dinner || []).slice(0, 5),
+const clonePreferences = (preferences: MealPlanPreferences): MealPlanPreferences => ({
+  allergens: [...(preferences.allergens || [])],
+  diets: [...(preferences.diets || [])],
+  nutrientLimits: JSON.parse(JSON.stringify(preferences.nutrientLimits || {})),
 });
-const getCachedSeedSnapshot = (
-  apiURL?: string,
-  userId?: string | null,
-  mealType: MealType | "all" = "all"
-) => {
-  if (!apiURL || !userId) return null;
+
+const getActiveFilterCount = (preferences: MealPlanPreferences) =>
+  (preferences.allergens || []).length +
+  (preferences.diets || []).length +
+  Object.keys(preferences.nutrientLimits || {}).length;
+
+const formatNutrientChip = (key: string, value: { min?: number; max?: number }) => {
+  const option = NUTRIENT_OPTIONS.find((item) => item.key === key);
+  const label = option?.label || key;
+  const unit = option?.unit || "";
+  if (value.min !== undefined && value.max !== undefined) return `${label} ${value.min}-${value.max}${unit}`;
+  if (value.min !== undefined) return `${label} >= ${value.min}${unit}`;
+  if (value.max !== undefined) return `${label} <= ${value.max}${unit}`;
+  return label;
+};
+
+const createItemKey = (item: any) =>
+  String(item?.fatsecret_food_id || item?.food_id || item?.recipe_id || item?.id || item?.title || "")
+    .trim()
+    .toLowerCase();
+
+const getExternalId = (item: any) =>
+  String(item?.fatsecret_food_id || item?.food_id || item?.recipe_id || item?.id || "").trim();
+
+const toNumber = (value: any) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const shuffleItems = (items: any[], seed = Date.now()) => {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.abs(Math.sin(seed + index) * 10000)) % (index + 1);
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+};
+
+const buildNutrientsSnapshot = (item: any) => ({
+  calories: toNumber(item?.calories),
+  protein: toNumber(item?.protein),
+  carbs: toNumber(item?.carbs),
+  fat: toNumber(item?.fats ?? item?.fat),
+  fiber: toNumber(item?.fiber),
+  sugar: toNumber(item?.sugar),
+  sodium: toNumber(item?.sodium),
+  cholesterol: toNumber(item?.cholesterol),
+  per100: item?.per100 || {},
+});
+
+const DishCard = ({
+  item,
+  isSelected,
+  onPress,
+  onToggleSelect,
+  onSkip,
+  onLove,
+  isAdding = false,
+  isFavorite = false,
+  isFavoriteLoading = false,
+}: {
+  item: any;
+  isSelected: boolean;
+  onPress: () => void;
+  onToggleSelect: () => void;
+  onSkip: () => void;
+  onLove: () => void;
+  isAdding?: boolean;
+  isFavorite?: boolean;
+  isFavoriteLoading?: boolean;
+}) => {
+  const image = typeof item?.image === "string" ? item.image.trim() : "";
+  const sourceLabel = item?.source === "fatsecret_recipe" ? "Recipe" : item?.food_type || "Food";
 
   return (
-    peekCachedRecommendations({ apiURL, userId, mealType }) ||
-    (mealType !== "all"
-      ? peekCachedRecommendations({ apiURL, userId, mealType: "all" })
-      : null)
+    <View className={`mb-4 rounded-3xl border overflow-hidden bg-white shadow-sm ${isSelected ? "border-primary" : "border-gray-100"}`}>
+      <TouchableOpacity onPress={onPress} activeOpacity={0.9}>
+        <View className="h-44 bg-gray-100">
+          {image ? (
+            <Image source={{ uri: image }} className="w-full h-full" resizeMode="cover" />
+          ) : (
+            <View className="w-full h-full items-center justify-center">
+              <Food3DIcon name={item?.title} size={54} />
+            </View>
+          )}
+          <View className="absolute top-3 right-3 rounded-full bg-white/95 px-3 py-1">
+            <Text className="text-xs font-bold text-gray-700">{sourceLabel}</Text>
+          </View>
+        </View>
+
+        <View className="p-4">
+          <Text className="text-lg font-bold text-black mb-1" numberOfLines={2}>
+            {item?.title || "Unknown dish"}
+          </Text>
+          <View className="flex-row items-center mb-3">
+            <Ionicons name="flame-outline" size={15} color="#6B7280" />
+            <Text className="text-gray-600 text-xs ml-1 mr-3">{Math.round(toNumber(item?.calories))} kcal</Text>
+            <Ionicons name="scale-outline" size={15} color="#6B7280" />
+            <Text className="text-gray-600 text-xs ml-1">{Math.round(toNumber(item?.grams || item?.metric_serving_amount || 100))} g</Text>
+          </View>
+          <View className="flex-row gap-2 flex-wrap">
+            <View className="bg-orange-50 px-2 py-1 rounded-full">
+              <Text className="text-[11px] text-orange-700 font-semibold">Fat {toNumber(item?.fats).toFixed(1)}g</Text>
+            </View>
+            <View className="bg-blue-50 px-2 py-1 rounded-full">
+              <Text className="text-[11px] text-blue-700 font-semibold">Protein {toNumber(item?.protein).toFixed(1)}g</Text>
+            </View>
+            <View className="bg-green-50 px-2 py-1 rounded-full">
+              <Text className="text-[11px] text-green-700 font-semibold">Carbs {toNumber(item?.carbs).toFixed(1)}g</Text>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+
+      <View className="px-4 pb-4">
+        <View className="border-t border-gray-100 pt-3 flex-row justify-between items-center">
+          <View className="flex-row items-center gap-2">
+            <TouchableOpacity onPress={onLove} disabled={isFavoriteLoading} className="p-2">
+              {isFavoriteLoading ? (
+                <ActivityIndicator size="small" color="#EF4444" />
+              ) : (
+                <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={24} color={isFavorite ? "#EF4444" : "#A0AEC0"} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onSkip} className="p-2">
+              <Ionicons name="close-circle-outline" size={24} color="#9CA3AF" />
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            onPress={onToggleSelect}
+            disabled={isAdding}
+            className={`flex-row items-center px-4 py-2 rounded-full border ${isSelected ? "bg-primary border-primary" : "bg-gray-50 border-gray-200"}`}
+          >
+            {isAdding ? (
+              <ActivityIndicator size="small" color={isSelected ? "white" : "#007BFF"} />
+            ) : (
+              <Ionicons name={isSelected ? "checkmark-circle" : "add-circle-outline"} size={18} color={isSelected ? "white" : "#007BFF"} />
+            )}
+            <Text className={`font-bold ml-2 ${isSelected ? "text-white" : "text-primary"}`}>Pick</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
   );
 };
 
 const PlanningScreen = () => {
   const router = useRouter();
   const { userId } = useAuth();
-  const isScreenFocused = useIsFocused();
   const configuredApiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-  const initialRecommendationSnapshotRef = useRef(
-    getCachedSeedSnapshot(configuredApiURL, userId, "breakfast")
-  );
-  const initialRecommendationResult = initialRecommendationSnapshotRef.current?.result;
   const isMountedRef = useRef(true);
-  const latestRequestIdsRef = useRef<Record<string, number>>({
-    breakfast: 0,
-    lunch: 0,
-    dinner: 0,
-    all: 0,
-  });
-  const hasRecommendationContentRef = useRef(false);
-  const selectedMealTypeRef = useRef<MealType>("breakfast");
-  const itemsByMealRef = useRef<ItemsByMeal>(createEmptyItemsByMeal());
-  const loadingMealsRef = useRef<Record<MealType, boolean>>(createEmptyMealLoadingState());
-  const mostConsumedItemsCountRef = useRef(0);
-  const loadRecommendationsRef = useRef<((options?: { forceExploration?: boolean; mealType?: MealType | "all"; skipPrimeCheck?: boolean }) => Promise<void>) | null>(null);
-  const backgroundPrefetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isBackgroundPrefetchingRef = useRef(false);
-  const isScreenFocusedRef = useRef(true);
   const addRequestInFlightRef = useRef(false);
+  const prewarmRequestKeyRef = useRef("");
+  const shuffleSeedRef = useRef(0);
 
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedMealType, setSelectedMealType] = useState<MealType>("breakfast");
-  const [isInitialLoading, setIsInitialLoading] = useState(() => !initialRecommendationResult);
-  const [isRefreshingRecommendations, setIsRefreshingRecommendations] = useState(false);
-  const [isPrimeWarmupPending, setIsPrimeWarmupPending] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
-  const [itemsByMeal, setItemsByMeal] = useState<ItemsByMeal>(() => createItemsByMealFromRecommendationResult(initialRecommendationResult));
-  const [loadingMeals, setLoadingMeals] = useState<Record<MealType, boolean>>(createEmptyMealLoadingState());
-  const [mostConsumedItems, setMostConsumedItems] = useState<any[]>(() => (initialRecommendationResult?.mostConsumedItems || []).slice(0, 10));
-  const [dailyCalorieTarget, setDailyCalorieTarget] = useState(() => Math.max(1200, Number(initialRecommendationResult?.dailyCalorieTarget || 2000)));
+  const [itemsByMeal, setItemsByMeal] = useState<ItemsByMeal>(createEmptyItemsByMeal());
+  const [mostConsumedItems, setMostConsumedItems] = useState<any[]>([]);
+  const [preferences, setPreferences] = useState<MealPlanPreferences>(emptyPreferences);
+  const [draftPreferences, setDraftPreferences] = useState<MealPlanPreferences>(emptyPreferences);
+  const [hasPlanStarted, setHasPlanStarted] = useState(false);
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false);
+  const [loadingPreferences, setLoadingPreferences] = useState(true);
+  const [dailyCalorieTarget, setDailyCalorieTarget] = useState(2000);
   const [consumedCalories, setConsumedCalories] = useState(0);
-  const [usingSafetyFallback, setUsingSafetyFallback] = useState(() => !!initialRecommendationResult?.payload?.used_safety_fallback);
-  const [usingCachedRecommendations, setUsingCachedRecommendations] = useState(() => !!initialRecommendationResult);
+  const [selectedItemKeys, setSelectedItemKeys] = useState<Record<string, any>>({});
 
-  const [showSuccess, setShowSuccess] = useState(false);
+  const [isRefineVisible, setIsRefineVisible] = useState(false);
+  const [refineStep, setRefineStep] = useState(0);
+  const [isAddMenuVisible, setIsAddMenuVisible] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
-  const [alertVisible, setAlertVisible] = useState(false);
-  const [alertConfig, setAlertConfig] = useState({ title: "", message: "", onConfirm: () => setAlertVisible(false) });
   const [isRecentModalVisible, setIsRecentModalVisible] = useState(false);
   const [isRecommendationInfoVisible, setIsRecommendationInfoVisible] = useState(false);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [pickingItemKey, setPickingItemKey] = useState<string | null>(null);
+  const [favoriteItemKeys, setFavoriteItemKeys] = useState<Record<string, boolean>>({});
+  const [favoriteLoadingKey, setFavoriteLoadingKey] = useState<string | null>(null);
+  const [alertConfig, setAlertConfig] = useState({
+    title: "",
+    message: "",
+    confirmText: "OK",
+    variant: "default" as "default" | "success",
+    onConfirm: () => setAlertVisible(false),
+  });
 
   const displayedItems = itemsByMeal[selectedMealType] || [];
-  const isSelectedMealLoading = loadingMeals[selectedMealType];
-  const hasAnyRecommendations = useMemo(
-    () => MEAL_TYPES.some((mealType) => (itemsByMeal[mealType] || []).length > 0),
-    [itemsByMeal]
-  );
+  const selectedItems = useMemo(() => Object.values(selectedItemKeys), [selectedItemKeys]);
+  const activeFilterCount = getActiveFilterCount(preferences);
+  const refineStepSelectionCount =
+    refineStep === 0
+      ? draftPreferences.allergens.length
+      : refineStep === 1
+        ? draftPreferences.diets.length
+        : Object.keys(draftPreferences.nutrientLimits || {}).length;
+  const hasAnyRecommendations = MEAL_TYPES.some((mealType) => (itemsByMeal[mealType] || []).length > 0);
+  const progressRatio = dailyCalorieTarget > 0 ? Math.min(1, consumedCalories / dailyCalorieTarget) : 0;
 
-  const showCustomAlert = (title: string, message: string) => {
-    setAlertConfig({ title, message, onConfirm: () => setAlertVisible(false) });
-    setAlertVisible(true);
-  };
-
-  const isPlanningScreenActive = () => isMountedRef.current && isScreenFocusedRef.current;
-
-  const showMealLogOutcome = (payload: any) => {
-    if (!isPlanningScreenActive()) return;
-
-    if (payload?.exceededLimit) {
-      showCustomAlert("Calorie Target Exceeded", "Food added, but you crossed your daily calorie goal.");
-    } else if (payload?.reachedTarget) {
-      showCustomAlert("Calorie Target Reached", "Great job! You reached your daily calorie target.");
-    } else {
-      setShowSuccess(true);
-    }
-  };
-
-  const applyRecommendationResult = useCallback((
-    result: any,
-    mealScope: MealType | "all" = "all",
-    options: { updateMostConsumed?: boolean; updateStatus?: boolean } = {}
+  const showCustomAlert = useCallback((
+    title: string,
+    message: string,
+    onConfirm?: () => void,
+    options: { confirmText?: string; variant?: "default" | "success" } = {}
   ) => {
-    const nextItemsByMeal = {
-      breakfast: (result?.recommendationsByMeal?.breakfast || []).slice(0, 5),
-      lunch: (result?.recommendationsByMeal?.lunch || []).slice(0, 5),
-      dinner: (result?.recommendationsByMeal?.dinner || []).slice(0, 5),
-    };
-
-    const shouldUseTransition = mealScope !== "all" && mealScope !== selectedMealTypeRef.current;
-    const commitRecommendationResult = () => {
-      setItemsByMeal((previousItemsByMeal) => {
-        const mergedItemsByMeal = mealScope === "all"
-          ? nextItemsByMeal
-          : {
-              ...previousItemsByMeal,
-              [mealScope]: nextItemsByMeal[mealScope],
-            };
-
-        hasRecommendationContentRef.current = MEAL_TYPES.some((mealType) => mergedItemsByMeal[mealType].length > 0);
-        return mergedItemsByMeal;
-      });
-
-      if (options.updateMostConsumed ?? (mealScope === "all" || mostConsumedItemsCountRef.current === 0)) {
-        setMostConsumedItems((result?.mostConsumedItems || []).slice(0, 10));
-      }
-      setDailyCalorieTarget(Math.max(1200, Number(result?.dailyCalorieTarget || 2000)));
-      if (options.updateStatus ?? true) {
-        setUsingSafetyFallback(!!result?.payload?.used_safety_fallback);
-        setUsingCachedRecommendations(!!result?.usedCachedFallback);
-      }
-    };
-
-    if (shouldUseTransition) {
-      startTransition(commitRecommendationResult);
-      return;
-    }
-
-    commitRecommendationResult();
+    setAlertConfig({
+      title,
+      message,
+      confirmText: options.confirmText || "OK",
+      variant: options.variant || "default",
+      onConfirm: onConfirm || (() => setAlertVisible(false)),
+    });
+    setAlertVisible(true);
   }, []);
 
-  useEffect(() => {
-    selectedMealTypeRef.current = selectedMealType;
-  }, [selectedMealType]);
-
-  useEffect(() => {
-    itemsByMealRef.current = itemsByMeal;
-  }, [itemsByMeal]);
-
-  useEffect(() => {
-    loadingMealsRef.current = loadingMeals;
-  }, [loadingMeals]);
-
-  useEffect(() => {
-    mostConsumedItemsCountRef.current = mostConsumedItems.length;
-  }, [mostConsumedItems.length]);
-
-  const loadMostConsumedFallback = useCallback(async () => {
+  const refreshDailyProgress = useCallback(async () => {
     if (!userId || !configuredApiURL) return;
-    if (mostConsumedItemsCountRef.current > 0) return;
+    try {
+      const dateKey = formatLocalYYYYMMDD(selectedDate);
+      const meals = await fetchMealsSummaryWithCache({
+        apiURL: configuredApiURL,
+        userId,
+        date: dateKey,
+      });
+      const total = (meals || []).reduce((sum: number, item: any) => sum + Number(item?.calories || 0), 0);
+      if (isMountedRef.current) setConsumedCalories(Math.round(total));
+    } catch {
+      // Keep the previous progress if the summary refresh fails.
+    }
+  }, [configuredApiURL, selectedDate, userId]);
+
+  const loadMostConsumed = useCallback(async () => {
+    if (!userId || !configuredApiURL) return;
     const items = await fetchMostConsumedFromMealLogs({
       apiURL: configuredApiURL,
       clerkId: userId,
       limit: 10,
     });
-    if (!isMountedRef.current) return;
-    if (mostConsumedItemsCountRef.current > 0) return;
-    if (items.length === 0) return;
-    setMostConsumedItems(items.slice(0, 10));
+    if (isMountedRef.current) setMostConsumedItems(items);
   }, [configuredApiURL, userId]);
 
-  const queueBackgroundMealPrefetches = useCallback((anchorMealType: MealType) => {
-    const hasUnloadedMeal = MEAL_TYPES.some(
-      (mealType) =>
-        mealType !== anchorMealType &&
-        (itemsByMealRef.current[mealType] || []).length === 0 &&
-        !loadingMealsRef.current[mealType]
+  const applyRecommendationPayload = useCallback((payload: any, mealScope: MealType | "all" = "all") => {
+    const nextByMeal = {
+      breakfast: (payload?.recommendationsByMeal?.breakfast || []).slice(0, 8),
+      lunch: (payload?.recommendationsByMeal?.lunch || []).slice(0, 8),
+      dinner: (payload?.recommendationsByMeal?.dinner || []).slice(0, 8),
+    };
+
+    setItemsByMeal((previous) =>
+      mealScope === "all"
+        ? nextByMeal
+        : {
+            ...previous,
+            [mealScope]: nextByMeal[mealScope],
+          }
     );
 
-    if (!hasUnloadedMeal || backgroundPrefetchTimeoutRef.current || isBackgroundPrefetchingRef.current) {
-      return;
+    if (Array.isArray(payload?.most_consumed_items) && payload.most_consumed_items.length > 0) {
+      setMostConsumedItems(payload.most_consumed_items.slice(0, 10));
     }
-
-    backgroundPrefetchTimeoutRef.current = setTimeout(() => {
-      backgroundPrefetchTimeoutRef.current = null;
-
-      if (!isMountedRef.current || isBackgroundPrefetchingRef.current) {
-        return;
-      }
-
-      void (async () => {
-        isBackgroundPrefetchingRef.current = true;
-
-        try {
-          for (const mealType of MEAL_TYPES) {
-            if (
-              mealType === anchorMealType ||
-              (itemsByMealRef.current[mealType] || []).length > 0 ||
-              loadingMealsRef.current[mealType]
-            ) {
-              continue;
-            }
-
-            await loadRecommendationsRef.current?.({ mealType, skipPrimeCheck: true });
-          }
-        } finally {
-          isBackgroundPrefetchingRef.current = false;
-        }
-      })();
-    }, 1200);
+    setDailyCalorieTarget(Math.max(1200, Number(payload?.daily_calorie_target || 2000)));
   }, []);
 
-  const refreshDailyProgress = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      if (!apiURL) return;
-      const dateKey = formatLocalYYYYMMDD(selectedDate);
-      const meals = await fetchMealsSummaryWithCache({
-        apiURL,
-        userId,
-        date: dateKey,
-      });
-      if (!meals) return;
-      const total = meals.reduce((sum: number, item: any) => sum + Number(item?.calories || 0), 0);
-      setConsumedCalories(Math.round(total));
-    } catch {
-      // keep previous value
-    }
-  }, [selectedDate, userId]);
-
-  const maybeAwaitPrimeWarmup = useCallback(
-    async (apiURL: string, requestId: number, mealType: MealType | "all") => {
-      if (!userId) return;
-
-      const primeStatus = await getPrimeRecommendationStatus({
-        apiURL,
-        clerkId: userId,
-        mealType,
-      });
-
-      if (!isMountedRef.current || latestRequestIdsRef.current[mealType] !== requestId) return;
-
-      if (primeStatus?.warmed) {
-        return;
-      }
-
-      if (primeStatus?.warming) {
-        setIsPrimeWarmupPending(true);
-        setLoadingMessage(PRIME_WARMUP_LOADING_MESSAGE);
-
-        try {
-          await primeRecommendationsDetailed({
-            apiURL,
-            clerkId: userId,
-            mealType,
-            waitForWarmup: true,
-            waitTimeoutMs: PRIME_WARMUP_WAIT_TIMEOUT_MS,
-          });
-        } finally {
-          if (isMountedRef.current && latestRequestIdsRef.current[mealType] === requestId) {
-            setIsPrimeWarmupPending(false);
-          }
-        }
-
-        return;
-      }
-
-      void primeRecommendations({ apiURL, clerkId: userId, mealType });
-    },
-    [userId]
-  );
-
   const loadRecommendations = useCallback(
-    async (options: { forceExploration?: boolean; mealType?: MealType | "all"; skipPrimeCheck?: boolean } = {}) => {
-      if (!userId) return;
-      const requestedMealType = options.mealType || selectedMealTypeRef.current;
-      const requestId = (latestRequestIdsRef.current[requestedMealType] || 0) + 1;
-      latestRequestIdsRef.current[requestedMealType] = requestId;
-
-      const isMealScopedRequest = requestedMealType !== "all";
-      const hasRequestedMealContent = isMealScopedRequest
-        ? (itemsByMealRef.current[requestedMealType] || []).length > 0
-        : hasRecommendationContentRef.current;
-      const isSelectedMealRequest = requestedMealType === selectedMealTypeRef.current;
-      const shouldShowInitialSkeleton = !hasRecommendationContentRef.current && isSelectedMealRequest;
-      const shouldShowMealSkeleton = !shouldShowInitialSkeleton && isMealScopedRequest && isSelectedMealRequest && !hasRequestedMealContent;
-      const shouldUpdateStatusForResult = () => requestedMealType === "all" || selectedMealTypeRef.current === requestedMealType;
-
-      if (shouldShowInitialSkeleton) {
-        setIsInitialLoading(true);
-      } else if (isSelectedMealRequest && hasRequestedMealContent) {
-        setIsRefreshingRecommendations(true);
-      }
-
-      setLoadingMeals((previousLoadingMeals) =>
-        requestedMealType === "all"
-          ? { breakfast: true, lunch: true, dinner: true }
-          : { ...previousLoadingMeals, [requestedMealType]: true }
-      );
-
-      setLoadingMessage(LOADING_MESSAGES[0]);
-      let messageIndex = 0;
-      let ticker: ReturnType<typeof setInterval> | null = null;
-
+    async ({
+      forceExploration = false,
+      mealType = "all",
+      explorationSeed,
+      preferencesOverride,
+    }: {
+      forceExploration?: boolean;
+      mealType?: MealType | "all";
+      explorationSeed?: string | number;
+      preferencesOverride?: MealPlanPreferences;
+    } = {}) => {
+      if (!userId || !configuredApiURL) return;
+      setLoadingRecommendations(true);
       try {
-        const apiURL = configuredApiURL;
-        if (!apiURL) throw new Error("Missing backend URL");
-
-        const cachedSnapshot = !options.forceExploration
-          ? getCachedSeedSnapshot(apiURL, userId, requestedMealType)
-          : null;
-
-        if ((shouldShowInitialSkeleton || shouldShowMealSkeleton) && cachedSnapshot?.result) {
-          applyRecommendationResult(cachedSnapshot.result, requestedMealType, {
-            updateMostConsumed: mostConsumedItemsCountRef.current === 0,
-            updateStatus: false,
-          });
-
-          if (shouldUpdateStatusForResult()) {
-            setUsingSafetyFallback(!!cachedSnapshot.result.payload?.used_safety_fallback);
-            setUsingCachedRecommendations(true);
-          }
-
-          if (shouldShowInitialSkeleton) {
-            setIsInitialLoading(false);
-          }
-          setIsRefreshingRecommendations(true);
-        }
-
-        if (shouldShowInitialSkeleton && !options.forceExploration && !options.skipPrimeCheck) {
-          await maybeAwaitPrimeWarmup(apiURL, requestId, requestedMealType);
-          if (!isMountedRef.current || latestRequestIdsRef.current[requestedMealType] !== requestId) return;
-        }
-
-        if (shouldShowInitialSkeleton) {
-          setLoadingMessage(LOADING_MESSAGES[0]);
-          ticker = setInterval(() => {
-            messageIndex = (messageIndex + 1) % LOADING_MESSAGES.length;
-            setLoadingMessage(LOADING_MESSAGES[messageIndex]);
-          }, 1400);
-        } else if (shouldShowMealSkeleton) {
-          setLoadingMessage(getMealLoadingMessage(requestedMealType));
-        }
-
-        const result = await fetchRecommendations({
-          apiURL,
-          userId,
-          mealType: requestedMealType,
-          forceExploration: !!options.forceExploration,
-          onUpdate: (update) => {
-            if (!isMountedRef.current || latestRequestIdsRef.current[requestedMealType] !== requestId) return;
-            applyRecommendationResult(update, requestedMealType, {
-              updateMostConsumed: requestedMealType === "all" || mostConsumedItemsCountRef.current === 0,
-              updateStatus: shouldUpdateStatusForResult(),
-            });
-
-            if (
-              requestedMealType !== "all" &&
-              requestedMealType === selectedMealTypeRef.current &&
-              update.source === "network" &&
-              !update.usedCachedFallback &&
-              !update.payload?.used_safety_fallback
-            ) {
-              queueBackgroundMealPrefetches(requestedMealType);
-            }
-          },
+        const payload = await fetchMealPlanRecommendations({
+          apiURL: configuredApiURL,
+          clerkId: userId,
+          date: formatLocalYYYYMMDD(selectedDate),
+          mealType: mealType === "all" ? undefined : mealType,
+          forceExploration,
+          explorationSeed,
+          preferences: preferencesOverride,
         });
-
-        if (!isMountedRef.current || latestRequestIdsRef.current[requestedMealType] !== requestId) return;
-
-        if (result.ok) {
-          applyRecommendationResult(result, requestedMealType, {
-            updateMostConsumed: requestedMealType === "all" || mostConsumedItemsCountRef.current === 0,
-            updateStatus: shouldUpdateStatusForResult(),
-          });
-
-          if (mostConsumedItemsCountRef.current === 0) {
-            void loadMostConsumedFallback();
-          }
-
-          if (
-            requestedMealType !== "all" &&
-            requestedMealType === selectedMealTypeRef.current &&
-            result.source === "network" &&
-            !result.usedCachedFallback &&
-            !result.payload?.used_safety_fallback
-          ) {
-            queueBackgroundMealPrefetches(requestedMealType);
-          }
-        } else if (shouldUpdateStatusForResult()) {
-          setUsingSafetyFallback(true);
-        }
+        if (!isMountedRef.current) return;
+        applyRecommendationPayload(payload, mealType);
+        setHasPlanStarted(true);
       } catch {
-        if (!hasRecommendationContentRef.current && shouldUpdateStatusForResult()) {
-          setUsingSafetyFallback(true);
+        if (isMountedRef.current) {
+          showCustomAlert("Meal Plan", "We could not refresh meal ideas right now. Please try again.");
         }
       } finally {
-        setIsPrimeWarmupPending(false);
-        if (ticker) {
-          clearInterval(ticker);
-        }
-        if (!isMountedRef.current || latestRequestIdsRef.current[requestedMealType] !== requestId) return;
-        setLoadingMeals((previousLoadingMeals) =>
-          requestedMealType === "all"
-            ? createEmptyMealLoadingState()
-            : { ...previousLoadingMeals, [requestedMealType]: false }
-        );
-        if (shouldShowInitialSkeleton) {
-          setIsInitialLoading(false);
-        }
-        if (isSelectedMealRequest) {
-          setIsRefreshingRecommendations(false);
-        }
+        if (isMountedRef.current) setLoadingRecommendations(false);
       }
     },
-    [applyRecommendationResult, configuredApiURL, loadMostConsumedFallback, maybeAwaitPrimeWarmup, queueBackgroundMealPrefetches, userId]
+    [applyRecommendationPayload, configuredApiURL, selectedDate, showCustomAlert, userId]
+  );
+
+  const prewarmDraftRecommendations = useCallback(
+    (nextPreferences: MealPlanPreferences) => {
+      if (!userId || !configuredApiURL) return;
+      const date = formatLocalYYYYMMDD(selectedDate);
+      const requestKey = JSON.stringify({ userId, date, preferences: nextPreferences });
+      if (prewarmRequestKeyRef.current === requestKey) return;
+      prewarmRequestKeyRef.current = requestKey;
+
+      void fetchMealPlanRecommendations({
+        apiURL: configuredApiURL,
+        clerkId: userId,
+        date,
+        preferences: nextPreferences,
+      }).catch(() => {
+        prewarmRequestKeyRef.current = "";
+      });
+    },
+    [configuredApiURL, selectedDate, userId]
   );
 
   useEffect(() => {
-    loadRecommendationsRef.current = loadRecommendations;
-  }, [loadRecommendations]);
-
-  const handleSelectMealType = useCallback((mealType: MealType) => {
-    selectedMealTypeRef.current = mealType;
-    setSelectedMealType(mealType);
-
-    if ((itemsByMeal[mealType] || []).length > 0 || loadingMeals[mealType]) {
-      return;
-    }
-
-    void loadRecommendations({ mealType, skipPrimeCheck: true });
-  }, [itemsByMeal, loadingMeals, loadRecommendations]);
-
-  useEffect(() => {
-    hasRecommendationContentRef.current = hasAnyRecommendations;
-  }, [hasAnyRecommendations]);
-
-  useEffect(() => {
-    isScreenFocusedRef.current = isScreenFocused;
-    if (!isScreenFocused) {
-      setShowSuccess(false);
-    }
-  }, [isScreenFocused]);
-
-  useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      if (backgroundPrefetchTimeoutRef.current) {
-        clearTimeout(backgroundPrefetchTimeoutRef.current);
-      }
     };
   }, []);
 
   useEffect(() => {
-    loadRecommendations({ mealType: selectedMealTypeRef.current });
-  }, [loadRecommendations]);
+    void (async () => {
+      if (!userId || !configuredApiURL) {
+        setLoadingPreferences(false);
+        return;
+      }
+      try {
+        const [preferencesPayload] = await Promise.all([
+          fetchMealPlanPreferences({ apiURL: configuredApiURL, clerkId: userId }),
+          loadMostConsumed(),
+        ]);
+        if (!isMountedRef.current) return;
+        const savedPreferences = preferencesPayload?.preferences || emptyPreferences();
+        setPreferences(clonePreferences(savedPreferences));
+        setDraftPreferences(clonePreferences(savedPreferences));
+
+        if (getActiveFilterCount(savedPreferences) > 0) {
+          setHasPlanStarted(true);
+          void loadRecommendations({ mealType: "all" });
+        }
+      } catch {
+        if (isMountedRef.current) {
+          showCustomAlert("Meal Plan", "We could not load your saved meal plan settings.");
+        }
+      } finally {
+        if (isMountedRef.current) setLoadingPreferences(false);
+      }
+    })();
+  }, [configuredApiURL, loadMostConsumed, loadRecommendations, showCustomAlert, userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -529,138 +461,327 @@ const PlanningScreen = () => {
     }, [refreshDailyProgress])
   );
 
-  // NOTE: Shuffle sends "Skipped" feedback so ML can down-rank these combos.
-  const handleShuffle = async () => {
-    if (userId && displayedItems.length > 0) {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      await Promise.all(
-        displayedItems.map((item) =>
-          sendRecommendationFeedback({
-            apiURL,
-            clerkId: userId,
-            comboId: item?.id || item?.food_id,
-            mealType: selectedMealType,
-            status: "Skipped",
-            ml_tag: item?.ml_tag,
-            explanation: item?.explanation,
-            itemTitles: Array.isArray(item?.items)
-              ? item.items.map((comboItem: any) => comboItem?.title).filter(Boolean)
-              : [item?.title].filter(Boolean),
-          })
-        )
-      );
+  useEffect(() => {
+    if (hasPlanStarted && hasAnyRecommendations) {
+      void refreshDailyProgress();
     }
-    return loadRecommendations({ forceExploration: true, mealType: selectedMealType, skipPrimeCheck: true });
+  }, [hasPlanStarted, hasAnyRecommendations, refreshDailyProgress]);
+
+  const openRefine = () => {
+    setDraftPreferences(clonePreferences(preferences));
+    setRefineStep(0);
+    setIsRefineVisible(true);
   };
 
-  // NOTE: Add button saves all combo items to the meal log.
-  const handleAddRecommendedItem = async (item: any) => {
-    if (!userId || addRequestInFlightRef.current) return;
-    addRequestInFlightRef.current = true;
-
-    try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      if (!apiURL) throw new Error("Missing backend URL");
-
-      const date = formatLocalYYYYMMDD(selectedDate);
-      const mealType = selectedMealType;
-      const comboItems = Array.isArray(item?.items) && item.items.length > 0 ? item.items : [item];
-      const payload = await addMealsBatch(
-        comboItems.map((comboItem: any) => ({
-          apiURL,
-          clerkId: userId,
-          date,
-          mealType,
-          foodName: comboItem.title || "Unknown Item",
-          calories: Number(comboItem.calories || 0),
-          protein: Number(comboItem.protein || 0),
-          carbs: Number(comboItem.carbs || 0),
-          fats: Number(comboItem.fats || 0),
-          image: comboItem.image || "",
-        }))
-      );
-
-      const totalCalories = comboItems.reduce((sum: number, comboItem: any) => sum + Number(comboItem?.calories || 0), 0);
-      if (isMountedRef.current) {
-        setConsumedCalories(
-          Math.round(Number(payload?.dailyTotalCalories || consumedCalories + totalCalories))
-        );
-        setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
-      }
-
-      void sendRecommendationFeedback({
-        apiURL,
-        clerkId: userId,
-        comboId: item?.id || item?.food_id,
-        mealType,
-        status: "Accepted",
-        ml_tag: item?.ml_tag,
-        explanation: item?.explanation,
-        itemTitles: comboItems.map((comboItem: any) => comboItem?.title).filter(Boolean),
-      }).catch((error) => console.warn("Failed to send recommendation feedback:", error));
-
-      showMealLogOutcome(payload);
-    } catch {
-      if (isPlanningScreenActive()) {
-        Alert.alert("Error", "Failed to add food item");
-      }
-    } finally {
-      addRequestInFlightRef.current = false;
-    }
-  };
-
-  const handleSkipItem = async (item: any, itemIndex: number) => {
-    if (!userId) return;
-    const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-    await sendRecommendationFeedback({
-      apiURL,
-      clerkId: userId,
-      comboId: item?.id || item?.food_id,
-      mealType: selectedMealType,
-      status: "Skipped",
-      ml_tag: item?.ml_tag,
-      explanation: item?.explanation,
-      itemTitles: Array.isArray(item?.items)
-        ? item.items.map((comboItem: any) => comboItem?.title).filter(Boolean)
-        : [item?.title].filter(Boolean),
+  const toggleDraftAllergen = (allergen: string) => {
+    setDraftPreferences((current) => {
+      const exists = current.allergens.includes(allergen);
+      return {
+        ...current,
+        allergens: exists
+          ? current.allergens.filter((item) => item !== allergen)
+          : [...current.allergens, allergen],
+      };
     });
+  };
 
-    setItemsByMeal((prev) => ({
-      ...prev,
-      [selectedMealType]: prev[selectedMealType].filter((_item, index) => index !== itemIndex),
+  const toggleDraftDiet = (diet: string) => {
+    setDraftPreferences((current) => ({
+      ...current,
+      diets: current.diets.includes(diet) ? [] : [diet],
     }));
   };
 
-  const handleLoveItem = async (item: any) => {
-    if (!userId) return;
-    const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-    await sendRecommendationFeedback({
-      apiURL,
-      clerkId: userId,
-      comboId: item?.id || item?.food_id,
-      mealType: selectedMealType,
-      status: "Loved",
-      ml_tag: item?.ml_tag,
-      explanation: item?.explanation,
-      itemTitles: Array.isArray(item?.items)
-        ? item.items.map((comboItem: any) => comboItem?.title).filter(Boolean)
-        : [item?.title].filter(Boolean),
+  const updateDraftNutrient = (key: string, side: "min" | "max", value: string) => {
+    setDraftPreferences((current) => {
+      const nextLimits = { ...(current.nutrientLimits || {}) };
+      const nextValue = { ...(nextLimits[key] || {}) };
+      const parsed = value.trim() === "" ? undefined : Number(value);
+
+      if (parsed === undefined || !Number.isFinite(parsed)) {
+        delete nextValue[side];
+      } else {
+        nextValue[side] = Math.max(0, parsed);
+      }
+
+      if (nextValue.min === undefined && nextValue.max === undefined) {
+        delete nextLimits[key];
+      } else {
+        nextLimits[key] = nextValue;
+      }
+
+      return {
+        ...current,
+        nutrientLimits: nextLimits,
+      };
     });
+  };
+
+  const applyRefinePlan = async () => {
+    if (!userId || !configuredApiURL) return;
+    try {
+      const payload = await saveMealPlanPreferences({
+        apiURL: configuredApiURL,
+        clerkId: userId,
+        preferences: draftPreferences,
+      });
+      const savedPreferences = payload?.preferences || draftPreferences;
+      setPreferences(clonePreferences(savedPreferences));
+      setIsRefineVisible(false);
+      setSelectedItemKeys({});
+      setHasPlanStarted(true);
+      await loadRecommendations({ mealType: "all", preferencesOverride: savedPreferences });
+    } catch {
+      showCustomAlert("Meal Plan", "We could not save your meal plan settings.");
+    }
+  };
+
+  const handleUseDefaults = async () => {
+    if (!userId || !configuredApiURL) return;
+    const defaults = emptyPreferences();
+    try {
+      await saveMealPlanPreferences({
+        apiURL: configuredApiURL,
+        clerkId: userId,
+        preferences: defaults,
+      });
+      setPreferences(defaults);
+      setDraftPreferences(defaults);
+    } catch {
+      // Defaults can still be used locally even if persistence fails.
+    }
+    setHasPlanStarted(true);
+    await loadRecommendations({ forceExploration: true, mealType: "all" });
+  };
+
+  const handleSelectMealType = (mealType: MealType) => {
+    setSelectedMealType(mealType);
+    if (hasPlanStarted && (itemsByMeal[mealType] || []).length === 0 && !loadingRecommendations) {
+      void loadRecommendations({ mealType });
+    }
+  };
+
+  const handleShuffle = async () => {
+    const seed = Date.now() + shuffleSeedRef.current + 1;
+    shuffleSeedRef.current += 1;
+    setSelectedItemKeys({});
+    setItemsByMeal((current) => ({
+      ...current,
+      [selectedMealType]: shuffleItems(current[selectedMealType] || [], seed),
+    }));
+
+    if (configuredApiURL && userId && displayedItems.length > 0) {
+      void sendMealPlanEvent({
+        apiURL: configuredApiURL,
+        clerkId: userId,
+        eventType: "shuffled",
+        mealType: selectedMealType,
+        items: displayedItems,
+        preferences,
+      });
+    }
+    await loadRecommendations({ forceExploration: true, mealType: selectedMealType, explorationSeed: seed });
+  };
+
+  const handleSkipItem = (item: any, index: number) => {
+    const key = createItemKey(item);
+    setItemsByMeal((current) => ({
+      ...current,
+      [selectedMealType]: current[selectedMealType].filter((_item, itemIndex) => itemIndex !== index),
+    }));
+    setSelectedItemKeys((current) => {
+      if (!key || !current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    void sendMealPlanEvent({
+      apiURL: configuredApiURL,
+      clerkId: userId,
+      eventType: "skipped",
+      mealType: selectedMealType,
+      item,
+      preferences,
+    });
+  };
+
+  const handleLoveItem = async (item: any) => {
+    if (!userId || !configuredApiURL) {
+      showCustomAlert("Error", "You must be logged in to save favorites.");
+      return;
+    }
+
+    const key = createItemKey(item);
+    if (!key || favoriteLoadingKey === key) return;
+
+    setFavoriteLoadingKey(key);
+    try {
+      const response = await fetch(`${configuredApiURL}/api/favorites/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clerkId: userId,
+          item: {
+            id: getExternalId(item),
+            externalId: getExternalId(item),
+            title: item.title || item.food_name || "Unknown dish",
+            image: item.image || "",
+            calories: toNumber(item.calories),
+            protein: toNumber(item.protein),
+            carbs: toNumber(item.carbs),
+            fats: toNumber(item.fats),
+            grams: toNumber(item.grams || item.metric_serving_amount || 100),
+            time: item.time || "",
+            servings: item.servings || 1,
+          },
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Could not update favorite");
+
+      setFavoriteItemKeys((current) => ({
+        ...current,
+        [key]: !!payload?.isFavorite,
+      }));
+      markFavoritesDirty(userId);
+
+      if (payload?.isFavorite) {
+        showCustomAlert("Success!", "Dish saved to your favorite foods.", undefined, {
+          confirmText: "Confirm",
+          variant: "success",
+        });
+      } else {
+        showCustomAlert("Favorites", "Dish removed from your favorite foods.");
+      }
+    } catch {
+      showCustomAlert("Error", "Could not update this favorite food.");
+    } finally {
+      setFavoriteLoadingKey(null);
+    }
   };
 
   const goToDetail = (item: any) => {
     router.push({
       pathname: "/(tabs)/meal/comboDetail",
-      params: { itemData: JSON.stringify(item), selectedDate: formatLocalYYYYMMDD(selectedDate) },
+      params: {
+        itemData: JSON.stringify(item),
+        selectedDate: formatLocalYYYYMMDD(selectedDate),
+      },
     });
   };
 
-  const handleAddManualFood = async (foodItem: any) => {
-    if (!userId) return;
+  const showMealLogOutcome = (payload: any, options: { successModal?: boolean } = {}) => {
+    if (payload?.exceededLimit) {
+      showCustomAlert("Calorie Target Exceeded", "Food added, but you crossed your daily calorie goal.");
+    } else if (payload?.reachedTarget) {
+      showCustomAlert("Calorie Target Reached", "Great job! You reached your daily calorie target.");
+    } else if (options.successModal) {
+      setShowSuccessModal(true);
+    } else {
+      showCustomAlert("Meal Added", "Meal added successfully.");
+    }
+  };
+
+  const handlePickItem = async (item: any) => {
+    if (!userId || !configuredApiURL || addRequestInFlightRef.current) return;
+    const itemKey = createItemKey(item);
+    addRequestInFlightRef.current = true;
+    setPickingItemKey(itemKey || null);
+
     try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
       const date = formatLocalYYYYMMDD(selectedDate);
-      const response = await fetch(`${apiURL}/api/meals/add`, {
+      const payload = await addMealsBatch([
+        {
+          apiURL: configuredApiURL,
+          clerkId: userId,
+          date,
+          mealType: selectedMealType,
+          foodName: item.title || item.food_name || "Unknown Item",
+          calories: toNumber(item.calories),
+          protein: toNumber(item.protein),
+          carbs: toNumber(item.carbs),
+          fats: toNumber(item.fats),
+          image: item.image || "",
+          externalId: getExternalId(item),
+          source: item.source || item.type || "",
+          servingId: item.serving_id || "",
+          servingDescription: item.serving_description || "",
+          nutrients: buildNutrientsSnapshot(item),
+        },
+      ]);
+
+      markMealsSummaryDirty(userId, date);
+      setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
+      setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
+      setSelectedItemKeys({});
+      void sendMealPlanEvent({
+        apiURL: configuredApiURL,
+        clerkId: userId,
+        eventType: "accepted",
+        mealType: selectedMealType,
+        item,
+        preferences,
+      });
+      showMealLogOutcome(payload, { successModal: true });
+    } catch {
+      showCustomAlert("Error", "Failed to add this dish.");
+    } finally {
+      addRequestInFlightRef.current = false;
+      setPickingItemKey(null);
+    }
+  };
+
+  const handleAddSelectedItems = async () => {
+    if (!userId || !configuredApiURL || selectedItems.length === 0 || addRequestInFlightRef.current) return;
+    addRequestInFlightRef.current = true;
+    try {
+      const date = formatLocalYYYYMMDD(selectedDate);
+      const payload = await addMealsBatch(
+        selectedItems.map((item: any) => ({
+          apiURL: configuredApiURL,
+          clerkId: userId,
+          date,
+          mealType: selectedMealType,
+          foodName: item.title || item.food_name || "Unknown Item",
+          calories: toNumber(item.calories),
+          protein: toNumber(item.protein),
+          carbs: toNumber(item.carbs),
+          fats: toNumber(item.fats),
+          image: item.image || "",
+          externalId: getExternalId(item),
+          source: item.source || item.type || "",
+          servingId: item.serving_id || "",
+          servingDescription: item.serving_description || "",
+          nutrients: buildNutrientsSnapshot(item),
+        }))
+      );
+
+      markMealsSummaryDirty(userId, date);
+      setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
+      setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
+      setSelectedItemKeys({});
+      void sendMealPlanEvent({
+        apiURL: configuredApiURL,
+        clerkId: userId,
+        eventType: "accepted",
+        mealType: selectedMealType,
+        items: selectedItems,
+        preferences,
+      });
+      showMealLogOutcome(payload);
+    } catch {
+      showCustomAlert("Error", "Failed to add selected dishes.");
+    } finally {
+      addRequestInFlightRef.current = false;
+    }
+  };
+
+  const handleAddManualFood = async (foodItem: any) => {
+    if (!userId || !configuredApiURL) return;
+    try {
+      const date = formatLocalYYYYMMDD(selectedDate);
+      const response = await fetch(`${configuredApiURL}/api/meals/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -673,101 +794,72 @@ const PlanningScreen = () => {
           carbs: foodItem.carbs,
           fats: foodItem.fats,
           image: foodItem.image || "",
+          externalId: getExternalId(foodItem),
+          source: foodItem.source || foodItem.type || "",
+          servingId: foodItem.serving_id || "",
+          servingDescription: foodItem.serving_description || "",
+          nutrients: buildNutrientsSnapshot(foodItem),
         }),
       });
 
-      if (!response.ok) throw new Error("Could not save food");
-      const payload = await response.json();
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Could not save food");
       markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories + Number(foodItem?.calories || 0))));
       setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
-
       setIsModalVisible(false);
-      
-      setTimeout(() => {
-        setShowSuccess(true);
-      }, 500);
-
+      showMealLogOutcome(payload);
     } catch {
-      Alert.alert("Error", "Network error.");
+      showCustomAlert("Error", "Network error while adding custom food.");
     }
   };
 
   const handleAddRecentMeals = async (mealsToAdd: any[]) => {
-    if (!userId || mealsToAdd.length === 0 || addRequestInFlightRef.current) return;
+    if (!userId || !configuredApiURL || mealsToAdd.length === 0 || addRequestInFlightRef.current) return;
     addRequestInFlightRef.current = true;
-    
     setIsRecentModalVisible(false);
-    
     try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      if (!apiURL) throw new Error("Missing backend URL");
-
       const date = formatLocalYYYYMMDD(selectedDate);
-      const mealType = selectedMealType;
       const payload = await addMealsBatch(
         mealsToAdd.map((meal) => ({
-          apiURL,
+          apiURL: configuredApiURL,
           clerkId: userId,
           date,
-          mealType,
+          mealType: selectedMealType,
           foodName: meal.foodName || "Unknown Item",
-          calories: Number(meal.calories || 0),
-          protein: Number(meal.protein || 0),
-          carbs: Number(meal.carbs || 0),
-          fats: Number(meal.fats || 0),
+          calories: toNumber(meal.calories),
+          protein: toNumber(meal.protein),
+          carbs: toNumber(meal.carbs),
+          fats: toNumber(meal.fats),
           image: meal.image || "",
+          externalId: meal.externalId || "",
+          source: meal.source || "",
+          servingId: meal.servingId || "",
+          servingDescription: meal.servingDescription || "",
+          nutrients: meal.nutrients || {},
         }))
       );
 
       markMealsSummaryDirty(userId, date);
-      const totalCalories = mealsToAdd.reduce((sum: number, meal: any) => sum + Number(meal?.calories || 0), 0);
-      if (isMountedRef.current) {
-        setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories + totalCalories)));
-        setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
-      }
-
+      setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
+      setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
       showMealLogOutcome(payload);
     } catch {
-      if (isPlanningScreenActive()) {
-        showCustomAlert("Error", "Network error while adding recent meals.");
-      }
+      showCustomAlert("Error", "Network error while adding recent meals.");
     } finally {
       addRequestInFlightRef.current = false;
     }
   };
 
-  const progressRatio = useMemo(() => {
-    if (dailyCalorieTarget <= 0) return 0;
-    return Math.min(1, consumedCalories / dailyCalorieTarget);
-  }, [consumedCalories, dailyCalorieTarget]);
-
-  // Keep planning status copy in one place so only one user-facing message is shown at a time.
-  const isShowingInitialSkeleton = isInitialLoading && !hasAnyRecommendations;
-  const isShowingMealSkeleton = !isShowingInitialSkeleton && isSelectedMealLoading && displayedItems.length === 0;
-  const activeLoadingMessage = isShowingInitialSkeleton
-    ? (isPrimeWarmupPending ? "Getting your meal plan ready..." : loadingMessage)
-    : isShowingMealSkeleton
-      ? getMealLoadingMessage(selectedMealType)
-      : null;
-  const topStatusMessage = !isShowingInitialSkeleton && !isShowingMealSkeleton
-    ? (usingSafetyFallback && !isInitialLoading
-        ? "We couldn't refresh fresh meal ideas right now, so we're showing reliable suggestions instead."
-        : (isRefreshingRecommendations || (usingCachedRecommendations && hasAnyRecommendations))
-          ? "Updating your meal ideas..."
-          : null)
-    : null;
-  const isFallbackStatusMessage = topStatusMessage?.includes("reliable suggestions") ?? false;
-
-  const dates = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    return d;
+  const dates = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() + index);
+    return date;
   });
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <ScrollView className="px-5" showsVerticalScrollIndicator={false}>
+      <ScrollView className="px-5" contentContainerStyle={{ paddingBottom: selectedItems.length > 0 ? 116 : 24 }} showsVerticalScrollIndicator={false}>
         <View className="flex-row justify-between items-center py-4 mb-4">
           <TouchableOpacity onPress={() => router.push("/(tabs)/meal")} className="p-2">
             <Ionicons name="chevron-back" size={28} color="black" />
@@ -796,31 +888,6 @@ const PlanningScreen = () => {
           })}
         </View>
 
-        <View className="flex-row justify-between mb-5">
-          {MEAL_TYPES.map((type) => {
-            const isMealSelected = selectedMealType === type;
-            const isMealLoading = loadingMeals[type];
-            const hasMealContent = (itemsByMeal[type] || []).length > 0;
-
-            return (
-              <TouchableOpacity
-                key={type}
-                onPress={() => handleSelectMealType(type)}
-                className={`flex-1 py-3 rounded-xl mr-2 items-center ${isMealSelected ? "bg-[#FFCAB0]" : "bg-gray-50"}`}
-              >
-                <View className="flex-row items-center">
-                  <Text className={`font-bold capitalize ${isMealSelected ? "text-white" : "text-gray-900"}`}>{type}</Text>
-                  {isMealLoading ? (
-                    <ActivityIndicator size="small" color={isMealSelected ? "#FFFFFF" : "#007BFF"} className="ml-2" />
-                  ) : hasMealContent && !isMealSelected ? (
-                    <View className="ml-2 w-2 h-2 rounded-full bg-emerald-500" />
-                  ) : null}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
         <View className="bg-gray-50 rounded-2xl p-4 mb-5 border border-gray-200">
           <Text className="text-gray-700 font-bold mb-2">Calorie target: {consumedCalories}/{dailyCalorieTarget} kcal</Text>
           <View className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -828,102 +895,387 @@ const PlanningScreen = () => {
           </View>
         </View>
 
-        <View className="flex-row justify-between items-center mb-6">
-          <Text className="text-lg font-bold">Most consumed foods</Text>
-          <TouchableOpacity onPress={() => setIsModalVisible(true)} className="flex-row items-center">
-            <Ionicons name="add-circle-outline" size={18} color="#007BFF" />
-            <Text className="text-primary font-bold ml-1">Add custom food</Text>
+        {hasPlanStarted && (
+          <View className="mb-5">
+            <TouchableOpacity onPress={openRefine} className="self-start flex-row items-center bg-primarySoft px-3 py-2 rounded-full border border-blue-100">
+              <Ionicons name="options-outline" size={16} color="#007BFF" />
+              <Text className="text-primary font-bold ml-2">Refine plan</Text>
+              {activeFilterCount > 0 && (
+                <View className="ml-2 min-w-6 h-6 rounded-full bg-secondary items-center justify-center px-2">
+                  <Text className="text-white text-xs font-bold">{activeFilterCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            {activeFilterCount > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mt-3">
+                {[...preferences.allergens.map((item) => `${item}-free`), ...preferences.diets, ...Object.entries(preferences.nutrientLimits || {}).map(([key, value]) => formatNutrientChip(key, value))].map((chip) => (
+                  <View key={chip} className="mr-2 bg-gray-100 px-3 py-2 rounded-full">
+                    <Text className="text-xs font-bold text-gray-700">{chip}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        )}
+
+        <View className="flex-row justify-between items-center mb-4">
+          <Text className="text-2xl font-bold text-black">Most consumed foods</Text>
+          <TouchableOpacity
+            onPress={() => setIsAddMenuVisible(true)}
+            className="w-9 h-9 rounded-full bg-primary items-center justify-center shadow-lg"
+            style={{
+              shadowColor: "#007BFF",
+              shadowOpacity: 0.28,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 4 },
+              elevation: 5,
+            }}
+          >
+            <Ionicons name="add" size={30} color="white" />
           </TouchableOpacity>
         </View>
 
         <MostConsumedFoodsStrip items={mostConsumedItems} onPressItem={goToDetail} />
 
-        <View className="flex-row justify-between items-center mb-6">
-          <View className="flex-row items-center">
-            <Text className="text-xl font-bold">Recommended</Text>
-            <InfoButton onPress={() => setIsRecommendationInfoVisible(true)} />
-          </View>
-          <TouchableOpacity
-            onPress={() => setIsRecentModalVisible(true)}
-            className="flex-row items-center bg-gray-50 px-3 py-2 rounded-full border border-gray-200"
-          >
-            <Ionicons name="time-outline" size={15} color="#007BFF" />
-            <Text className="text-primary font-bold ml-2">Recent Meals</Text>
-          </TouchableOpacity>
-        </View>
-
-        {topStatusMessage && (
-          <View
-            className={`flex-row items-center rounded-xl px-3 py-2 mb-4 border ${
-              isFallbackStatusMessage
-                ? "bg-amber-50 border-amber-200"
-                : "bg-blue-50 border-blue-200"
-            }`}
-          >
-            {!isFallbackStatusMessage && <ActivityIndicator size="small" color="#007BFF" />}
-            <Text
-              className={`text-xs font-sans font-semibold ${
-                isFallbackStatusMessage
-                  ? "text-amber-700"
-                  : "text-blue-700"
-              } ${!isFallbackStatusMessage ? "ml-2" : ""}`}
-            >
-              {topStatusMessage}
+        {!hasPlanStarted && !hasAnyRecommendations ? (
+          <View className="mt-10 mb-8">
+            <Text className="text-2xl font-bold text-gray-900 mb-2">Build your meal plan</Text>
+            <Text className="text-gray-500 leading-6 mb-5">
+              Tell us about your allergies, diet, and nutrient targets. We will suggest dishes for each meal.
             </Text>
-          </View>
-        )}
-
-        {isShowingInitialSkeleton ? (
-          <View className="mt-4 mb-10">
-            <Text className="text-gray-500 font-sans mb-4 text-center">{activeLoadingMessage}</Text>
-            <RecommendationSkeletonList count={3} />
-          </View>
-        ) : isShowingMealSkeleton ? (
-          <View className="mt-4 mb-10">
-            <Text className="text-gray-500 font-sans mb-4 text-center">{activeLoadingMessage}</Text>
-            <RecommendationSkeletonList count={2} />
+            <TouchableOpacity onPress={openRefine} className="bg-primary py-4 rounded-2xl items-center mb-3">
+              <Text className="text-white font-bold text-base">Refine plan</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleUseDefaults} className="py-3 items-center">
+              <Text className="text-primary font-bold">or skip and use defaults</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <>
+            <View className="flex-row justify-between items-center mb-5">
+              <View className="flex-row items-center">
+                <Text className="text-xl font-bold">Recommended</Text>
+                <InfoButton onPress={() => setIsRecommendationInfoVisible(true)} />
+              </View>
+              {loadingRecommendations && <ActivityIndicator size="small" color="#007BFF" />}
+            </View>
+
+            <View className="flex-row justify-between mb-5">
+              {MEAL_TYPES.map((mealType) => {
+                const isSelected = selectedMealType === mealType;
+                const count = (itemsByMeal[mealType] || []).length;
+                return (
+                  <TouchableOpacity
+                    key={mealType}
+                    onPress={() => handleSelectMealType(mealType)}
+                    className={`flex-1 py-3 rounded-xl mr-2 items-center ${isSelected ? "bg-secondary" : "bg-gray-50"}`}
+                  >
+                    <Text className={`font-bold capitalize ${isSelected ? "text-white" : "text-gray-900"}`}>{mealType}</Text>
+                    {count > 0 && <Text className={`text-[11px] mt-1 ${isSelected ? "text-white" : "text-gray-400"}`}>{count} dishes</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
             <View className="flex-row items-center justify-between mb-3">
-              <Text className="text-lg font-bold capitalize">{selectedMealType}</Text>
+              <Text className="text-lg font-bold capitalize">
+                {selectedMealType}
+                {selectedItems.length > 0 ? ` ${selectedItems.length} picked` : ""}
+              </Text>
               <TouchableOpacity onPress={handleShuffle} className="px-3 py-2 rounded-full bg-blue-50 border border-blue-200">
                 <Text className="text-primary font-bold">Shuffle</Text>
               </TouchableOpacity>
             </View>
 
-            {displayedItems.map((item, index) => (
-              <ComboCard
-                key={`${item.id || item.food_id}-${index}`}
-                item={item}
-                onAdd={() => handleAddRecommendedItem(item)}
-                onSkip={() => handleSkipItem(item, index)}
-                onPress={() => goToDetail(item)}
-                onLove={() => handleLoveItem(item)}
-              />
-            ))}
+            {loadingRecommendations && displayedItems.length === 0 ? (
+              <View className="py-10 items-center">
+                <ActivityIndicator size="large" color="#007BFF" />
+                <Text className="text-gray-500 mt-3">Finding meal ideas...</Text>
+              </View>
+            ) : (
+              displayedItems.map((item, index) => {
+                const key = createItemKey(item);
+                return (
+                  <DishCard
+                    key={`${key}-${index}`}
+                    item={item}
+                    isSelected={!!selectedItemKeys[key]}
+                    isFavorite={!!favoriteItemKeys[key]}
+                    isFavoriteLoading={favoriteLoadingKey === key}
+                    onPress={() => goToDetail(item)}
+                    onToggleSelect={() => handlePickItem(item)}
+                    onSkip={() => handleSkipItem(item, index)}
+                    onLove={() => handleLoveItem(item)}
+                    isAdding={pickingItemKey === key}
+                  />
+                );
+              })
+            )}
 
-            {!isInitialLoading && displayedItems.length === 0 && (
+            {!loadingRecommendations && displayedItems.length === 0 && (
               <Text className="text-center text-gray-400 mt-10 mb-10">No recommendations available.</Text>
             )}
           </>
         )}
       </ScrollView>
 
-      {/*
-        By adding {boolean && <Modal />}, React Native physically destroys the modal 
-        from the view hierarchy when it closes, ensuring no invisible layers block your touches! 
-      */}
-      {showSuccess && (
-        <SuccessModal visible={showSuccess} message="Meal added successfully!" onClose={() => setShowSuccess(false)} />
+      {selectedItems.length > 0 && (
+        <View className="absolute left-0 right-0 bottom-0 bg-white border-t border-gray-100 px-5 pt-3 pb-6">
+          <TouchableOpacity onPress={handleAddSelectedItems} className="bg-primary py-4 rounded-2xl items-center">
+            <Text className="text-white font-bold text-base">Add {selectedItems.length} to meal log</Text>
+          </TouchableOpacity>
+          <Text className="text-center text-gray-400 text-xs mt-2">You can edit each in the log</Text>
+        </View>
       )}
-      
+
+      <Modal transparent visible={isAddMenuVisible} animationType="fade" onRequestClose={() => setIsAddMenuVisible(false)}>
+        <View className="flex-1 bg-black/40 justify-end">
+          <View className="bg-white rounded-t-3xl p-5 pb-8">
+            <TouchableOpacity
+              onPress={() => {
+                setIsAddMenuVisible(false);
+                setIsModalVisible(true);
+              }}
+              className="flex-row items-center py-4 border-b border-gray-100"
+            >
+              <View className="w-12 h-12 rounded-xl bg-primarySoft items-center justify-center">
+                <Ionicons name="add-circle-outline" size={24} color="#007BFF" />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="font-bold text-gray-900 text-lg">Add custom food</Text>
+                <Text className="text-gray-500 text-xs mt-1">Enter your own item with macros</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={24} color="#9CA3AF" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                setIsAddMenuVisible(false);
+                setIsRecentModalVisible(true);
+              }}
+              className="flex-row items-center py-4 border-b border-gray-100"
+            >
+              <View className="w-12 h-12 rounded-xl bg-primarySoft items-center justify-center">
+                <Ionicons name="time-outline" size={24} color="#007BFF" />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="font-bold text-gray-900 text-lg">From recent meals</Text>
+                <Text className="text-gray-500 text-xs mt-1">Re-log something you have had before</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={24} color="#9CA3AF" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setIsAddMenuVisible(false)} className="py-4 items-center">
+              <Text className="text-gray-400 font-bold">Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal transparent visible={isRefineVisible} animationType="slide" onRequestClose={() => setIsRefineVisible(false)}>
+        <View className="flex-1 bg-black/40 justify-end">
+          <View className="bg-white rounded-t-[28px] overflow-hidden" style={{ height: "88%" }}>
+            <View className="items-center pt-2">
+              <View className="w-10 h-1 rounded-full bg-gray-300" />
+            </View>
+
+            <View className="px-4 pt-5 pb-3">
+              <View className="flex-row justify-between items-center mb-5">
+                <View className="flex-row items-center">
+                  {refineStep > 0 && (
+                    <TouchableOpacity
+                      onPress={() => setRefineStep((step) => Math.max(0, step - 1))}
+                      className="w-9 h-9 rounded-full bg-gray-100 items-center justify-center mr-3"
+                    >
+                      <Ionicons name="chevron-back" size={20} color="#0F172A" />
+                    </TouchableOpacity>
+                  )}
+                  <View className="flex-row items-center">
+                    {[0, 1, 2].map((step) => (
+                      <View
+                        key={step}
+                        className={`mr-1.5 rounded-full ${step <= refineStep ? "bg-primary" : "bg-gray-200"}`}
+                        style={{ width: step === refineStep ? 22 : 6, height: 6 }}
+                      />
+                    ))}
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => setIsRefineVisible(false)} className="w-10 h-10 rounded-full bg-gray-100 items-center justify-center">
+                  <Ionicons name="close" size={22} color="#0F172A" />
+                </TouchableOpacity>
+              </View>
+
+              <Text className="text-xs text-secondary font-bold mb-2">STEP {refineStep + 1} OF 3</Text>
+              <Text className="text-2xl font-bold text-gray-950">
+                {refineStep === 0 ? "Any allergies?" : refineStep === 1 ? "Diet preference" : "Nutrient limits"}
+              </Text>
+              <Text className="text-gray-500 mt-2 leading-5">
+                {refineStep === 0
+                  ? "We'll exclude any food containing these from your plan."
+                  : refineStep === 1
+                    ? "Pick one if it matches how you eat. You can change this any time."
+                    : "Choose minimum and maximum values for a nutrient per serving. For individual foods, values default to a 100 g serving."}
+              </Text>
+            </View>
+
+            <ScrollView
+              className="px-4 flex-1"
+              contentContainerStyle={{ paddingBottom: 12 }}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {refineStep === 0 && (
+                <View className="flex-row flex-wrap justify-between pt-1">
+                  {ALLERGEN_OPTIONS.map((allergen) => {
+                    const selected = draftPreferences.allergens.includes(allergen);
+                    return (
+                      <TouchableOpacity
+                        key={allergen}
+                        onPress={() => toggleDraftAllergen(allergen)}
+                        className={`mb-2.5 rounded-2xl border px-2.5 py-2.5 flex-row items-center justify-between ${selected ? "bg-blue-50 border-primary" : "bg-gray-50 border-gray-100"}`}
+                        style={{ width: "48%" }}
+                      >
+                        <View className="flex-row items-center flex-1">
+                          <View className={`w-6 h-6 rounded-full border items-center justify-center mr-2 ${selected ? "bg-primary border-primary" : "bg-white border-gray-300"}`}>
+                            {selected && <Ionicons name="checkmark" size={15} color="white" />}
+                          </View>
+                          <Text className={`font-bold text-sm flex-1 ${selected ? "text-primary" : "text-slate-700"}`} numberOfLines={1}>
+                            {allergen}-free
+                          </Text>
+                        </View>
+                        <Ionicons name="information-circle-outline" size={15} color="#94A3B8" />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
+              {refineStep === 1 && (
+                <View className="pt-2">
+                  {DIET_DETAILS.map((diet) => {
+                    const selected = draftPreferences.diets.includes(diet.value);
+                    return (
+                      <TouchableOpacity
+                        key={diet.value}
+                        onPress={() => toggleDraftDiet(diet.value)}
+                        className={`p-3.5 rounded-2xl border mb-3 flex-row items-center ${selected ? "bg-blue-50 border-primary" : "bg-white border-gray-200"}`}
+                      >
+                        <View className={`w-12 h-12 rounded-xl items-center justify-center mr-3 ${selected ? "bg-primary" : diet.iconBgClass}`}>
+                          <Ionicons name={diet.icon as any} size={23} color={selected ? "white" : diet.iconColor} />
+                        </View>
+                        <View className="flex-1">
+                          <Text className="font-bold text-gray-900 text-base">{diet.value}</Text>
+                          <Text className="text-gray-500 text-xs mt-1">{diet.description}</Text>
+                        </View>
+                        <View className={`w-7 h-7 rounded-full border items-center justify-center ${selected ? "bg-primary border-primary" : "bg-white border-gray-300"}`}>
+                          {selected && <Ionicons name="checkmark" size={16} color="white" />}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+
+                  <TouchableOpacity
+                    onPress={() => setDraftPreferences((current) => ({ ...current, diets: [] }))}
+                    className={`p-3.5 rounded-2xl border mb-3 flex-row items-center ${draftPreferences.diets.length === 0 ? "bg-blue-50 border-primary" : "bg-white border-gray-200"}`}
+                    style={draftPreferences.diets.length === 0 ? undefined : { borderStyle: "dashed" }}
+                  >
+                    <View className={`w-12 h-12 rounded-xl items-center justify-center mr-3 ${draftPreferences.diets.length === 0 ? "bg-primary" : "bg-gray-100"}`}>
+                      <Ionicons name="close" size={22} color={draftPreferences.diets.length === 0 ? "white" : "#64748B"} />
+                    </View>
+                    <View className="flex-1">
+                      <Text className={`font-bold text-base ${draftPreferences.diets.length === 0 ? "text-gray-900" : "text-gray-500"}`}>No preference</Text>
+                      <Text className="text-gray-500 text-xs mt-1">Show me everything</Text>
+                    </View>
+                    {draftPreferences.diets.length === 0 && (
+                      <View className="w-7 h-7 rounded-full bg-primary items-center justify-center">
+                        <Ionicons name="checkmark" size={16} color="white" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {refineStep === 2 && (
+                <View className="pt-2">
+                  {NUTRIENT_OPTIONS.map((nutrient) => {
+                    const limit = draftPreferences.nutrientLimits[nutrient.key] || {};
+                    return (
+                      <View key={nutrient.key} className="mb-3 p-3 rounded-2xl bg-gray-50 border border-gray-100">
+                        <Text className="font-bold text-gray-800 mb-2">{nutrient.label} ({nutrient.unit})</Text>
+                        <View className="flex-row gap-3">
+                          <View className="flex-1">
+                            <Text className="text-[11px] text-gray-400 mb-1">MIN</Text>
+                            <TextInput
+                              value={limit.min === undefined ? "" : String(limit.min)}
+                              onChangeText={(value) => updateDraftNutrient(nutrient.key, "min", value)}
+                              keyboardType="numeric"
+                              placeholder="No min"
+                              className="bg-white border border-gray-200 rounded-xl px-3 py-2"
+                            />
+                          </View>
+                          <View className="flex-1">
+                            <Text className="text-[11px] text-gray-400 mb-1">MAX</Text>
+                            <TextInput
+                              value={limit.max === undefined ? "" : String(limit.max)}
+                              onChangeText={(value) => updateDraftNutrient(nutrient.key, "max", value)}
+                              keyboardType="numeric"
+                              placeholder="No max"
+                              className="bg-white border border-gray-200 rounded-xl px-3 py-2"
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </ScrollView>
+
+            <View className="border-t border-gray-100 px-4 pt-3 pb-6 flex-row items-center gap-3">
+              <TouchableOpacity
+                onPress={() => {
+                  if (refineStep === 0) {
+                    setDraftPreferences((current) => ({ ...current, allergens: [] }));
+                    return;
+                  }
+                  setRefineStep((step) => Math.max(0, step - 1));
+                }}
+                className="w-20 py-4 rounded-2xl bg-gray-100 items-center"
+              >
+                <Text className="font-bold text-gray-700">{refineStep === 0 ? "None" : "Back"}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  if (refineStep < 2) {
+                    prewarmDraftRecommendations(draftPreferences);
+                    setRefineStep((step) => step + 1);
+                  } else {
+                    void applyRefinePlan();
+                  }
+                }}
+                className="flex-1 py-4 rounded-2xl bg-primary items-center justify-center flex-row shadow-md"
+                style={{
+                  shadowColor: "#007BFF",
+                  shadowOpacity: 0.2,
+                  shadowRadius: 8,
+                  shadowOffset: { width: 0, height: 3 },
+                  elevation: 4,
+                }}
+              >
+                <Text className="font-bold text-white">{refineStep < 2 ? "Continue" : "Apply"}</Text>
+                {refineStepSelectionCount > 0 && (
+                  <View className="ml-3 min-w-6 h-6 rounded-full bg-white/20 items-center justify-center px-2">
+                    <Text className="text-white text-xs font-bold">{refineStepSelectionCount}</Text>
+                  </View>
+                )}
+                <Ionicons name="chevron-forward" size={18} color="white" style={{ marginLeft: 8 }} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {isModalVisible && (
         <AddFoodModal visible={isModalVisible} onClose={() => setIsModalVisible(false)} mealType={selectedMealType} onAddFood={handleAddManualFood} />
-      )}
-      
-      {alertVisible && (
-        <CustomAlert visible={alertVisible} title={alertConfig.title} message={alertConfig.message} onConfirm={alertConfig.onConfirm} onCancel={undefined} />
       )}
 
       <FatSecretInfoModal
@@ -933,9 +1285,33 @@ const PlanningScreen = () => {
         note="Note: Food images are symbolic illustrations and may not match the exact dish. Some dishes may also be displayed without images while we improve image coverage."
         onClose={() => setIsRecommendationInfoVisible(false)}
       />
-      
+
       {isRecentModalVisible && (
         <RecentMealsModal visible={isRecentModalVisible} onClose={() => setIsRecentModalVisible(false)} onAddSelected={handleAddRecentMeals} />
+      )}
+
+      {alertVisible && (
+        <CustomAlert
+          visible={alertVisible}
+          title={alertConfig.title}
+          message={alertConfig.message}
+          confirmText={alertConfig.confirmText}
+          variant={alertConfig.variant}
+          onConfirm={alertConfig.onConfirm}
+          onCancel={undefined}
+        />
+      )}
+
+      <SuccessModal
+        visible={showSuccessModal}
+        message="Meal added successfully!"
+        onClose={() => setShowSuccessModal(false)}
+      />
+
+      {loadingPreferences && (
+        <View className="absolute inset-0 bg-white/60 items-center justify-center">
+          <ActivityIndicator size="large" color="#007BFF" />
+        </View>
       )}
     </SafeAreaView>
   );

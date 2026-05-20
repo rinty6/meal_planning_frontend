@@ -337,6 +337,25 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     latestSearchRequestRef.current += 1;
   };
 
+  const formatMacroValue = (value: any, unit = 'g') => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) return null;
+    return `${parsed % 1 === 0 ? parsed.toFixed(0) : parsed.toFixed(1)}${unit}`;
+  };
+
+  const buildSearchResultMacroText = (item: any) => {
+    const protein = formatMacroValue(item?.protein ?? 0);
+    const fats = formatMacroValue(item?.fats ?? item?.fat ?? 0);
+    const carbs = formatMacroValue(item?.carbs ?? item?.carbohydrate ?? 0);
+    const macros = [
+      protein ? `Protein ${protein}` : null,
+      fats ? `Fat ${fats}` : null,
+      carbs ? `Carbs ${carbs}` : null,
+    ].filter(Boolean);
+
+    return macros.length > 0 ? macros.join('  ') : String(item?.description || '').trim();
+  };
+
   const handleClose = () => {
     resetManualForm();
     resetSearchState();
@@ -416,7 +435,9 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                       <View className="bg-white border border-gray-200 rounded-2xl p-4 mb-3 shadow-sm flex-row justify-between items-center">
                         <View className="flex-1 mr-4">
                           <Text className="text-lg font-bold text-black">{item.title}</Text>
-                          <Text className="text-gray-500 text-xs mt-1" numberOfLines={2}>{item.description}</Text>
+                          <Text className="text-gray-500 text-xs mt-1" numberOfLines={2}>
+                            {buildSearchResultMacroText(item)}
+                          </Text>
                         </View>
                         <TouchableOpacity
                           onPress={() => handleAddClick(item.id)}
