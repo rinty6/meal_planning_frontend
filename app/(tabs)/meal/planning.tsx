@@ -923,7 +923,7 @@ const PlanningScreen = () => {
           <Text className="text-2xl font-bold text-black">Most consumed foods</Text>
           <TouchableOpacity
             onPress={() => setIsAddMenuVisible(true)}
-            className="w-9 h-9 rounded-full bg-primary items-center justify-center shadow-lg"
+            className="w-8 h-8 rounded-full bg-primary items-center justify-center shadow-lg"
             style={{
               shadowColor: "#007BFF",
               shadowOpacity: 0.28,

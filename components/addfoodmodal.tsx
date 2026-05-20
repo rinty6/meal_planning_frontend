@@ -21,6 +21,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -140,15 +141,16 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     isProcessingRef.current = true;
     setProcessingBarcode(true);
     const processingStartedAt = Date.now();
+    const scannedBarcode = String(data?.data || '').trim();
 
     try {
-      const response = await fetchBarcodeData(data.data);
+      const response = await fetchBarcodeData(scannedBarcode);
       await waitForMinProcessingDisplay(processingStartedAt);
 
       if (!response.success || !response.data) {
         closeScannerThenAlert(
           'Product Not Found',
-          `We couldn't find barcode ${data.data} in the food database.\n\nTry scanning again or add the item manually.`
+          `We couldn't find this barcode in Open Food Facts.\n\nBarcode: ${scannedBarcode || 'Unknown'}\n\nTry scanning again or add the item manually.`
         );
         return;
       }
@@ -380,6 +382,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   return (
     <>
       <Modal animationType="slide" transparent={true} visible={visible} onRequestClose={handleClose}>
+        <View className="flex-1">
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           className="flex-1 bg-black/50 justify-end"
@@ -611,7 +614,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
               ) : processingBarcode ? (
                 <View className="flex-1 justify-center items-center px-6">
                   <ActivityIndicator size="large" color="white" />
-                  <Text className="text-white mt-8 text-lg font-bold text-center">Looking up product…</Text>
+                  <Text className="text-white mt-8 text-lg font-bold text-center">Looking up product...</Text>
                   <View className="mt-6 h-24 justify-center">
                     {processingStep >= 1 && (
                       <Text className="text-gray-300 text-center text-base leading-6 mb-2">
@@ -620,7 +623,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                     )}
                     {processingStep >= 2 && (
                       <Text className="text-gray-300 text-center text-sm leading-5">
-                        This usually takes a few seconds — please hold the camera steady.
+                        This usually takes a few seconds. Please hold the camera steady.
                       </Text>
                     )}
                   </View>
@@ -648,20 +651,11 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
           </Modal>
         )}
 
-        {/* In-modal alert overlay.
-            Previously this was rendered as a sibling <CustomAlert/> Modal. On
-            iOS, presenting a second top-level Modal while AddFoodModal is still
-            presented is unreliable — the OS silently dropped the alert and the
-            user saw nothing on "Product Not Found". Rendering the alert as a
-            non-Modal absolute overlay inside the outer Modal sidesteps the
-            stacking issue entirely: the overlay is just another View inside
-            the already-presented Modal, so it always paints on top of the
-            modal content without any native window juggling. */}
+        {/* In-modal alert overlay. Keeping this inside a full-screen parent lets
+            the alert dim and center over the whole AddFoodModal without opening
+            a second top-level native Modal on iOS. */}
         {alertVisible && (
-          <View
-            className="absolute inset-0 bg-black/50 justify-center items-center px-6"
-            style={{ zIndex: 9999, elevation: 9999 }}
-          >
+          <View style={styles.alertOverlay}>
             <View className="bg-white w-full max-w-sm p-6 rounded-3xl shadow-xl">
               <Text className="text-xl font-bold text-center text-gray-900 mb-2">
                 {alertConfig.title}
@@ -678,9 +672,22 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
             </View>
           </View>
         )}
+        </View>
       </Modal>
     </>
   );
 };
+
+const styles = StyleSheet.create({
+  alertOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9999,
+    elevation: 9999,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+});
 
 export default AddFoodModal;

@@ -72,7 +72,8 @@ export const fetchMostConsumedFromMealLogs = async ({
   if (!apiURL || !clerkId) return [];
   try {
     const response = await fetch(
-      `${apiURL}/api/meals/most-consumed/${clerkId}?limit=${limit}`
+      `${apiURL}/api/meals/most-consumed/${encodeURIComponent(clerkId)}?limit=${limit}`,
+      { cache: "no-store" }
     );
     if (!response.ok) return [];
     const data = await readResponseJson(response);

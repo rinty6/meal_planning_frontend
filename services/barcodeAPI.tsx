@@ -1,15 +1,9 @@
 /**
- * BARCODE API SERVICE
+ * Barcode API service.
  *
- * This file handles all API calls to Open Food Facts database.
- * It allows users to scan food barcodes and retrieve nutritional information.
- *
- * Used by: addfoodmodal.tsx (barcode scanning feature)
+ * Looks up scanned packaged-food barcodes in Open Food Facts and converts the
+ * response into the shape consumed by AddFoodModal.
  */
-
-// ============================================
-// STEP 1: Define the response structure from Open Food Facts API
-// ============================================
 
 interface NutrimentData {
   energy_kcal?: number;
@@ -20,12 +14,14 @@ interface NutrimentData {
   carbohydrates_100g?: number;
   fat?: number;
   fat_100g?: number;
-  [key: string]: any; // Allow other fields
+  [key: string]: any;
 }
 
 interface OpenFoodFactsProduct {
   code: string;
-  product_name: string;
+  product_name?: string;
+  product_name_en?: string;
+  generic_name?: string;
   nutrition_grades?: string;
   nutriments?: NutrimentData;
   images?: {
@@ -57,47 +53,34 @@ interface BarcodeResponse {
   error?: string;
 }
 
-// ============================================
-// STEP 2: Construct image URL from barcode and product data
-// ============================================
+function normalizeBarcode(barcode: string): string {
+  return String(barcode || '').trim();
+}
 
 /**
- * Generates the product image URL from Open Food Facts based on barcode
- * Following their image URL construction rules:
- * - Split barcode into folders: first 9 digits split into 3 groups of 3, rest in last group
- * - For product image selection, use the front_en (or fallback to first available)
+ * Generates a product image URL from Open Food Facts image metadata.
  */
 function constructImageUrl(barcode: string, productData: OpenFoodFactsProduct): string | null {
   try {
-    // Pad barcode with leading zeros if less than 13 digits
     const paddedBarcode = barcode.padStart(13, '0');
-
-    // Extract the first 9 digits and split into 3 groups of 3, then add the rest
     const match = paddedBarcode.match(/^(...)(...)(...)(.*)$/);
     if (!match) return null;
 
     const [, group1, group2, group3, rest] = match;
     const folderPath = `${group1}/${group2}/${group3}/${rest}`;
-
-    // Check if product has images
     if (!productData.images) return null;
 
-    // Priority: front_en (English front), then any front_xx, then fall back to first numeric image
     let imageKey: string | null = null;
 
     if ('front_en' in productData.images) {
       imageKey = 'front_en';
     } else {
-      // Try to find any front image
-      const frontKeys = Object.keys(productData.images).filter(k => k.startsWith('front_'));
+      const frontKeys = Object.keys(productData.images).filter((key) => key.startsWith('front_'));
       if (frontKeys.length > 0) {
         imageKey = frontKeys[0];
       } else {
-        // Fall back to first numeric image (raw upload)
-        const numericKeys = Object.keys(productData.images).filter(k => /^\d+$/.test(k));
-        if (numericKeys.length > 0) {
-          imageKey = numericKeys[0];
-        }
+        const numericKeys = Object.keys(productData.images).filter((key) => /^\d+$/.test(key));
+        if (numericKeys.length > 0) imageKey = numericKeys[0];
       }
     }
 
@@ -105,98 +88,64 @@ function constructImageUrl(barcode: string, productData: OpenFoodFactsProduct): 
 
     const imageData = productData.images[imageKey];
     const baseUrl = 'https://images.openfoodfacts.org/images/products';
-
-    // Construct filename based on image type
-    let filename = '';
-    if (/^\d+$/.test(imageKey)) {
-      // Raw image: just the numeric ID + .jpg
-      filename = `${imageKey}.jpg`;
-    } else {
-      // Selected image: image_name.rev.resolution.jpg
-      const rev = imageData.rev || '1';
-      filename = `${imageKey}.${rev}.400.jpg`; // Use 400px resolution
-    }
+    const filename = /^\d+$/.test(imageKey)
+      ? `${imageKey}.jpg`
+      : `${imageKey}.${imageData.rev || '1'}.400.jpg`;
 
     return `${baseUrl}/${folderPath}/${filename}`;
   } catch (error) {
-    console.error('Error constructing image URL:', error);
+    console.error('[BARCODE API] Error constructing image URL:', error);
     return null;
   }
 }
 
-// ============================================
-// STEP 3: Extract nutritional information from product data
-// ============================================
-
 /**
- * Extracts nutritional values from Open Food Facts product data
- * Values are calculated per 100g to normalize portion sizes
+ * Extracts nutrition values per 100 g.
  */
-function extractNutritionData(
-  productData: OpenFoodFactsProduct
-): {
+function extractNutritionData(productData: OpenFoodFactsProduct): {
   calories: number;
   protein: number;
   carbs: number;
   fats: number;
 } {
   const nutriments = productData.nutriments || {};
-
-  // Extract per 100g values (more standardized across products)
   const protein = Math.round((nutriments.proteins_100g || nutriments.proteins || 0) * 10) / 10;
   const carbs = Math.round((nutriments.carbohydrates_100g || nutriments.carbohydrates || 0) * 10) / 10;
   const fats = Math.round((nutriments.fat_100g || nutriments.fat || 0) * 10) / 10;
-  
   let calories = Math.round(nutriments.energy_kcal_100g || nutriments.energy_kcal || 0);
 
-  // Calculate calories manually using 4-4-9 if the database is missing them
   if (calories === 0 && (protein > 0 || carbs > 0 || fats > 0)) {
     calories = Math.round((fats * 9) + (protein * 4) + (carbs * 4));
-    console.log(`🧮 [BARCODE API] Calories were 0. Calculated manually: ${calories} kcal`);
+    console.log(`[BARCODE API] Calories were missing. Calculated manually: ${calories} kcal`);
   }
 
   return { calories, protein, carbs, fats };
 }
 
-// ============================================
-// STEP 4: Fetch barcode data from Open Food Facts API
-// ============================================
-
-/**
- * Main function to fetch product data from Open Food Facts by barcode
- *
- * @param barcode - The product barcode to scan
- * @returns Promise<BarcodeResponse> - Contains success status and food data
- */
 export async function fetchBarcodeData(barcode: string): Promise<BarcodeResponse> {
   try {
-    console.log(`🔍 [BARCODE API] Fetching product data for barcode: ${barcode}`);
+    const normalizedBarcode = normalizeBarcode(barcode);
+    console.log(`[BARCODE API] Fetching product data for barcode: ${normalizedBarcode}`);
 
-    // Validate barcode
-    if (!barcode || barcode.trim() === '') {
+    if (!normalizedBarcode) {
       return {
         success: false,
         error: 'Invalid barcode: barcode cannot be empty',
       };
     }
 
-    // Construct API URL with specific fields we need
-    const apiUrl = `https://world.openfoodfacts.org/api/v2/product/${barcode}?fields=product_name,nutriments,nutrition_grades,images`;
+    const apiUrl =
+      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(normalizedBarcode)}` +
+      '?fields=product_name,product_name_en,generic_name,nutriments,nutrition_grades,images';
 
-    // ============================================
-    // IMPORTANT: Set User-Agent header as required by Open Food Facts API
-    // ============================================
     const headers = {
       'User-Agent': 'meal_app/1.0 (duongphuthinh2001@gmail.com)',
-      'Accept': 'application/json',
+      Accept: 'application/json',
     };
 
-    // Fetch product data from Open Food Facts
     const response = await fetch(apiUrl, { headers });
+    console.log(`[BARCODE API] API Response Status: ${response.status}`);
 
-    console.log(`📡 [BARCODE API] API Response Status: ${response.status}`);
-
-    // Check if response is ok (status 200-299)
     if (!response.ok) {
       return {
         success: false,
@@ -205,9 +154,8 @@ export async function fetchBarcodeData(barcode: string): Promise<BarcodeResponse
     }
 
     const responseData = await response.json();
-    console.log(`✅ [BARCODE API] Response received:`, responseData);
+    console.log('[BARCODE API] Response received:', responseData);
 
-    // Check if product exists in response
     if (responseData.status === 0 || !responseData.product) {
       return {
         success: false,
@@ -216,32 +164,24 @@ export async function fetchBarcodeData(barcode: string): Promise<BarcodeResponse
     }
 
     const product: OpenFoodFactsProduct = responseData.product;
+    const foodName =
+      product.product_name ||
+      product.product_name_en ||
+      product.generic_name ||
+      `Unknown (${normalizedBarcode})`;
 
-    // ============================================
-    // STEP 5: Extract required data
-    // ============================================
-
-    // Get food name
-    const foodName = product.product_name || `Unknown (${barcode})`;
-    console.log(`📝 [BARCODE API] Food Name: ${foodName}`);
-
-    // Extract nutritional information
     const nutritionData = extractNutritionData(product);
-    console.log(`📊 [BARCODE API] Nutrition Data:`, nutritionData);
+    const imageUrl = constructImageUrl(normalizedBarcode, product);
 
-    // Construct image URL
-    const imageUrl = constructImageUrl(barcode, product);
-    console.log(`🖼️ [BARCODE API] Image URL: ${imageUrl || 'No image found'}`);
-
-    // ============================================
-    // STEP 6: Return formatted response
-    // ============================================
+    console.log(`[BARCODE API] Food Name: ${foodName}`);
+    console.log('[BARCODE API] Nutrition Data:', nutritionData);
+    console.log(`[BARCODE API] Image URL: ${imageUrl || 'No image found'}`);
 
     return {
       success: true,
       data: {
         foodName,
-        barcode,
+        barcode: normalizedBarcode,
         calories: nutritionData.calories,
         protein: nutritionData.protein,
         carbs: nutritionData.carbs,
@@ -258,12 +198,8 @@ export async function fetchBarcodeData(barcode: string): Promise<BarcodeResponse
   }
 }
 
-// ============================================
-// STEP 7: Additional utility function for testing
-// ============================================
-
 export async function testBarcodeAPI(testBarcode: string = '3017624010701'): Promise<void> {
-  console.log(`🧪 [BARCODE API] Testing with barcode: ${testBarcode}`);
+  console.log(`[BARCODE API] Testing with barcode: ${testBarcode}`);
   const result = await fetchBarcodeData(testBarcode);
-  console.log(`🧪 [BARCODE API] Test Result:`, result);
+  console.log('[BARCODE API] Test Result:', result);
 }
