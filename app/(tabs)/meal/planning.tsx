@@ -932,7 +932,7 @@ const PlanningScreen = () => {
               elevation: 5,
             }}
           >
-            <Ionicons name="add" size={30} color="white" />
+            <Ionicons name="add" size={28} color="white" />
           </TouchableOpacity>
         </View>
 
