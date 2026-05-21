@@ -671,15 +671,13 @@ const PlanningScreen = () => {
     });
   };
 
-  const showMealLogOutcome = (payload: any, options: { successModal?: boolean } = {}) => {
+  const showMealLogOutcome = (payload: any) => {
     if (payload?.exceededLimit) {
       showCustomAlert("Calorie Target Exceeded", "Food added, but you crossed your daily calorie goal.");
     } else if (payload?.reachedTarget) {
       showCustomAlert("Calorie Target Reached", "Great job! You reached your daily calorie target.");
-    } else if (options.successModal) {
-      setShowSuccessModal(true);
     } else {
-      showCustomAlert("Meal Added", "Meal added successfully.");
+      setShowSuccessModal(true);
     }
   };
 
@@ -723,7 +721,7 @@ const PlanningScreen = () => {
         item,
         preferences,
       });
-      showMealLogOutcome(payload, { successModal: true });
+      showMealLogOutcome(payload);
     } catch {
       showCustomAlert("Error", "Failed to add this dish.");
     } finally {
@@ -843,7 +841,7 @@ const PlanningScreen = () => {
       markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
       setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
-      showMealLogOutcome(payload, { successModal: true });
+      showMealLogOutcome(payload);
     } catch {
       showCustomAlert("Error", "Network error while adding recent meals.");
     } finally {

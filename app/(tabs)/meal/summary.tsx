@@ -107,6 +107,7 @@ export default function SummaryScreen() {
   
   // Ref for Calendar Scroll
   const flatListRef = useRef<FlatList>(null);
+  const removedTempIdsRef = useRef<Set<string>>(new Set());
 
   // State
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -174,7 +175,7 @@ export default function SummaryScreen() {
   useFocusEffect(useCallback(() => { fetchMeals(); }, [fetchMeals]));
 
   // --- HANDLER: REMOVE ---
-  const handleRemoveOne = async (id: number) => {
+  const handleRemoveOne = async (id: number | string) => {
     // Optimistic Update
     setMeals(current => {
       const index = current.findIndex(m => m.id === id);
@@ -188,7 +189,13 @@ export default function SummaryScreen() {
 
     try {
       const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      await fetch(`${apiURL}/api/meals/delete/${id}`, { method: 'DELETE' });
+      const idText = String(id);
+      if (idText.startsWith('temp-')) {
+        removedTempIdsRef.current.add(idText);
+        return;
+      }
+      const response = await fetch(`${apiURL}/api/meals/delete/${encodeURIComponent(idText)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(`Failed to delete meal item ${idText}`);
       markMealsSummaryDirty(userId, formatLocalYYYYMMDD(selectedDate));
     } catch (e) { console.error(e); }
   };
@@ -196,8 +203,9 @@ export default function SummaryScreen() {
   // --- FIX: OPTIMISTIC ADD DUPLICATE ---
   const handleAddDuplicate = async (item: any) => {
     // 1. Create a temp object to update UI instantly
+    const tempId = `temp-${Date.now()}`;
     const newTempMeal = {
-        id: `temp-${Date.now()}`, // Temporary ID
+        id: tempId, // Temporary ID until /api/meals/add returns the real row.
         userId,
         date: formatLocalYYYYMMDD(selectedDate),
         mealType: item.mealType,
@@ -228,18 +236,31 @@ export default function SummaryScreen() {
       };
       // We don't need to await the fetch for the UI to update, 
       // but waiting ensures data consistency if user leaves page.
-      await fetch(`${apiURL}/api/meals/add`, {
+      const response = await fetch(`${apiURL}/api/meals/add`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
       });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || "Could not add item.");
+
+      const createdMeal = data?.meal;
+      if (createdMeal?.id) {
+        if (removedTempIdsRef.current.has(tempId)) {
+          removedTempIdsRef.current.delete(tempId);
+          await fetch(`${apiURL}/api/meals/delete/${encodeURIComponent(String(createdMeal.id))}`, { method: 'DELETE' });
+        } else {
+          setMeals((current) => current.map((meal) => meal.id === tempId ? createdMeal : meal));
+        }
+      } else {
+        fetchMeals();
+      }
       markMealsSummaryDirty(userId, newTempMeal.date);
 
-      // Note: We DO NOT call fetchMeals() here to avoid spinner/reload.
-      // The local state is already correct.
     } catch (e) { 
         console.error(e);
-        Alert.alert("Error", "Could not add item.");
+        removedTempIdsRef.current.delete(tempId);
+        Alert.alert("Error", "Could not update item.");
         // Optional: Revert local state if error occurs
         fetchMeals(); 
     }
