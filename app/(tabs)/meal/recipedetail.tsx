@@ -1,5 +1,5 @@
-import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert, TextInput } from 'react-native';
-import React, { useEffect, useState } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,17 +10,31 @@ import IngredientIcon from '../../../components/IngredientIcon';
 import SuccessModal from '../../../components/sucessmodal'; 
 import Food3DIcon from '../../../components/Food3DIcon';
 
+const normalizeCaloriesInput = (value: any) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? String(Math.max(0, Math.round(parsed))) : "0";
+};
+
+const caloriesFromInput = (value: string) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+};
+
 const RecipeDetailScreen = () => {
   // 1. GET PARAMS
   const { id, previewImage, savedRecipeId, isCreating } = useLocalSearchParams(); 
   const router = useRouter();
   const { userId } = useAuth();
+  const scrollViewRef = useRef<ScrollView>(null);
+  const caloriesInputRef = useRef<TextInput>(null);
+  const stepOffsetsRef = useRef<Record<number, number>>({});
 
   // 2. STATE VARIABLES
   const [loading, setLoading] = useState(true);       // Page loading state
   const [activeAction, setActiveAction] = useState<'recipe' | 'shopping' | null>(null);
   
   const [recipeTitle, setRecipeTitle] = useState("");
+  const [recipeCalories, setRecipeCalories] = useState("0");
   const [ingredients, setIngredients] = useState<any[]>([]);
   const [instructions, setInstructions] = useState<any[]>([]);
   const [baseRecipeInfo, setBaseRecipeInfo] = useState<any>(null);
@@ -36,6 +50,7 @@ const RecipeDetailScreen = () => {
         // --- CREATE MODE ---
         setLoading(false);
         setRecipeTitle(""); 
+        setRecipeCalories("0");
         setIngredients([{ name: "", quantity: "", description: "", image: null }]);
         setInstructions([{ step: 1, text: "" }]);
         setBaseRecipeInfo({ id: `custom-${Date.now()}` }); 
@@ -57,6 +72,7 @@ const RecipeDetailScreen = () => {
         const data = await getRecipeDetails(id as string);
         if (data) {
             setRecipeTitle(data.title);
+            setRecipeCalories(normalizeCaloriesInput(data.calories));
             setIngredients(data.ingredients);
             setInstructions(data.instructions);
             setBaseRecipeInfo({ ...data, image: data.image || (previewImage as string) });
@@ -77,6 +93,7 @@ const RecipeDetailScreen = () => {
         
         if (data) {
             setRecipeTitle(data.title);
+            setRecipeCalories(normalizeCaloriesInput(data.calories));
             setIngredients(data.ingredients);
             setInstructions(data.instructions);
             setBaseRecipeInfo(data);
@@ -122,6 +139,13 @@ const RecipeDetailScreen = () => {
     setInstructions([...instructions, { step: instructions.length + 1, text: "" }]);
   };
 
+  const scrollStepIntoView = (index: number) => {
+    setTimeout(() => {
+      const y = stepOffsetsRef.current[index] ?? 0;
+      scrollViewRef.current?.scrollTo({ y: Math.max(0, y - 160), animated: true });
+    }, 120);
+  };
+
   // --- SAVE / UPDATE LOGIC ---
   const handleSaveOrUpdate = async () => {
     if (!userId) return;
@@ -136,6 +160,7 @@ const RecipeDetailScreen = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     title: recipeTitle,
+                    calories: caloriesFromInput(recipeCalories),
                     ingredients: ingredients,
                     instructions: instructions
                 })
@@ -157,7 +182,7 @@ const RecipeDetailScreen = () => {
                 prepTime: baseRecipeInfo?.prepTime || 0,
                 cookTime: baseRecipeInfo?.cookTime || 0,
                 servings: baseRecipeInfo?.servings || 1,
-                calories: baseRecipeInfo?.calories || 0,
+                calories: caloriesFromInput(recipeCalories),
                 protein: baseRecipeInfo?.protein || 0,
                 carbs: baseRecipeInfo?.carbs || 0,
                 fats: baseRecipeInfo?.fats || 0,
@@ -253,16 +278,50 @@ const RecipeDetailScreen = () => {
         </Text>
       </View>
 
-      <ScrollView className="px-5" showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        className="flex-1"
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+      >
+      <ScrollView
+        ref={scrollViewRef}
+        className="px-5"
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+        contentContainerStyle={{ paddingBottom: 180 }}
+      >
          {/* TITLE INPUT */}
          <TextInput 
             value={recipeTitle}
             onChangeText={setRecipeTitle}
-            className="text-2xl font-bold text-gray-900 mb-6 leading-tight border-b border-gray-200 pb-2"
+            className="text-2xl font-bold text-gray-900 mb-2 leading-tight border-b border-gray-200 pb-2"
             multiline
             placeholder="Name your recipe..."
             placeholderTextColor="#9CA3AF"
          />
+
+         <View className="flex-row items-center mb-6 h-8">
+            <Ionicons name="flame" size={16} color="#FF9500" />
+            <TextInput
+              ref={caloriesInputRef}
+              value={recipeCalories}
+              onChangeText={(text) => setRecipeCalories(text.replace(/[^0-9.]/g, ""))}
+              onBlur={() => setRecipeCalories(normalizeCaloriesInput(recipeCalories))}
+              keyboardType="numeric"
+              className="ml-2 text-base font-bold text-gray-700 border-b border-gray-200 px-1"
+              style={{ minWidth: 44, height: 28, paddingTop: 0, paddingBottom: 0, lineHeight: 20, textAlignVertical: 'center' }}
+              placeholder="0"
+              placeholderTextColor="#9CA3AF"
+            />
+            <Text className="text-base font-bold text-gray-500 ml-1 leading-5">kcal</Text>
+            <TouchableOpacity
+              onPress={() => caloriesInputRef.current?.focus()}
+              className="ml-2 w-7 h-7 rounded-full bg-blue-50 items-center justify-center"
+            >
+              <Ionicons name="create-outline" size={15} color="#007BFF" />
+            </TouchableOpacity>
+         </View>
 
          {/* INGREDIENTS SECTION */}
          <View className="flex-row justify-between items-center mb-4">
@@ -319,11 +378,18 @@ const RecipeDetailScreen = () => {
 
          <View className="mb-8">
             {instructions.map((inst, index) => (
-                <View key={index} className="flex-row items-start mb-4 border border-blue-200/50 rounded-2xl p-4 bg-white shadow-sm">
+                <View
+                    key={index}
+                    onLayout={(event) => {
+                      stepOffsetsRef.current[index] = event.nativeEvent.layout.y;
+                    }}
+                    className="flex-row items-start mb-4 border border-blue-200/50 rounded-2xl p-4 bg-white shadow-sm"
+                >
                     <Text className="text-lg font-bold text-gray-400 mr-3 mt-1">{String(index + 1).padStart(2, '0')}</Text>
                     <TextInput 
                         value={inst.text}
                         onChangeText={(text) => handleUpdateStep(text, index)}
+                        onFocus={() => scrollStepIntoView(index)}
                         multiline
                         placeholder="Describe this step..."
                         placeholderTextColor="#9CA3AF"
@@ -368,6 +434,7 @@ const RecipeDetailScreen = () => {
          </View>
 
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <SuccessModal 
         visible={showSuccessModal}
