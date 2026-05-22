@@ -132,6 +132,18 @@ export const setCachedHomeDashboard = (
   });
 };
 
+export const setCachedHomeUserName = (userId: string, dbUserName: string) => {
+  const current = homeByUser.get(userId);
+  homeByUser.set(userId, {
+    dbUserName,
+    macros: cloneMacros(current?.macros || null),
+    foodItems: cloneItems(current?.foodItems || []),
+    foodItemsMealPeriod: current?.foodItemsMealPeriod || null,
+    dashboardFetchedAt: current?.dashboardFetchedAt || 0,
+    foodItemsFetchedAt: current?.foodItemsFetchedAt || 0,
+  });
+};
+
 export const setCachedHomeFoodItems = (userId: string, foodItems: any[], mealPeriod?: string | null) => {
   const current = homeByUser.get(userId);
   homeByUser.set(userId, {

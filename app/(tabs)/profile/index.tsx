@@ -11,6 +11,7 @@ import * as ImagePicker from 'expo-image-picker';
 import CustomAlert from '../../../components/customAlert';
 import { getCachedProfileDemographics, setCachedProfileDemographics, shouldRefreshProfile } from '../../../services/profileStore';
 import { clearBackendBootstrapCache } from '../../../services/userSync';
+import { setCachedHomeUserName } from '../../../services/homeStore';
 
 const PROFILE_REFRESH_TTL_MS = 60 * 1000;
 
@@ -21,6 +22,7 @@ const ProfileScreen = () => {
     
     const [profileData, setProfileData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [displayName, setDisplayName] = useState(user?.fullName || 'Aussie Tracker');
     
     // Inline Name Editing State
     const [isEditingName, setIsEditingName] = useState(false);
@@ -48,6 +50,7 @@ const ProfileScreen = () => {
             if (res.ok) {
                 const data = await res.json();
                 setProfileData(data.demographics);
+                setDisplayName(data.user?.username || user?.fullName || 'Aussie Tracker');
                 setCachedProfileDemographics(user.id, data.demographics);
             }
         } catch (error) {
@@ -55,7 +58,7 @@ const ProfileScreen = () => {
         } finally {
             if (showSpinner) setLoading(false);
         }
-    }, [user?.id]);
+    }, [user?.fullName, user?.id]);
 
     useFocusEffect(
         useCallback(() => {
@@ -79,7 +82,7 @@ const ProfileScreen = () => {
             setSavingAuthData(true);
             try {
                 await user?.setProfileImage({ file: `data:image/jpeg;base64,${result.assets[0].base64}` });
-            } catch (error) {
+            } catch {
                 setAlertConfig({ title: "Error", message: "Failed to update profile picture.", isConfirm: false, onConfirm: () => setAlertVisible(false) });
                 setAlertVisible(true);
             } finally {
@@ -88,18 +91,39 @@ const ProfileScreen = () => {
         }
     };
 
-    // CLERK: Save Updated Name
+    // Save updated name to Clerk and to the app database.
     const handleSaveName = async () => {
-        if (!tempName.trim()) return;
+        const nextName = tempName.trim().replace(/\s+/g, ' ');
+        if (!nextName) return;
         setSavingAuthData(true);
         try {
-            const nameParts = tempName.trim().split(' ');
+            const nameParts = nextName.split(' ');
             const firstName = nameParts[0] || '';
             const lastName = nameParts.slice(1).join(' ') || '';
+            const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
+
+            if (!user?.id || !apiURL) {
+                throw new Error("Missing user or backend configuration");
+            }
             
             await user?.update({ firstName, lastName });
+            const response = await fetch(`${apiURL}/api/profile/name/${user.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: nextName }),
+            });
+
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                throw new Error(data?.error || "Failed to update database name");
+            }
+
+            const savedName = data?.user?.username || nextName;
+            setDisplayName(savedName);
+            setTempName(savedName);
+            setCachedHomeUserName(user.id, savedName);
             setIsEditingName(false);
-        } catch (error) {
+        } catch {
             setAlertConfig({ title: "Error", message: "Failed to update name.", isConfirm: false, onConfirm: () => setAlertVisible(false) });
             setAlertVisible(true);
         } finally {
@@ -162,8 +186,8 @@ const ProfileScreen = () => {
                         </View>
                     ) : (
                         <View className="flex-row items-center">
-                            <Text className="text-2xl font-bold text-gray-900 mr-2">{user?.fullName || 'Aussie Tracker'}</Text>
-                            <TouchableOpacity onPress={() => { setTempName(user?.fullName || ''); setIsEditingName(true); }}>
+                            <Text className="text-2xl font-bold text-gray-900 mr-2">{displayName}</Text>
+                            <TouchableOpacity onPress={() => { setTempName(displayName); setIsEditingName(true); }}>
                                 <Ionicons name="pencil" size={18} color="#9CA3AF" />
                             </TouchableOpacity>
                         </View>
