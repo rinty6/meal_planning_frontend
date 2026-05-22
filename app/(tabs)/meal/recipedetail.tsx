@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform, Modal, TouchableWithoutFeedback } from 'react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,7 +8,14 @@ import { markFavoritesDirty } from '../../../services/favoritesStore';
 import { useAuth } from '@clerk/clerk-expo';
 import IngredientIcon from '../../../components/IngredientIcon';
 import SuccessModal from '../../../components/sucessmodal'; 
-import Food3DIcon from '../../../components/Food3DIcon';
+import { markMealsSummaryDirty } from '../../../services/mealsSummaryStore';
+
+const formatLocalYYYYMMDD = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const normalizeCaloriesInput = (value: any) => {
   const parsed = Number(value);
@@ -31,7 +38,7 @@ const RecipeDetailScreen = () => {
 
   // 2. STATE VARIABLES
   const [loading, setLoading] = useState(true);       // Page loading state
-  const [activeAction, setActiveAction] = useState<'recipe' | 'shopping' | null>(null);
+  const [activeAction, setActiveAction] = useState<'recipe' | 'shopping' | 'meal' | null>(null);
   
   const [recipeTitle, setRecipeTitle] = useState("");
   const [recipeCalories, setRecipeCalories] = useState("0");
@@ -41,8 +48,9 @@ const RecipeDetailScreen = () => {
   
   // Modal State
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showMealSelector, setShowMealSelector] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
-  const [successAction, setSuccessAction] = useState<'recipe' | 'shopping' | null>(null);
+  const [successAction, setSuccessAction] = useState<'recipe' | 'shopping' | 'meal' | null>(null);
 
   // 3. INITIALIZATION LOGIC
   useEffect(() => {
@@ -250,6 +258,62 @@ const RecipeDetailScreen = () => {
       setActiveAction(null);
     }
   };
+
+  const handleAddToMealLog = () => {
+    if (!userId) {
+      Alert.alert("Error", "You must be logged in to add this recipe to your meal log.");
+      return;
+    }
+    setShowMealSelector(true);
+  };
+
+  const handleSelectMeal = (mealType: 'breakfast' | 'lunch' | 'dinner') => {
+    setShowMealSelector(false);
+    void saveRecipeToMealLog(mealType);
+  };
+
+  const saveRecipeToMealLog = async (mealType: 'breakfast' | 'lunch' | 'dinner') => {
+    if (!userId) return;
+
+    const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
+    const date = formatLocalYYYYMMDD(new Date());
+    const recipeName = recipeTitle.trim() || baseRecipeInfo?.title || "My Custom Recipe";
+
+    setActiveAction('meal');
+    try {
+      const response = await fetch(`${apiURL}/api/meals/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clerkId: userId,
+          date,
+          mealType,
+          foodName: recipeName,
+          calories: caloriesFromInput(recipeCalories),
+          protein: Number(baseRecipeInfo?.protein) || 0,
+          carbs: Number(baseRecipeInfo?.carbs) || 0,
+          fats: Number(baseRecipeInfo?.fats) || 0,
+          image: baseRecipeInfo?.image || (previewImage as string) || "",
+          externalId: baseRecipeInfo?.id || savedRecipeId || id || recipeName,
+          source: savedRecipeId || isCreating === "true" ? "custom_recipe" : "fatsecret_recipe",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to add recipe to meal log");
+      }
+
+      markMealsSummaryDirty(userId, date);
+      setSuccessAction('meal');
+      setSuccessMessage("Meal added successfully!");
+      setShowSuccessModal(true);
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Could not add this recipe to your meal log.");
+    } finally {
+      setActiveAction(null);
+    }
+  };
   
   const handleCloseModal = () => {
       setShowSuccessModal(false);
@@ -403,38 +467,86 @@ const RecipeDetailScreen = () => {
          </View>
          
          {/* Footer Button */}
-         <View className="flex-row gap-3 mb-10">
+         <View className="mb-10">
              <TouchableOpacity 
-                onPress={handleSaveOrUpdate} 
-                disabled={!!activeAction} 
-                className={`flex-1 py-4 rounded-2xl shadow-md flex-row justify-center items-center ${activeAction ? 'bg-blue-300' : 'bg-primary'}`}
+                onPress={handleAddToMealLog}
+                disabled={!!activeAction}
+                className={`w-full py-4 rounded-xl shadow-md flex-row justify-center items-center mb-3 ${activeAction ? 'bg-blue-300' : 'bg-primary'}`}
              >
-                 {activeAction === 'recipe' ? (
+                 {activeAction === 'meal' ? (
                      <ActivityIndicator size="small" color="white" />
                  ) : (
-                     <Text className="text-white text-center font-bold text-lg">
-                        {savedRecipeId ? "Update Recipe" : "Save Recipe"}
-                     </Text>
+                    <>
+                      <Ionicons name="add" size={18} color="white" />
+                      <Text className="text-white text-center font-bold text-base ml-2">Add to meal log</Text>
+                    </>
                  )}
              </TouchableOpacity>
 
-             <TouchableOpacity 
-                onPress={handleSaveToShoppingList}
-                disabled={!!activeAction}
-                className="flex-1 py-4 rounded-2xl shadow-md flex-row justify-center items-center bg-secondary"
-             >
-                 {activeAction === 'shopping' ? (
-                     <ActivityIndicator size="small" color="white" />
-                 ) : (
-                     <Text className="text-white text-center font-bold text-lg">
-                        Save to Shopping List
-                     </Text>
-                 )}
-             </TouchableOpacity>
+             <View className="flex-row gap-2">
+               <TouchableOpacity 
+                  onPress={handleSaveOrUpdate} 
+                  disabled={!!activeAction} 
+                  className={`flex-1 py-3 rounded-xl border flex-row justify-center items-center ${activeAction ? 'border-blue-300 bg-blue-50' : 'border-primary bg-white'}`}
+               >
+                   {activeAction === 'recipe' ? (
+                       <ActivityIndicator size="small" color="#007BFF" />
+                   ) : (
+                      <>
+                        <Ionicons name="heart-outline" size={15} color="#007BFF" />
+                        <Text className="text-primary text-center font-bold text-sm ml-1" numberOfLines={1}>
+                          {savedRecipeId ? "Update Recipe" : "Save Recipe"}
+                        </Text>
+                      </>
+                   )}
+               </TouchableOpacity>
+
+               <TouchableOpacity 
+                  onPress={handleSaveToShoppingList}
+                  disabled={!!activeAction}
+                  className={`flex-1 py-3 rounded-xl border flex-row justify-center items-center ${activeAction ? 'border-orange-200 bg-orange-50' : 'border-secondary bg-white'}`}
+               >
+                   {activeAction === 'shopping' ? (
+                       <ActivityIndicator size="small" color="#FF9500" />
+                   ) : (
+                      <>
+                        <Ionicons name="bag-handle-outline" size={15} color="#FF9500" />
+                        <Text className="text-secondary text-center font-bold text-sm ml-1" numberOfLines={1}>
+                          Shopping List
+                        </Text>
+                      </>
+                   )}
+               </TouchableOpacity>
+             </View>
          </View>
 
       </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal visible={showMealSelector} transparent animationType="fade">
+        <TouchableWithoutFeedback onPress={() => setShowMealSelector(false)}>
+          <View className="flex-1 bg-black/50 justify-center items-center px-4">
+            <TouchableWithoutFeedback>
+              <View className="bg-white w-full max-w-xs p-6 rounded-3xl items-center shadow-xl">
+                <Text className="text-xl font-bold text-gray-900 mb-2">Select Meal</Text>
+                <Text className="text-gray-400 text-center text-sm mb-6">When are you eating this?</Text>
+                <TouchableOpacity onPress={() => handleSelectMeal('breakfast')} className="w-full bg-white py-4 rounded-2xl mb-3 border border-gray-100 px-4">
+                  <Text className="font-bold text-gray-700 text-base">Breakfast</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleSelectMeal('lunch')} className="w-full bg-white py-4 rounded-2xl mb-3 border border-gray-100 px-4">
+                  <Text className="font-bold text-gray-700 text-base">Lunch</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleSelectMeal('dinner')} className="w-full bg-white py-4 rounded-2xl mb-6 border border-gray-100 px-4">
+                  <Text className="font-bold text-gray-700 text-base">Dinner</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowMealSelector(false)}>
+                  <Text className="text-gray-400 font-bold">Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       <SuccessModal 
         visible={showSuccessModal}
