@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, Switch, TouchableOpacity, ActivityIndicator, Alert, Platform, Modal } from 'react-native';
+import { View, Text, ScrollView, Switch, TouchableOpacity, Alert, Platform, Modal } from 'react-native';
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -9,6 +9,22 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import TextInputArea from '../../../components/TextInput';
 import Button from '../../../components/Button';
 import SuccessModal from '../../../components/sucessmodal';
+
+const addDays = (date: Date, days: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const formatLocalYYYYMMDD = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const isSameLocalDay = (left: Date, right: Date) =>
+  formatLocalYYYYMMDD(left) === formatLocalYYYYMMDD(right);
 
 const GoalSettingScreen = () => {
   const router = useRouter();
@@ -22,8 +38,8 @@ const GoalSettingScreen = () => {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
 
   // DATE STATE
-  const [startDate, setStartDate] = useState(new Date());
-  const [endDate, setEndDate] = useState(new Date());
+  const [startDate, setStartDate] = useState(() => new Date());
+  const [endDate, setEndDate] = useState(() => addDays(new Date(), 30));
   
   // Picker Control
   const [showPicker, setShowPicker] = useState(false);
@@ -61,9 +77,11 @@ const GoalSettingScreen = () => {
     
     if (selectedDate) {
       if (pickerMode === 'start') {
+        const shouldMoveEndDate = selectedDate > endDate || isSameLocalDay(startDate, endDate);
         setStartDate(selectedDate);
-        // Auto-adjust end date if it's before start date
-        if (selectedDate > endDate) setEndDate(selectedDate);
+        // Keep new goals useful by default: notifications should not expire on
+        // the same day unless the user explicitly chooses that.
+        if (shouldMoveEndDate) setEndDate(addDays(selectedDate, 30));
       } else {
         setEndDate(selectedDate);
       }
@@ -89,9 +107,9 @@ const GoalSettingScreen = () => {
               goalName,
               dailyCalories,
               description,
-              // Convert Date objects to YYYY-MM-DD strings for DB
-              startDate: startDate.toISOString().split('T')[0],
-              endDate: endDate.toISOString().split('T')[0],
+              // Convert Date objects to local YYYY-MM-DD strings for DB.
+              startDate: formatLocalYYYYMMDD(startDate),
+              endDate: formatLocalYYYYMMDD(endDate),
               notificationsEnabled
           };
 
