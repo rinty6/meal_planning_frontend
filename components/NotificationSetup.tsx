@@ -5,19 +5,26 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { useEffect } from 'react';
 import { useAuth } from '@clerk/clerk-expo';
-import Constants from 'expo-constants';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { markNotificationsDirty } from '../services/notificationsStore';
 
 let lastRegisteredDeviceKey: string | null = null;
 let notificationHandlerConfigured = false;
 let notificationsModulePromise: Promise<typeof import('expo-notifications') | null> | null = null;
+let expoGoPushNoticeLogged = false;
 
-function isExpoGoPushUnsupported() {
-  return Constants.appOwnership === 'expo' && Platform.OS === 'android';
+function isExpoGoRuntime() {
+  return Constants.executionEnvironment === ExecutionEnvironment.StoreClient || Constants.appOwnership === 'expo';
 }
 
 async function loadNotificationsModule() {
-  if (isExpoGoPushUnsupported()) {
+  if (isExpoGoRuntime()) {
+    if (!expoGoPushNoticeLogged) {
+      console.log(
+        '[NotificationSetup] Expo Go does not support full remote push-token registration in SDK 53+. Use an EAS development build, preview build, TestFlight, or production build to test app push notifications.'
+      );
+      expoGoPushNoticeLogged = true;
+    }
     return null;
   }
 
@@ -126,7 +133,7 @@ export default function NotificationSetup() {
         finalStatus = status;
       }
       if (finalStatus !== 'granted') {
-        console.log('Failed to get push token for push notification!');
+        console.log('Push notification permission was not granted; no push token was registered.');
         return null;
       }
 
@@ -137,7 +144,7 @@ export default function NotificationSetup() {
       const projectId = envProjectId || Constants.easConfig?.projectId;
       const envExperienceId = process.env.EXPO_PUBLIC_EXPERIENCE_ID?.trim();
       const fallbackExperienceId = envExperienceId || (owner && slug ? `@${owner}/${slug}` : undefined);
-      const isExpoGo = Constants.appOwnership === 'expo';
+      const isExpoGo = isExpoGoRuntime();
 
       const attempts: { label: string; options?: Record<string, string> }[] = [];
       if (isExpoGo) {

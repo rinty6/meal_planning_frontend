@@ -1,3 +1,4 @@
+import { TouchableOpacity } from 'react-native'
 import { Tabs, Redirect, useRouter } from 'expo-router'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
@@ -6,6 +7,10 @@ import NotificationSetup from '../../components/NotificationSetup'
 const TabLayout = () => {
   const { isSignedIn } = useAuth()
   const router = useRouter()
+
+  const openMealMenu = () => {
+    router.navigate('/(tabs)/meal')
+  }
 
   // 1. Security Check
   if (!isSignedIn) {
@@ -31,14 +36,23 @@ const TabLayout = () => {
       />
       <Tabs.Screen 
         name="meal" 
-        listeners={{
-          tabPress: () => {
-            router.replace('/(tabs)/meal');
-          },
-        }}
         options={{
           title: 'Meal',
           tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "restaurant" : "restaurant-outline"} size={24} color={color} />,
+          tabBarButton: ({ children, accessibilityLabel, accessibilityState, onLongPress, style, testID }) => (
+            <TouchableOpacity
+              accessibilityLabel={accessibilityLabel}
+              accessibilityRole="button"
+              accessibilityState={accessibilityState}
+              activeOpacity={0.7}
+              onLongPress={onLongPress || undefined}
+              onPress={openMealMenu}
+              style={style}
+              testID={testID}
+            >
+              {children}
+            </TouchableOpacity>
+          ),
         }} 
       />
       <Tabs.Screen 
