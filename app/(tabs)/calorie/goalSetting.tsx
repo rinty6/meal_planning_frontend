@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, Switch, TouchableOpacity, Alert, Platform, Modal } from 'react-native';
+import { View, Text, ScrollView, Switch, TouchableOpacity, Platform, Modal } from 'react-native';
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -9,6 +9,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import TextInputArea from '../../../components/TextInput';
 import Button from '../../../components/Button';
 import SuccessModal from '../../../components/sucessmodal';
+import CustomAlert from '../../../components/customAlert';
 
 const addDays = (date: Date, days: number) => {
   const next = new Date(date);
@@ -48,6 +49,11 @@ const GoalSettingScreen = () => {
   const [loading, setLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState({
+    title: "",
+    message: "",
+  });
 
   useEffect(() => {
     if (goalId) {
@@ -93,9 +99,14 @@ const GoalSettingScreen = () => {
     setShowPicker(true);
   };
 
+  const showCustomAlert = (title: string, message: string) => {
+    setAlertConfig({ title, message });
+    setAlertVisible(true);
+  };
+
   const handleSubmit = async () => {
-      if (!goalName || !dailyCalories) {
-          Alert.alert("Missing Fields", "Please fill in all required fields.");
+      if (!goalName.trim() || !dailyCalories.trim()) {
+          showCustomAlert("Missing Fields", "Please fill in all required fields.");
           return;
       }
 
@@ -131,11 +142,11 @@ const GoalSettingScreen = () => {
               setSuccessMsg(goalId ? "Goal updated successfully!" : "New goal created!");
               setShowSuccess(true);
           } else {
-              Alert.alert("Error", "Failed to save goal.");
+              showCustomAlert("Error", "Failed to save goal.");
           }
       } catch (e) {
           console.error(e);
-          Alert.alert("Error", "Server error occurred.");
+          showCustomAlert("Error", "Server error occurred.");
       } finally {
           setLoading(false);
       }
@@ -256,6 +267,12 @@ const GoalSettingScreen = () => {
       </ScrollView>
 
       <SuccessModal visible={showSuccess} message={successMsg} onClose={handleCloseModal} />
+      <CustomAlert
+        visible={alertVisible}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        onConfirm={() => setAlertVisible(false)}
+      />
     </SafeAreaView>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@clerk/clerk-expo";
@@ -15,15 +15,33 @@ interface RecommendedFoodCardProps {
   onPress: () => void;
   onSkip?: () => void;
   onLove?: (item: any) => void;
+  isFavorite?: boolean;
+  onFavoriteChange?: (item: any, isFavorite: boolean) => void;
+  onFavoriteError?: () => void;
 }
 
 const macro = (value: any) => `${(Number(value) || 0).toFixed(1)}g`;
+const getExternalId = (item: any) =>
+  String(item?.fatsecret_food_id || item?.food_id || item?.externalId || item?.external_id || item?.id || "").trim();
 
-const ComboCard = ({ item, onAdd, onPress, onSkip, onLove }: RecommendedFoodCardProps) => {
+const ComboCard = ({
+  item,
+  onAdd,
+  onPress,
+  onSkip,
+  onLove,
+  isFavorite: controlledFavorite = false,
+  onFavoriteChange,
+  onFavoriteError,
+}: RecommendedFoodCardProps) => {
   const { userId } = useAuth();
-  const [isFavorite, setIsFavorite] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(controlledFavorite);
   const [isLoading, setIsLoading] = useState(false);
   const [failedImageKeys, setFailedImageKeys] = useState<Record<string, true>>({});
+
+  useEffect(() => {
+    setIsFavorite(controlledFavorite);
+  }, [controlledFavorite]);
 
   if (!item) return null;
 
@@ -62,17 +80,19 @@ const ComboCard = ({ item, onAdd, onPress, onSkip, onLove }: RecommendedFoodCard
         if (response.ok) {
           markFavoritesDirty(userId);
           setIsFavorite(true);
+          onFavoriteChange?.(item, true);
           onLove?.(item);
         }
       } else {
+        const externalId = getExternalId(item);
         const response = await fetch(`${apiURL}/api/favorites/toggle`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             clerkId: userId,
             item: {
-              id: item.id || item.food_id,
-              externalId: item.id || item.food_id,
+              id: externalId,
+              externalId,
               title: item.title,
               image: item.image,
               calories: item.calories,
@@ -89,6 +109,7 @@ const ComboCard = ({ item, onAdd, onPress, onSkip, onLove }: RecommendedFoodCard
           const data = await response.json();
           markFavoritesDirty(userId);
           setIsFavorite(data.isFavorite);
+          onFavoriteChange?.(item, !!data.isFavorite);
           if (data.isFavorite) {
             onLove?.(item);
           }
@@ -96,6 +117,7 @@ const ComboCard = ({ item, onAdd, onPress, onSkip, onLove }: RecommendedFoodCard
       }
     } catch (error) {
       console.error("Error toggling favorite:", error);
+      onFavoriteError?.();
     } finally {
       setIsLoading(false);
     }

@@ -1,10 +1,11 @@
-import { Tabs, Redirect } from 'expo-router'
+import { Tabs, Redirect, useRouter } from 'expo-router'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import NotificationSetup from '../../components/NotificationSetup'
 
 const TabLayout = () => {
   const { isSignedIn } = useAuth()
+  const router = useRouter()
 
   // 1. Security Check
   if (!isSignedIn) {
@@ -30,6 +31,11 @@ const TabLayout = () => {
       />
       <Tabs.Screen 
         name="meal" 
+        listeners={{
+          tabPress: () => {
+            router.replace('/(tabs)/meal');
+          },
+        }}
         options={{
           title: 'Meal',
           tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "restaurant" : "restaurant-outline"} size={24} color={color} />,

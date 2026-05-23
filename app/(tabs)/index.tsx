@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +8,7 @@ import CircularProgress from '../../components/CircularProgress';
 import ComboCard from '../../components/ComboCard';
 import AddFoodModal from '../../components/addfoodmodal';
 import SuccessModal from '../../components/sucessmodal';
+import CustomAlert from '../../components/customAlert';
 import { getCurrentFoodSuggestionMealPeriod, searchFoodItemsWithNutrition } from '../../services/mealAPI';
 import {
     getCachedHomeSnapshot,
@@ -20,6 +21,7 @@ import {
     fetchMealsSummaryWithCache,
     markMealsSummaryDirty,
 } from '../../services/mealsSummaryStore';
+import { markFavoritesDirty } from '../../services/favoritesStore';
 
 type MacroSet = {
     calories: number;
@@ -132,6 +134,9 @@ const getDefaultMealLogType = (): MealLogType => {
     return 'dinner';
 };
 
+const getFavoriteExternalId = (item: any) =>
+    String(item?.fatsecret_food_id || item?.food_id || item?.externalId || item?.external_id || item?.id || '').trim();
+
 const HomeScreen = () => {
     const router = useRouter();
     const { userId } = useAuth(); // Clerk ID
@@ -152,6 +157,30 @@ const HomeScreen = () => {
     const [isAddFoodModalVisible, setIsAddFoodModalVisible] = useState(false);
     const [activeMealType, setActiveMealType] = useState<MealLogType>('breakfast');
     const [showSuccess, setShowSuccess] = useState(false);
+    const [showMealSelector, setShowMealSelector] = useState(false);
+    const [selectedRecommendedFood, setSelectedRecommendedFood] = useState<any | null>(null);
+    const [favoriteItemKeys, setFavoriteItemKeys] = useState<Record<string, boolean>>({});
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState({
+        title: '',
+        message: '',
+        confirmText: 'OK',
+        variant: 'default' as 'default' | 'success',
+    });
+
+    const showCustomAlert = useCallback((
+        title: string,
+        message: string,
+        options: { confirmText?: string; variant?: 'default' | 'success' } = {}
+    ) => {
+        setAlertConfig({
+            title,
+            message,
+            confirmText: options.confirmText || 'OK',
+            variant: options.variant || 'default',
+        });
+        setAlertVisible(true);
+    }, []);
 
     const hydrateFromCache = useCallback(() => {
         if (!userId) return;
@@ -264,6 +293,28 @@ const HomeScreen = () => {
         }
     }, [userId]);
 
+    const loadFavoriteItemKeys = useCallback(async () => {
+        if (!userId) return;
+        try {
+            const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
+            if (!apiURL) return;
+            const response = await fetch(`${apiURL}/api/favorites/list/${encodeURIComponent(userId)}`, {
+                cache: 'no-store',
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            const next: Record<string, boolean> = {};
+            const favorites = Array.isArray(data?.favoriteFoods) ? data.favoriteFoods : [];
+            favorites.forEach((favorite: any) => {
+                const externalId = String(favorite?.externalId || favorite?.external_id || '').trim();
+                if (externalId) next[externalId] = true;
+            });
+            setFavoriteItemKeys(next);
+        } catch (error) {
+            console.error('Home favorite status load error:', error);
+        }
+    }, [userId]);
+
     useFocusEffect(useCallback(() => {
         const cached = getCachedHomeSnapshot(userId);
         hydrateFromCache();
@@ -279,22 +330,24 @@ const HomeScreen = () => {
         if (shouldRefreshFoods) {
             void loadFoodItems({ showSpinner: !cached?.foodItems?.length });
         }
-    }, [hydrateFromCache, loadDashboardData, loadFoodItems, userId]));
+        void loadFavoriteItemKeys();
+    }, [hydrateFromCache, loadDashboardData, loadFavoriteItemKeys, loadFoodItems, userId]));
 
     const handleOpenHomeAddFood = () => {
         setActiveMealType(getDefaultMealLogType());
         setIsAddFoodModalVisible(true);
     };
 
-    const handleAddHomeFood = async (foodItem: any) => {
+    const handleAddHomeFood = async (foodItem: any, mealTypeOverride?: MealLogType) => {
         if (!userId) {
-            Alert.alert('Error', 'You must be logged in to save meals.');
+            showCustomAlert('Error', 'You must be logged in to save meals.');
             return;
         }
 
         try {
             const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
             if (!apiURL) throw new Error('Missing backend URL');
+            const mealType = mealTypeOverride || activeMealType;
 
             const response = await fetch(`${apiURL}/api/meals/add`, {
                 method: 'POST',
@@ -302,7 +355,7 @@ const HomeScreen = () => {
                 body: JSON.stringify({
                     clerkId: userId,
                     date: getTodayFormatted(),
-                    mealType: activeMealType,
+                    mealType,
                     foodName: foodItem.title || foodItem.food_name || 'Unknown Item',
                     calories: toNumber(foodItem.calories),
                     protein: toNumber(foodItem.protein),
@@ -320,7 +373,41 @@ const HomeScreen = () => {
             void loadDashboardData({ showSpinner: false });
         } catch (error) {
             console.error('Home add food error:', error);
-            Alert.alert('Error', 'Failed to add food item.');
+            showCustomAlert('Error', 'Failed to add food item.');
+        }
+    };
+
+    const openRecommendedMealSelector = (item: any) => {
+        setSelectedRecommendedFood(item);
+        setShowMealSelector(true);
+    };
+
+    const handleSelectRecommendedMeal = (mealType: MealLogType) => {
+        const item = selectedRecommendedFood;
+        setShowMealSelector(false);
+        setSelectedRecommendedFood(null);
+        if (item) {
+            void handleAddHomeFood(item, mealType);
+        }
+    };
+
+    const handleFavoriteChange = (item: any, isFavorite: boolean) => {
+        const externalId = getFavoriteExternalId(item);
+        if (externalId) {
+            setFavoriteItemKeys((current) => ({
+                ...current,
+                [externalId]: isFavorite,
+            }));
+        }
+        markFavoritesDirty(userId);
+
+        if (isFavorite) {
+            showCustomAlert('Success!', 'Dish saved to your favorite foods.', {
+                confirmText: 'Confirm',
+                variant: 'success',
+            });
+        } else {
+            showCustomAlert('Favorites', 'Dish removed from your favorite foods.');
         }
     };
 
@@ -566,18 +653,16 @@ const HomeScreen = () => {
                             <ComboCard
                                 key={`${item?.fatsecret_food_id || item?.food_id || item?.id || item?.title || 'food'}-${index}`}
                                 item={item}
+                                isFavorite={!!favoriteItemKeys[getFavoriteExternalId(item)]}
+                                onFavoriteChange={handleFavoriteChange}
+                                onFavoriteError={() => showCustomAlert('Error', 'Could not update this favorite food.')}
                                 onPress={() => {
                                     router.push({
                                         pathname: '/(tabs)/meal/comboDetail',
                                         params: { itemData: JSON.stringify(item) }
                                     });
                                 }}
-                                onAdd={() => {
-                                    router.push({
-                                        pathname: '/(tabs)/meal/comboDetail',
-                                        params: { itemData: JSON.stringify(item) }
-                                    });
-                                }}
+                                onAdd={() => openRecommendedMealSelector(item)}
                             />
                         ))}
                     </View>
@@ -605,6 +690,40 @@ const HomeScreen = () => {
                     onAddFood={handleAddHomeFood}
                 />
             )}
+
+            <Modal visible={showMealSelector} transparent animationType="fade">
+                <TouchableWithoutFeedback onPress={() => setShowMealSelector(false)}>
+                    <View className="flex-1 bg-black/50 justify-center items-center px-4">
+                        <TouchableWithoutFeedback>
+                            <View className="bg-white w-full max-w-xs p-6 rounded-3xl items-center shadow-xl">
+                                <Text className="text-xl font-bold text-gray-900 mb-2">Select Meal</Text>
+                                <Text className="text-gray-400 text-center text-sm mb-6">When are you eating this?</Text>
+                                <TouchableOpacity onPress={() => handleSelectRecommendedMeal('breakfast')} className="w-full bg-white py-4 rounded-2xl mb-3 border border-gray-100 px-4">
+                                    <Text className="font-bold text-gray-700 text-base">Breakfast</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => handleSelectRecommendedMeal('lunch')} className="w-full bg-white py-4 rounded-2xl mb-3 border border-gray-100 px-4">
+                                    <Text className="font-bold text-gray-700 text-base">Lunch</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => handleSelectRecommendedMeal('dinner')} className="w-full bg-white py-4 rounded-2xl mb-6 border border-gray-100 px-4">
+                                    <Text className="font-bold text-gray-700 text-base">Dinner</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => setShowMealSelector(false)}>
+                                    <Text className="text-gray-400 font-bold">Cancel</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </TouchableWithoutFeedback>
+                    </View>
+                </TouchableWithoutFeedback>
+            </Modal>
+
+            <CustomAlert
+                visible={alertVisible}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                confirmText={alertConfig.confirmText}
+                variant={alertConfig.variant}
+                onConfirm={() => setAlertVisible(false)}
+            />
         </SafeAreaView>
     );
 };

@@ -275,6 +275,7 @@ const PlanningScreen = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [pickingItemKey, setPickingItemKey] = useState<string | null>(null);
   const [favoriteItemKeys, setFavoriteItemKeys] = useState<Record<string, boolean>>({});
+  const [favoriteExternalIds, setFavoriteExternalIds] = useState<Set<string>>(() => new Set());
   const [favoriteLoadingKey, setFavoriteLoadingKey] = useState<string | null>(null);
   const [alertConfig, setAlertConfig] = useState({
     title: "",
@@ -336,6 +337,26 @@ const PlanningScreen = () => {
       limit: 10,
     });
     if (isMountedRef.current) setMostConsumedItems(items);
+  }, [configuredApiURL, userId]);
+
+  const loadFavoriteStatuses = useCallback(async () => {
+    if (!userId || !configuredApiURL) return;
+    try {
+      const response = await fetch(`${configuredApiURL}/api/favorites/list/${encodeURIComponent(userId)}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const payload = await response.json().catch(() => ({}));
+      const favorites = Array.isArray(payload?.favoriteFoods) ? payload.favoriteFoods : [];
+      const ids = new Set<string>();
+      favorites.forEach((favorite: any) => {
+        const externalId = String(favorite?.externalId || favorite?.external_id || "").trim();
+        if (externalId) ids.add(externalId);
+      });
+      if (isMountedRef.current) setFavoriteExternalIds(ids);
+    } catch {
+      // Favorite state is cosmetic here; keep the cards usable if this refresh fails.
+    }
   }, [configuredApiURL, userId]);
 
   const applyRecommendationPayload = useCallback((payload: any, mealScope: MealType | "all" = "all") => {
@@ -458,7 +479,8 @@ const PlanningScreen = () => {
   useFocusEffect(
     useCallback(() => {
       refreshDailyProgress();
-    }, [refreshDailyProgress])
+      void loadFavoriteStatuses();
+    }, [loadFavoriteStatuses, refreshDailyProgress])
   );
 
   useEffect(() => {
@@ -644,6 +666,18 @@ const PlanningScreen = () => {
         ...current,
         [key]: !!payload?.isFavorite,
       }));
+      const externalId = getExternalId(item);
+      if (externalId) {
+        setFavoriteExternalIds((current) => {
+          const next = new Set(current);
+          if (payload?.isFavorite) {
+            next.add(externalId);
+          } else {
+            next.delete(externalId);
+          }
+          return next;
+        });
+      }
       markFavoritesDirty(userId);
 
       if (payload?.isFavorite) {
@@ -670,6 +704,15 @@ const PlanningScreen = () => {
       },
     });
   };
+
+  const isFavoriteItem = useCallback((item: any) => {
+    const key = createItemKey(item);
+    if (key && Object.prototype.hasOwnProperty.call(favoriteItemKeys, key)) {
+      return !!favoriteItemKeys[key];
+    }
+    const externalId = getExternalId(item);
+    return !!externalId && favoriteExternalIds.has(externalId);
+  }, [favoriteExternalIds, favoriteItemKeys]);
 
   const showMealLogOutcome = (payload: any) => {
     if (payload?.exceededLimit) {
@@ -999,7 +1042,7 @@ const PlanningScreen = () => {
                     key={`${key}-${index}`}
                     item={item}
                     isSelected={!!selectedItemKeys[key]}
-                    isFavorite={!!favoriteItemKeys[key]}
+                    isFavorite={isFavoriteItem(item)}
                     isFavoriteLoading={favoriteLoadingKey === key}
                     onPress={() => goToDetail(item)}
                     onToggleSelect={() => handlePickItem(item)}
