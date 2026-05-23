@@ -35,6 +35,50 @@ const firstFiniteNumber = (...values: any[]) => {
 
 // Treat only numeric ids as valid FatSecret food identifiers.
 const isNumericFatSecretId = (value: any) => /^\d+$/.test(String(value ?? "").trim());
+const normalizeKey = (value: any) => String(value ?? "").trim().toLowerCase();
+const cleanId = (value: any) => String(value ?? "").trim();
+const getSourceKey = (item: any) => normalizeKey(item?.source || item?.type || "");
+const isRecipeLikeItem = (item: any) => {
+  const id = cleanId(item?.id);
+  const source = getSourceKey(item);
+  return source.includes("recipe") || !!cleanId(item?.recipe_id) || id.startsWith("recipe-");
+};
+const isLocalOnlyItem = (item: any) => {
+  const id = cleanId(item?.id);
+  const externalId = cleanId(item?.externalId || item?.external_id);
+  const source = getSourceKey(item);
+  return (
+    id.startsWith("local-") ||
+    id.startsWith("custom-") ||
+    externalId.startsWith("local-") ||
+    externalId.startsWith("custom-") ||
+    externalId.startsWith("title:") ||
+    source.includes("custom") ||
+    source.includes("local")
+  );
+};
+const hasFoodDetailSignals = (item: any) => {
+  const source = getSourceKey(item);
+  return (
+    source === "fatsecret_food" ||
+    source === "food" ||
+    item?.type === "food" ||
+    !!item?.food_type ||
+    !!item?.food_url ||
+    !!item?.brand_name ||
+    !!item?.serving_id
+  );
+};
+const getFallbackFatSecretFoodId = (item: any) => {
+  if (isRecipeLikeItem(item) || isLocalOnlyItem(item)) return "";
+
+  for (const value of [item?.food_id, item?.externalId, item?.external_id]) {
+    if (isNumericFatSecretId(value)) return cleanId(value);
+  }
+
+  const id = cleanId(item?.id);
+  return hasFoodDetailSignals(item) && isNumericFatSecretId(id) ? id : "";
+};
 
 const hasMeaningfulMacroSnapshot = (item: any) =>
   [item?.calories, item?.protein, item?.carbs, item?.fats, item?.fat].some((value) => Number(value) > 0);
@@ -149,7 +193,7 @@ const FoodDetailScreen = () => {
       setLoadingNutrition(!snapshotFacts);
       try {
         const explicitFatSecretId = String(selectedDish?.fatsecret_food_id || "").trim();
-        const fallbackFoodId = String(selectedDish?.food_id || selectedDish?.id || "").trim();
+        const fallbackFoodId = getFallbackFatSecretFoodId(selectedDish);
         const hasResolvableFatSecretId =
           isNumericFatSecretId(explicitFatSecretId) || isNumericFatSecretId(fallbackFoodId);
         

@@ -290,6 +290,48 @@ const cleanId = (value: any) => {
 };
 // Only numeric ids are valid for direct FatSecret food detail lookups.
 const isNumericFatSecretId = (value: any) => /^\d+$/.test(cleanId(value));
+const getSourceKey = (item: any) => normalizeLookupKey(item?.source || item?.type || "");
+const isRecipeLikeFoodItem = (item: any) => {
+  const id = cleanId(item?.id);
+  const source = getSourceKey(item);
+  return source.includes("recipe") || !!cleanId(item?.recipe_id) || id.startsWith("recipe-");
+};
+const isLocalOnlyFoodItem = (item: any) => {
+  const id = cleanId(item?.id);
+  const externalId = cleanId(item?.externalId || item?.external_id);
+  const source = getSourceKey(item);
+  return (
+    id.startsWith("local-") ||
+    id.startsWith("custom-") ||
+    externalId.startsWith("local-") ||
+    externalId.startsWith("custom-") ||
+    externalId.startsWith("title:") ||
+    source.includes("custom") ||
+    source.includes("local")
+  );
+};
+const hasFoodDetailSignals = (item: any) => {
+  const source = getSourceKey(item);
+  return (
+    source === "fatsecret_food" ||
+    source === "food" ||
+    item?.type === "food" ||
+    !!item?.food_type ||
+    !!item?.food_url ||
+    !!item?.brand_name ||
+    !!item?.serving_id
+  );
+};
+const getFallbackFatSecretFoodId = (item: any) => {
+  if (isRecipeLikeFoodItem(item) || isLocalOnlyFoodItem(item)) return "";
+
+  for (const value of [item?.food_id, item?.externalId, item?.external_id]) {
+    if (isNumericFatSecretId(value)) return cleanId(value);
+  }
+
+  const id = cleanId(item?.id);
+  return hasFoodDetailSignals(item) && isNumericFatSecretId(id) ? id : "";
+};
 const toNumeric = (value: any, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -1681,11 +1723,11 @@ export const resolveFoodImageFromFatSecret = async (
   options: { preferFatSecretImage?: boolean } = {}
 ) => {
   const explicitFatSecretId = cleanId(item?.fatsecret_food_id);
-  const fallbackId = cleanId(item?.food_id || item?.id);
+  const fallbackId = getFallbackFatSecretFoodId(item);
   const rawId = explicitFatSecretId || fallbackId;
   const image = String(item?.image || "").trim();
   const preferFatSecretImage = !!options.preferFatSecretImage;
-  const hasResolvableFatSecretId = !!rawId && !rawId.startsWith("local-");
+  const hasResolvableFatSecretId = isNumericFatSecretId(rawId);
   const hasExplicitFatSecretId = !!explicitFatSecretId && !explicitFatSecretId.startsWith('local-');
   const semanticImageOverride = getSemanticImageOverride(item);
   const forceSemanticImageSearch = !!semanticImageOverride?.forceSearch;
@@ -1949,9 +1991,7 @@ export const fetchFoodDetailForFacts = async (
   const explicitFatSecretId = isNumericFatSecretId(item?.fatsecret_food_id)
     ? cleanId(item?.fatsecret_food_id)
     : "";
-  const fallbackFoodId = isNumericFatSecretId(item?.food_id || item?.id)
-    ? cleanId(item?.food_id || item?.id)
-    : "";
+  const fallbackFoodId = getFallbackFatSecretFoodId(item);
   const primaryId = explicitFatSecretId || fallbackFoodId;
   const hasResolvableId = !!primaryId;
   const hasExplicitFatSecretId = !!explicitFatSecretId;
@@ -2039,8 +2079,9 @@ export const fetchFoodDetailForFacts = async (
       merged.serving_description = source?.serving_description || item?.serving_description || fallbackServingText || "1 serving";
     }
 
+    const itemFoodId = getFallbackFatSecretFoodId(item);
     merged.id = source?.id || source?.food_id || item?.id || foodId || null;
-    merged.food_id = source?.food_id || foodId || item?.food_id || item?.id || null;
+    merged.food_id = source?.food_id || foodId || itemFoodId || null;
     merged.fatsecret_food_id = hasExplicitFatSecretId ? explicitFatSecretId : item?.fatsecret_food_id || null;
     merged.image = item?.image || source?.image || "";
 
