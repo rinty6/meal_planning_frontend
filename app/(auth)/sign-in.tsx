@@ -27,8 +27,47 @@ const SignInScreen = () => {
     setAlertVisible(true);
   };
 
+  const openSignedInApp = async (signInResult: any) => {
+    if (signInResult?.status === 'complete' && signInResult.createdSessionId) {
+      if (setActive) {
+        await setActive({ session: signInResult.createdSessionId });
+      }
+      router.replace('/');
+      return true;
+    }
+
+    return false;
+  };
+
+  const showIncompleteSignInMessage = (status?: string | null) => {
+    if (status === 'needs_second_factor') {
+      showSimpleAlert(
+        'Verification Required',
+        'This account requires an extra verification step. Please use a demo account without multi-factor authentication for App Review.'
+      );
+      return;
+    }
+
+    if (status === 'needs_new_password') {
+      showSimpleAlert(
+        'Password Update Required',
+        'This account needs a password update before it can sign in.'
+      );
+      return;
+    }
+
+    showSimpleAlert(
+      'Error',
+      status
+        ? `Sign in could not finish. Clerk returned: ${status}.`
+        : 'Sign in failed. Please try again.'
+    );
+  };
+
   const handleSignIn = async () => {
-    if (!email || !password) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !password) {
       showSimpleAlert('Warning', 'Please fill in all the fields');
       return;
     }
@@ -38,16 +77,35 @@ const SignInScreen = () => {
 
     try {
       const signInAttempt = await signIn.create({
-        identifier: email,
+        identifier: normalizedEmail,
         password,
       });
 
-      if (signInAttempt.status === 'complete') {
-        await setActive({ session: signInAttempt.createdSessionId });
-        router.replace('/');
-      } else {
-        showSimpleAlert('Error', 'Sign in failed. Please try again.');
+      if (await openSignedInApp(signInAttempt)) {
+        return;
       }
+
+      if (signInAttempt.status === 'needs_first_factor') {
+        const firstFactorAttempt = await signIn.attemptFirstFactor({
+          strategy: 'password',
+          password,
+        });
+
+        if (await openSignedInApp(firstFactorAttempt)) {
+          return;
+        }
+
+        console.warn('[auth] password first factor did not complete', {
+          status: firstFactorAttempt?.status,
+        });
+        showIncompleteSignInMessage(firstFactorAttempt?.status);
+        return;
+      }
+
+      console.warn('[auth] sign-in did not complete', {
+        status: signInAttempt.status,
+      });
+      showIncompleteSignInMessage(signInAttempt.status);
     } catch (error: any) {
       showSimpleAlert(
         'Error',
@@ -150,6 +208,11 @@ const SignInScreen = () => {
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              textContentType="username"
+              returnKeyType="next"
             />
             <TextInputArea
               placeholder="Password"
@@ -159,6 +222,12 @@ const SignInScreen = () => {
               secureTextEntry={!showPassword}
               isPasswordVisible={showPassword}
               onTogglePassword={() => setShowPassword(!showPassword)}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="password"
+              textContentType="password"
+              returnKeyType="done"
+              onSubmitEditing={handleSignIn}
             />
 
             <TouchableOpacity

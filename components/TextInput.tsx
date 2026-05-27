@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity } from 'react-native'
+import { View, TextInput, TouchableOpacity, type TextInputProps } from 'react-native'
 import React from 'react'
 import { Ionicons } from '@expo/vector-icons'
 
@@ -12,6 +12,12 @@ interface TextInputAreaProps {
   isPassword?: boolean; // Is this a password input? (Triggers the eye icon)
   onTogglePassword?: () => void; // Function to run when eye is clicked
   isPasswordVisible?: boolean;   // Is the text currently visible?
+  autoCapitalize?: TextInputProps['autoCapitalize'];
+  autoCorrect?: TextInputProps['autoCorrect'];
+  autoComplete?: TextInputProps['autoComplete'];
+  textContentType?: TextInputProps['textContentType'];
+  returnKeyType?: TextInputProps['returnKeyType'];
+  onSubmitEditing?: TextInputProps['onSubmitEditing'];
 }
 
 
@@ -25,7 +31,14 @@ const TextInputArea = ({
   keyboardType = 'default',
   isPassword = false, // Default to false
   onTogglePassword,
-  isPasswordVisible = false}: TextInputAreaProps) => {
+  isPasswordVisible = false,
+  autoCapitalize,
+  autoCorrect,
+  autoComplete,
+  textContentType,
+  returnKeyType,
+  onSubmitEditing,
+}: TextInputAreaProps) => {
   return (
     <View className="flex-row items-center border border-border rounded-lg px-3 bg-background mb-4">
       <TextInput
@@ -35,6 +48,12 @@ const TextInputArea = ({
         onChangeText={onChangeText}
         secureTextEntry={secureTextEntry}
         keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={autoCorrect}
+        autoComplete={autoComplete}
+        textContentType={textContentType}
+        returnKeyType={returnKeyType}
+        onSubmitEditing={onSubmitEditing}
         placeholderTextColor="#9CA3AF"
       />
       
