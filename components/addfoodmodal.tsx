@@ -177,26 +177,9 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   // --- FOOD RECOGNITION ---
-  const handleScanFood = async () => {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      showCustomAlert('Camera Access Required', 'Enable camera permissions to scan food.');
-      return;
-    }
-
-    const pickerResult = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
-
-    if (pickerResult.canceled || !pickerResult.assets?.length) return;
-
-    const uri = pickerResult.assets[0].uri;
+  const processImageForRecognition = async (uri: string) => {
     setRecognitionImageUri(uri);
     setRecognitionLoading(true);
-
     try {
       const prediction = await recognizeFood(uri);
       setRecognitionResult(prediction);
@@ -207,6 +190,38 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     } finally {
       setRecognitionLoading(false);
     }
+  };
+
+  const handleTakePhoto = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      showCustomAlert('Camera Access Required', 'Enable camera permissions to scan food.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    await processImageForRecognition(result.assets[0].uri);
+  };
+
+  const handlePickFromLibrary = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      showCustomAlert('Permission Required', 'Enable photo library access to upload a food image.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    await processImageForRecognition(result.assets[0].uri);
   };
 
   const handleUseFoodFromRecognition = (candidate: FoodCandidate) => {
@@ -240,7 +255,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   const handleRecognitionTryAgain = () => {
     clearRecognitionState();
     setViewMode('search');
-    setTimeout(() => handleScanFood(), 400);
+    setTimeout(() => handleTakePhoto(), 400);
   };
 
   const clearRecognitionState = () => {
@@ -469,20 +484,27 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   >
                     <Text className="text-white font-bold text-lg">+ Add Food Manually</Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setBarcodeScanning(true)}
+                    className="border-2 border-primary py-3 rounded-xl items-center flex-row justify-center mb-3"
+                  >
+                    <Ionicons name="barcode-outline" size={18} color="#007BFF" />
+                    <Text className="text-primary font-bold ml-2">Scan Barcode</Text>
+                  </TouchableOpacity>
                   <View className="flex-row">
                     <TouchableOpacity
-                      onPress={() => setBarcodeScanning(true)}
+                      onPress={handleTakePhoto}
                       className="flex-1 border-2 border-primary py-3 rounded-xl items-center flex-row justify-center mr-2"
                     >
-                      <Ionicons name="barcode-outline" size={18} color="#007BFF" />
-                      <Text className="text-primary font-bold ml-2">Scan Barcode</Text>
+                      <Ionicons name="camera-outline" size={18} color="#007BFF" />
+                      <Text className="text-primary font-bold ml-2">Take Photo</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      onPress={handleScanFood}
+                      onPress={handlePickFromLibrary}
                       className="flex-1 border-2 border-primary py-3 rounded-xl items-center flex-row justify-center"
                     >
-                      <Ionicons name="camera-outline" size={18} color="#007BFF" />
-                      <Text className="text-primary font-bold ml-2">Scan Food</Text>
+                      <Ionicons name="images-outline" size={18} color="#007BFF" />
+                      <Text className="text-primary font-bold ml-2">Upload Photo</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
