@@ -1598,8 +1598,30 @@ const hydrateTimeBasedRecommendationImages = async (items: any[], maxResults: nu
   });
 };
 
-export const searchFoodItemsWithNutrition = async (query = '', maxResults = 10) => {
+const applyTimeBasedRecommendationFallbackImages = (items: any[]) =>
+  items.map((item) => {
+    if (String(item?.image || '').trim()) return item;
+
+    return {
+      ...item,
+      image: getTimeBasedRecommendationFallbackImage(item),
+      image_lookup_state: 'resolved',
+      image_lookup_source: 'time-based-fallback',
+    };
+  });
+
+type SearchFoodItemsWithNutritionOptions = {
+  hydrateDetails?: boolean;
+  hydrateImages?: boolean;
+};
+
+export const searchFoodItemsWithNutrition = async (
+  query = '',
+  maxResults = 10,
+  options: SearchFoodItemsWithNutritionOptions = {}
+) => {
   try {
+    const { hydrateDetails = true, hydrateImages = true } = options;
     const searchContext = buildFoodSearchContext(query);
     const candidateSearchLimit = Math.min(25, Math.max(maxResults * 2, maxResults + 3));
 
@@ -1623,7 +1645,30 @@ export const searchFoodItemsWithNutrition = async (query = '', maxResults = 10) 
     }
     
     if (basicItems.length === 0) return [];
-    
+
+    if (!hydrateDetails) {
+      const basicRecommendationItems = dedupeFoodRecommendations(
+        searchContext.isTimeBased
+          ? basicItems.filter(isTimeBasedFoodRecommendationCandidate)
+          : basicItems,
+        maxResults
+      ).map((item: any) =>
+        withTimeBasedRecommendationMetadata(
+          {
+            ...item,
+            grams: item.metric_serving_amount || 100,
+            time: item.time || '15 min',
+          },
+          searchContext,
+          item?.recommendationQuery || resolvedSearchQuery
+        )
+      );
+
+      return searchContext.isTimeBased
+        ? applyTimeBasedRecommendationFallbackImages(basicRecommendationItems)
+        : basicRecommendationItems;
+    }
+
     // Then enrich each item with nutritional data
     const enrichedItems = await Promise.all(
       basicItems.map(async (item: any) => {
@@ -1660,9 +1705,11 @@ export const searchFoodItemsWithNutrition = async (query = '', maxResults = 10) 
       maxResults
     );
 
-    return searchContext.isTimeBased
+    if (!searchContext.isTimeBased) return filteredEnrichedItems;
+
+    return hydrateImages
       ? hydrateTimeBasedRecommendationImages(filteredEnrichedItems, maxResults)
-      : filteredEnrichedItems;
+      : applyTimeBasedRecommendationFallbackImages(filteredEnrichedItems);
   } catch (error) {
     console.error("Food Search with Nutrition Error:", error);
     return [];

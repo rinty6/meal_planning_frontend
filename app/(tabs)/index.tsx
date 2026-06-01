@@ -12,6 +12,7 @@ import CustomAlert from '../../components/customAlert';
 import { getCurrentFoodSuggestionMealPeriod, searchFoodItemsWithNutrition } from '../../services/mealAPI';
 import {
     getCachedHomeSnapshot,
+    hydrateHomeFoodItemsFromStorage,
     setCachedHomeDashboard,
     setCachedHomeFoodItems,
     shouldRefreshHomeDashboard,
@@ -277,7 +278,10 @@ const HomeScreen = () => {
         if (showSpinner) setLoadingFoodItems(true);
         try {
             // Empty query lets mealAPI choose breakfast/lunch/dinner/snack suggestions by current time.
-            const items = await searchFoodItemsWithNutrition('', 5);
+            const items = await searchFoodItemsWithNutrition('', 5, {
+                hydrateDetails: false,
+                hydrateImages: false,
+            });
             setFoodItems(items);
             if (userId) {
                 setCachedHomeFoodItems(
@@ -316,21 +320,41 @@ const HomeScreen = () => {
     }, [userId]);
 
     useFocusEffect(useCallback(() => {
-        const cached = getCachedHomeSnapshot(userId);
-        hydrateFromCache();
+        let isActive = true;
 
-        const shouldRefreshDashboard = shouldRefreshHomeDashboard(userId, HOME_DASHBOARD_REFRESH_TTL_MS) || !cached?.macros;
-        const shouldRefreshFoods =
-            shouldRefreshHomeFoodItems(userId, HOME_FOOD_ITEMS_REFRESH_TTL_MS, getCurrentFoodSuggestionMealPeriod()) ||
-            !cached?.foodItems?.length;
+        const initializeHomeScreen = async () => {
+            let cached = getCachedHomeSnapshot(userId);
+            hydrateFromCache();
 
-        if (shouldRefreshDashboard) {
-            void loadDashboardData({ showSpinner: !cached?.macros });
-        }
-        if (shouldRefreshFoods) {
-            void loadFoodItems({ showSpinner: !cached?.foodItems?.length });
-        }
-        void loadFavoriteItemKeys();
+            if (!cached?.foodItems?.length) {
+                const persisted = await hydrateHomeFoodItemsFromStorage(userId);
+                if (!isActive) return;
+                if (persisted?.foodItems?.length) {
+                    cached = persisted;
+                    setFoodItems(persisted.foodItems);
+                    setLoadingFoodItems(false);
+                }
+            }
+
+            const shouldRefreshDashboard = shouldRefreshHomeDashboard(userId, HOME_DASHBOARD_REFRESH_TTL_MS) || !cached?.macros;
+            const shouldRefreshFoods =
+                shouldRefreshHomeFoodItems(userId, HOME_FOOD_ITEMS_REFRESH_TTL_MS, getCurrentFoodSuggestionMealPeriod()) ||
+                !cached?.foodItems?.length;
+
+            if (shouldRefreshDashboard) {
+                void loadDashboardData({ showSpinner: !cached?.macros });
+            }
+            if (shouldRefreshFoods) {
+                void loadFoodItems({ showSpinner: !cached?.foodItems?.length });
+            }
+            void loadFavoriteItemKeys();
+        };
+
+        void initializeHomeScreen();
+
+        return () => {
+            isActive = false;
+        };
     }, [hydrateFromCache, loadDashboardData, loadFavoriteItemKeys, loadFoodItems, userId]));
 
     const handleOpenHomeAddFood = () => {
