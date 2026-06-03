@@ -135,6 +135,8 @@ const FoodDetailScreen = () => {
   const [alertVisible, setAlertVisible] = useState(false);
   const [nutritionFacts, setNutritionFacts] = useState<NutritionFactsState | null>(null);
   const [detailItem, setDetailItem] = useState<ComboDetailItem | null>(null);
+  const [detailItemRouteKey, setDetailItemRouteKey] = useState("");
+  const [detailItemOwnerKey, setDetailItemOwnerKey] = useState("");
   const [loadingNutrition, setLoadingNutrition] = useState(false);
   const [selectedDish, setSelectedDish] = useState<ComboDetailItem | null>(null);
   const latestNutritionRequestRef = useRef(0);
@@ -149,16 +151,35 @@ const FoodDetailScreen = () => {
     onConfirm: () => {},
   });
 
-  const rawItem = params.itemData || params.comboData;
-  const item = rawItem ? (JSON.parse(rawItem as string) as ComboDetailPayload) : null;
+  const rawItemParam = params.itemData || params.comboData;
+  const rawItemString = Array.isArray(rawItemParam) ? rawItemParam[0] : rawItemParam;
+  const routePayloadKey = rawItemString || "";
+  const item = useMemo<ComboDetailPayload | null>(() => {
+    if (!rawItemString) return null;
+    try {
+      return JSON.parse(rawItemString) as ComboDetailPayload;
+    } catch (error) {
+      console.error("Combo detail payload parse error:", error);
+      return null;
+    }
+  }, [rawItemString]);
   // NOTE: Combo detail renders a main + side + drink (fallback to single item).
   const comboItems = useMemo<ComboDetailItem[]>(
     () => (Array.isArray(item?.items) && item.items.length > 0 ? item.items : item ? [item] : []),
     [item]
   );
+  const selectedDishInCurrentPayload = useMemo(() => {
+    const selectedIdentity = getDishIdentity(selectedDish);
+    if (!selectedIdentity) return null;
+    return comboItems.find((dish) => getDishIdentity(dish) === selectedIdentity) || null;
+  }, [comboItems, selectedDish]);
+  const activeSelectedDish = selectedDishInCurrentPayload || comboItems[0] || item || null;
+  const activeSelectedDishKey = getDishIdentity(activeSelectedDish);
+  const currentDetailItem =
+    detailItemRouteKey === routePayloadKey && detailItemOwnerKey === activeSelectedDishKey ? detailItem : null;
   const resolvedSingleItem = useMemo(
-    () => (comboItems.length === 1 ? mergeFoodSnapshot(comboItems[0] || item, detailItem) : null),
-    [comboItems, detailItem, item]
+    () => (comboItems.length === 1 ? mergeFoodSnapshot(comboItems[0] || item, currentDetailItem) : null),
+    [comboItems, currentDetailItem, item]
   );
   const displayComboItems = useMemo(
     () => (resolvedSingleItem ? [resolvedSingleItem] : comboItems),
@@ -171,23 +192,37 @@ const FoodDetailScreen = () => {
       : null;
 
   useEffect(() => {
-    if (comboItems.length > 0) {
-      setSelectedDish((prev) => prev || comboItems[0]);
-    }
-  }, [comboItems]);
+    latestNutritionRequestRef.current += 1;
+    const nextDish = comboItems[0] || null;
+    const snapshotFacts = nextDish && hasMeaningfulMacroSnapshot(nextDish)
+      ? buildNutritionFactsFromFood(nextDish)
+      : null;
+
+    setSelectedDish(nextDish);
+    setDetailItem(null);
+    setDetailItemRouteKey(routePayloadKey);
+    setDetailItemOwnerKey(getDishIdentity(nextDish));
+    setNutritionFacts(snapshotFacts);
+    setLoadingNutrition(!!nextDish && !snapshotFacts);
+  }, [comboItems, routePayloadKey]);
 
   // Fetch detailed nutrition facts when item loads, with cache-first strategy
   useEffect(() => {
     const fetchNutritionData = async () => {
       if (!selectedDish) return;
+      if (getDishIdentity(selectedDish) !== activeSelectedDishKey) return;
 
       const requestId = latestNutritionRequestRef.current + 1;
       latestNutritionRequestRef.current = requestId;
+      const requestRouteKey = routePayloadKey;
+      const requestOwnerKey = getDishIdentity(selectedDish);
       const snapshotFacts = hasMeaningfulMacroSnapshot(selectedDish)
         ? buildNutritionFactsFromFood(selectedDish)
         : null;
       startTransition(() => {
         setDetailItem(selectedDish);
+        setDetailItemRouteKey(requestRouteKey);
+        setDetailItemOwnerKey(requestOwnerKey);
         setNutritionFacts(snapshotFacts);
       });
       setLoadingNutrition(!snapshotFacts);
@@ -218,6 +253,8 @@ const FoodDetailScreen = () => {
             ) {
               const cachedSnapshot = mergeFoodSnapshot(selectedDish, matchingItem);
               setDetailItem(cachedSnapshot);
+              setDetailItemRouteKey(requestRouteKey);
+              setDetailItemOwnerKey(requestOwnerKey);
               setNutritionFacts(buildNutritionFactsFromFood(cachedSnapshot));
               setLoadingNutrition(false);
             }
@@ -238,12 +275,16 @@ const FoodDetailScreen = () => {
         startTransition(() => {
           setNutritionFacts(payload?.nutritionFacts || null);
           setDetailItem(payload?.item || selectedDish);
+          setDetailItemRouteKey(requestRouteKey);
+          setDetailItemOwnerKey(requestOwnerKey);
         });
       } catch (error) {
         console.error("Error fetching nutrition facts:", error);
         if (latestNutritionRequestRef.current !== requestId) return;
         setNutritionFacts(null);
         setDetailItem(selectedDish);
+        setDetailItemRouteKey(requestRouteKey);
+        setDetailItemOwnerKey(requestOwnerKey);
       } finally {
         if (latestNutritionRequestRef.current === requestId) {
           setLoadingNutrition(false);
@@ -252,7 +293,7 @@ const FoodDetailScreen = () => {
     };
 
     fetchNutritionData();
-  }, [selectedDish, userId]);
+  }, [selectedDish, userId, routePayloadKey, activeSelectedDishKey]);
 
   const showAlert = (title: string, message: string, onConfirm = () => setAlertVisible(false), onCancel?: () => void) => {
     setAlertConfig({ title, message, onConfirm, onCancel });
@@ -345,7 +386,7 @@ const FoodDetailScreen = () => {
     Number(item?.total_fats) ||
     displayComboItems.reduce((sum: number, comboItem: any) => sum + Number(comboItem?.fats || 0), 0);
 
-  const food = mergeFoodSnapshot(selectedDish || item, detailItem);
+  const food = mergeFoodSnapshot(activeSelectedDish || item, currentDetailItem);
   const comboServingText = `${displayComboItems.length} items`;
 
   return (
@@ -413,7 +454,7 @@ const FoodDetailScreen = () => {
                 : category === "drink"
                   ? "SIDE (DRINK/BREAD)"
                   : "SIDE (VEG/FRUIT)";
-            const isSelected = getDishIdentity(selectedDish) === getDishIdentity(dish);
+            const isSelected = getDishIdentity(activeSelectedDish) === getDishIdentity(dish);
 
             return (
               <TouchableOpacity

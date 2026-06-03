@@ -9,6 +9,8 @@ import ComboCard from '../../components/ComboCard';
 import AddFoodModal from '../../components/addfoodmodal';
 import SuccessModal from '../../components/sucessmodal';
 import CustomAlert from '../../components/customAlert';
+import GuidanceContent from '../../components/GuidanceContent';
+import SafeFullScreenModal from '../../components/SafeFullScreenModal';
 import { getCurrentFoodSuggestionMealPeriod, searchFoodItemsWithNutrition } from '../../services/mealAPI';
 import {
     getCachedHomeSnapshot,
@@ -159,6 +161,7 @@ const HomeScreen = () => {
     const [activeMealType, setActiveMealType] = useState<MealLogType>('breakfast');
     const [showSuccess, setShowSuccess] = useState(false);
     const [showMealSelector, setShowMealSelector] = useState(false);
+    const [isGuidanceVisible, setIsGuidanceVisible] = useState(false);
     const [selectedRecommendedFood, setSelectedRecommendedFood] = useState<any | null>(null);
     const [favoriteItemKeys, setFavoriteItemKeys] = useState<Record<string, boolean>>({});
     const [alertVisible, setAlertVisible] = useState(false);
@@ -436,7 +439,7 @@ const HomeScreen = () => {
     };
 
     const categories = [
-        { name: 'Guide', icon: 'help-circle-outline', route: '/(tabs)/profile/guidance', iconColor: THEME_COLORS.primary, iconBgClass: 'bg-primarySoft' },
+        { name: 'Guide', icon: 'help-circle-outline', onPress: () => setIsGuidanceVisible(true), iconColor: THEME_COLORS.primary, iconBgClass: 'bg-primarySoft' },
         { name: 'Add Food', icon: 'add-circle-outline', onPress: handleOpenHomeAddFood, iconColor: THEME_COLORS.secondary, iconBgClass: 'bg-secondarySoft' },
         { name: 'Meal', icon: 'restaurant-outline', route: '/(tabs)/meal/planning', iconColor: THEME_COLORS.primary, iconBgClass: 'bg-primarySoft' },
         { name: 'Calorie', icon: 'flame-outline', route: '/(tabs)/calorie/summary', iconColor: THEME_COLORS.secondary, iconBgClass: 'bg-secondarySoft' },
@@ -748,6 +751,15 @@ const HomeScreen = () => {
                 variant={alertConfig.variant}
                 onConfirm={() => setAlertVisible(false)}
             />
+
+            <SafeFullScreenModal
+                visible={isGuidanceVisible}
+                onRequestClose={() => setIsGuidanceVisible(false)}
+                backgroundColor="#EEF3F8"
+                statusBarStyle="dark"
+            >
+                <GuidanceContent onClose={() => setIsGuidanceVisible(false)} />
+            </SafeFullScreenModal>
         </SafeAreaView>
     );
 };
