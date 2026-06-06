@@ -5,8 +5,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
+  Linking,
   RefreshControl,
+  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -93,6 +96,8 @@ const NotificationsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [masterEnabled, setMasterEnabled] = useState(true);
+  const [togglingPref, setTogglingPref] = useState(false);
 
   useEffect(() => {
     getTokenRef.current = getToken;
@@ -160,12 +165,93 @@ const NotificationsScreen = () => {
     [userId]
   );
 
+  const loadPreferences = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
+      const token = await getTokenRef.current();
+      if (!apiURL) return;
+      const response = await fetch(`${apiURL}/api/notifications/preferences/${userId}`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'x-clerk-id': userId,
+        },
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (typeof data?.notificationsMasterEnabled === 'boolean') {
+        setMasterEnabled(data.notificationsMasterEnabled);
+      }
+    } catch (error) {
+      console.warn('Failed to load notification preferences:', error);
+    }
+  }, [userId]);
+
+  // When the user turns notifications ON, make sure the OS permission is also
+  // granted — the in-app switch cannot override an iOS-level denial.
+  const ensureOsPermissionGranted = useCallback(async () => {
+    try {
+      const Notifications = await import('expo-notifications');
+      const current = await Notifications.getPermissionsAsync();
+      if (current.status === 'granted') return true;
+      const requested = await Notifications.requestPermissionsAsync();
+      if (requested.status === 'granted') return true;
+      Alert.alert(
+        'Allow notifications',
+        'Notifications are turned off for GoodHealthMate in your device settings. Open Settings to enable them.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]
+      );
+      return false;
+    } catch (error) {
+      // If the check itself fails (e.g. Expo Go), don't block the saved pref.
+      console.warn('OS permission check failed:', error);
+      return true;
+    }
+  }, []);
+
+  const toggleMaster = useCallback(
+    async (next: boolean) => {
+      if (!userId || togglingPref) return;
+      const previous = masterEnabled;
+      setMasterEnabled(next); // optimistic
+      setTogglingPref(true);
+      try {
+        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
+        const token = await getToken();
+        const response = await fetch(`${apiURL}/api/notifications/preferences/${userId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            'x-clerk-id': userId,
+          },
+          body: JSON.stringify({ clerkId: userId, enabled: next }),
+        });
+        if (!response.ok) throw new Error(`status ${response.status}`);
+        if (next) {
+          await ensureOsPermissionGranted();
+        }
+      } catch (error) {
+        console.warn('Failed to update notification preference:', error);
+        setMasterEnabled(previous); // revert on failure
+        Alert.alert('Error', 'Could not update your notification setting. Please try again.');
+      } finally {
+        setTogglingPref(false);
+      }
+    },
+    [userId, masterEnabled, togglingPref, getToken, ensureOsPermissionGranted]
+  );
+
   useFocusEffect(
     useCallback(() => {
       const cached = getCachedNotifications(userId);
       hydrateFromCache();
       void loadNotifications({ showSpinner: !cached });
-    }, [hydrateFromCache, loadNotifications, userId])
+      void loadPreferences();
+    }, [hydrateFromCache, loadNotifications, loadPreferences, userId])
   );
 
   const markAsRead = useCallback(
@@ -238,6 +324,33 @@ const NotificationsScreen = () => {
                 onRefresh={() => loadNotifications({ isRefresh: true, showSpinner: false, force: true })}
                 tintColor="#2563EB"
               />
+            }
+            ListHeaderComponent={
+              <View>
+                {/* Section 1 — master switch */}
+                <View className="mb-5 rounded-2xl border border-gray-200 bg-white p-4">
+                  <View className="flex-row items-center justify-between">
+                    <View className="flex-1 pr-3">
+                      <Text className="text-base font-bold text-[#1F2937]">Enable Notifications</Text>
+                      <Text className="text-sm text-[#64748B] mt-1 leading-5">
+                        Turn all GoodHealthMate notifications on or off. When off, you won&apos;t
+                        receive meal reminders or calorie goal updates.
+                      </Text>
+                    </View>
+                    <Switch
+                      value={masterEnabled}
+                      onValueChange={toggleMaster}
+                      disabled={togglingPref}
+                      trackColor={{ false: '#CBD5E1', true: '#2563EB' }}
+                    />
+                  </View>
+                </View>
+
+                {/* Section 2 — messages heading */}
+                <Text className="text-sm font-semibold text-[#475569] mb-2 ml-1">
+                  Recent notifications
+                </Text>
+              </View>
             }
             renderItem={({ item }) => (
               <NotificationCard item={item} onPress={onPressNotification} />

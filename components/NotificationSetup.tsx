@@ -17,6 +17,18 @@ function isExpoGoRuntime() {
   return Constants.executionEnvironment === ExecutionEnvironment.StoreClient || Constants.appOwnership === 'expo';
 }
 
+// Resolve the device's IANA timezone (e.g. "Australia/Perth") with no native
+// dependency — Hermes ships Intl on SDK 54, so this is OTA-deployable.
+function getDeviceTimeZone(): string | null {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && tz !== 'Etc/Unknown') return tz;
+  } catch {
+    // Intl unavailable in some minimal runtimes — backend falls back to default.
+  }
+  return null;
+}
+
 async function loadNotificationsModule() {
   if (isExpoGoRuntime()) {
     if (!expoGoPushNoticeLogged) {
@@ -76,10 +88,12 @@ export default function NotificationSetup() {
 
       const token = await registerForPushNotificationsAsync(notifications);
       if (!isMounted || !token || !userId) return;
-      const registrationKey = `${userId}:${token}`;
+      const timezone = getDeviceTimeZone();
+      // Include timezone in the dedupe key so a zone change (travel) re-registers.
+      const registrationKey = `${userId}:${token}:${timezone ?? ''}`;
       if (lastRegisteredDeviceKey === registrationKey) return;
       const authToken = await getToken();
-      await saveTokenToBackend(userId, token, authToken || '');
+      await saveTokenToBackend(userId, token, authToken || '', timezone);
       lastRegisteredDeviceKey = registrationKey;
     };
 
@@ -94,7 +108,12 @@ export default function NotificationSetup() {
     };
   }, [userId, getToken]);
 
-  const saveTokenToBackend = async (clerkId: string, token: string, authToken: string) => {
+  const saveTokenToBackend = async (
+    clerkId: string,
+    token: string,
+    authToken: string,
+    timezone: string | null
+  ) => {
     try {
       const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
       await fetch(`${apiURL}/api/devices/register`, {
@@ -108,6 +127,7 @@ export default function NotificationSetup() {
           clerkId,
           pushToken: token,
           platform: Platform.OS,
+          ...(timezone ? { timezone } : {}),
         }),
       });
     } catch (error) {
