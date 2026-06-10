@@ -12,12 +12,13 @@ import CustomAlert from '../../../components/customAlert';
 import { getCachedProfileDemographics, setCachedProfileDemographics, shouldRefreshProfile } from '../../../services/profileStore';
 import { clearBackendBootstrapCache } from '../../../services/userSync';
 import { setCachedHomeUserName } from '../../../services/homeStore';
+import { authedFetch } from '../../../services/authedFetch';
 
 const PROFILE_REFRESH_TTL_MS = 60 * 1000;
 
 const ProfileScreen = () => {
     const router = useRouter();
-    const { signOut } = useAuth();
+    const { signOut, getToken } = useAuth();
     const { user } = useUser();
     
     const [profileData, setProfileData] = useState<any>(null);
@@ -45,8 +46,7 @@ const ProfileScreen = () => {
         if (!force && !shouldRefreshProfile(user.id, PROFILE_REFRESH_TTL_MS)) return;
         if (showSpinner) setLoading(true);
         try {
-            const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-            const res = await fetch(`${apiURL}/api/profile/${user.id}`);
+            const res = await authedFetch(`/api/profile/${user.id}`, { getToken, clerkId: user.id });
             if (res.ok) {
                 const data = await res.json();
                 setProfileData(data.demographics);
@@ -107,9 +107,10 @@ const ProfileScreen = () => {
             }
             
             await user?.update({ firstName, lastName });
-            const response = await fetch(`${apiURL}/api/profile/name/${user.id}`, {
+            const response = await authedFetch(`/api/profile/name/${user.id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                getToken,
+                clerkId: user.id,
                 body: JSON.stringify({ name: nextName }),
             });
 

@@ -2,6 +2,7 @@ import { Image as RNImage } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { resolveFoodImageFromFatSecret } from "./mealAPI";
+import { authedFetch, type GetToken } from "./authedFetch";
 
 type MealType = "breakfast" | "lunch" | "dinner";
 type RecommendationStage = "base" | "hydrated";
@@ -45,6 +46,7 @@ type RecommendationFetchArgs = {
   forceExploration?: boolean;
   timeoutMs?: number;
   onUpdate?: (result: RecommendationResult) => void;
+  getToken?: GetToken;
 };
 
 type FeedbackArgs = {
@@ -57,6 +59,7 @@ type FeedbackArgs = {
   explanation?: string;
   itemTitle?: string;
   itemTitles?: string[];
+  getToken?: GetToken;
 };
 
 type PrimeArgs = {
@@ -67,12 +70,14 @@ type PrimeArgs = {
   mealType?: MealType | "all";
   waitForWarmup?: boolean;
   waitTimeoutMs?: number;
+  getToken?: GetToken;
 };
 
 type PrimeStatusArgs = {
   apiURL?: string;
   clerkId?: string | null;
   mealType?: MealType | "all";
+  getToken?: GetToken;
 };
 
 export type PrimeWarmupResult = {
@@ -457,9 +462,13 @@ const setCachedRecommendationResult = (cacheKey: string, result: RecommendationR
 const getOrStartRecommendationRequest = ({
   url,
   cacheKey,
+  getToken,
+  clerkId,
 }: {
   url: string;
   cacheKey: string;
+  getToken?: GetToken;
+  clerkId?: string | null;
 }) => {
   const existingRequest = inFlightRecommendationRequests.get(cacheKey);
   if (existingRequest) {
@@ -467,7 +476,7 @@ const getOrStartRecommendationRequest = ({
     return existingRequest;
   }
 
-  const requestPromise = fetchNetworkRecommendationResult({ url, cacheKey })
+  const requestPromise = fetchNetworkRecommendationResult({ url, cacheKey, getToken, clerkId })
     .catch((error) => {
       console.warn("[recommendation.ts] recommendation fetch failed", error);
       return null;
@@ -512,9 +521,13 @@ const normalizePrimeWarmupResult = (payload: any, status: number): PrimeWarmupRe
 const getOrStartPrimeStatusRequest = ({
   requestKey,
   url,
+  getToken,
+  clerkId,
 }: {
   requestKey: string;
   url: string;
+  getToken?: GetToken;
+  clerkId?: string | null;
 }) => {
   const existingRequest = inFlightPrimeStatusRequests.get(requestKey);
   if (existingRequest) {
@@ -522,7 +535,7 @@ const getOrStartPrimeStatusRequest = ({
     return existingRequest;
   }
 
-  const requestPromise = fetch(url)
+  const requestPromise = authedFetch(url, { getToken, clerkId })
     .then(async (response) => {
       const payload = await response.json().catch(() => ({}));
       return normalizePrimeWarmupResult(payload, response.status);
@@ -542,10 +555,12 @@ const getOrStartPrimeRequest = ({
   requestKey,
   apiURL,
   body,
+  getToken,
 }: {
   requestKey: string;
   apiURL: string;
   body: Record<string, any>;
+  getToken?: GetToken;
 }) => {
   const existingRequest = inFlightPrimeRequests.get(requestKey);
   if (existingRequest) {
@@ -553,9 +568,11 @@ const getOrStartPrimeRequest = ({
     return existingRequest;
   }
 
-  const requestPromise = fetch(`${apiURL}/api/prime`, {
+  const requestPromise = authedFetch(`/api/prime`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    baseUrl: apiURL,
+    getToken,
+    clerkId: body?.clerkId,
     body: JSON.stringify(body),
   })
     .then(async (response) => {
@@ -1097,12 +1114,16 @@ const buildRecommendationResult = ({
 const fetchNetworkRecommendationResult = async ({
   url,
   cacheKey,
+  getToken,
+  clerkId,
 }: {
   url: string;
   cacheKey: string;
+  getToken?: GetToken;
+  clerkId?: string | null;
 }): Promise<RecommendationResult> => {
   const requestStartedAt = Date.now();
-  const response = await fetch(url);
+  const response = await authedFetch(url, { getToken, clerkId });
   const payload = await response.json();
   const normalizedByMeal = normalizeRecommendationsByMeal(payload);
   const normalizedMostConsumed = ensureArray(payload?.most_consumed_items).map((item: any) => normalizeMostConsumedItem(item));
@@ -1253,6 +1274,7 @@ export const fetchRecommendations = async ({
   forceExploration = false,
   timeoutMs = RECOMMENDATION_FETCH_TIMEOUT_MS,
   onUpdate,
+  getToken,
 }: RecommendationFetchArgs = {}) => {
   if (!apiURL || !userId) throw new Error("Missing apiURL or userId");
 
@@ -1264,7 +1286,7 @@ export const fetchRecommendations = async ({
   const cacheKey = buildRecommendationCacheKey(apiURL, userId, mealType, forceExploration);
   const callStartedAt = Date.now();
   const cacheReadyPromise = ensureRecommendationCacheReady();
-  const networkPromise = getOrStartRecommendationRequest({ url, cacheKey });
+  const networkPromise = getOrStartRecommendationRequest({ url, cacheKey, getToken, clerkId: userId });
   await cacheReadyPromise;
   const cachedPayload = getCachedRecommendationResult(cacheKey);
 
@@ -1370,15 +1392,18 @@ export const sendRecommendationFeedback = async ({
   explanation,
   itemTitle,
   itemTitles,
+  getToken,
 }: FeedbackArgs = {}) => {
   if (!apiURL || !clerkId || !comboId || !status) return false;
   const normalizedStatus = String(status).trim();
   if (!["Accepted", "Rejected", "Loved", "Skipped"].includes(normalizedStatus)) return false;
 
   try {
-    const response = await fetch(`${apiURL}/api/recommendation/feedback`, {
+    const response = await authedFetch(`/api/recommendation/feedback`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      baseUrl: apiURL,
+      getToken,
+      clerkId,
       body: JSON.stringify({
         clerkId,
         comboId,
@@ -1400,12 +1425,15 @@ export const getPrimeRecommendationStatus = async ({
   apiURL,
   clerkId,
   mealType = "all",
+  getToken,
 }: PrimeStatusArgs = {}): Promise<PrimeWarmupResult | null> => {
   if (!apiURL || !clerkId) return null;
 
   return getOrStartPrimeStatusRequest({
     requestKey: buildPrimeStatusRequestKey({ apiURL, clerkId, mealType }),
     url: buildPrimeStatusUrl(apiURL, clerkId, mealType),
+    getToken,
+    clerkId,
   });
 };
 
@@ -1417,6 +1445,7 @@ export const primeRecommendationsDetailed = async ({
   mealType = "all",
   waitForWarmup = false,
   waitTimeoutMs,
+  getToken,
 }: PrimeArgs = {}): Promise<PrimeWarmupResult | null> => {
   if (!apiURL || (!clerkId && !userId)) return null;
 
@@ -1431,6 +1460,7 @@ export const primeRecommendationsDetailed = async ({
       waitTimeoutMs,
     }),
     apiURL,
+    getToken,
     body: {
       clerkId: clerkId || null,
       userId: userId || null,
@@ -1450,6 +1480,7 @@ export const primeRecommendations = async ({
   mealType = "all",
   waitForWarmup = false,
   waitTimeoutMs,
+  getToken,
 }: PrimeArgs = {}) => {
   const result = await primeRecommendationsDetailed({
     apiURL,
@@ -1459,6 +1490,7 @@ export const primeRecommendations = async ({
     mealType,
     waitForWarmup,
     waitTimeoutMs,
+    getToken,
   });
 
   if (!result?.ok) {

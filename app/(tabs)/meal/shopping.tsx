@@ -6,13 +6,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
+import { authedFetch } from '../../../services/authedFetch';
 import CreateListModal from '../../../components/CreateListModal';
 import ImportRecipeModal from '../../../components/ImportRecipeModal';
 
 const ShoppingScreen = () => {
   const router = useRouter();
-  const { userId } = useAuth();
-  
+  const { userId, getToken } = useAuth();
+
   const [lists, setLists] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,8 +43,7 @@ const ShoppingScreen = () => {
     }
 
     try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        const res = await fetch(`${apiURL}/api/shopping/list/${userId}`);
+        const res = await authedFetch(`/api/shopping/list/${userId}`, { getToken, clerkId: userId });
         const data = await res.json();
         if (latestFetchRef.current !== requestId) return;
         if (res.ok) setLists(Array.isArray(data) ? data : []);
@@ -65,10 +65,10 @@ const ShoppingScreen = () => {
   const handleCreateList = async (title: string) => {
       // Create empty list
       try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        await fetch(`${apiURL}/api/shopping/create`, {
+        await authedFetch(`/api/shopping/create`, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            getToken,
+            clerkId: userId,
             body: JSON.stringify({ clerkId: userId, title: title, items: [] })
         });
         await fetchLists();
@@ -78,17 +78,17 @@ const ShoppingScreen = () => {
   const handleImportRecipe = async (recipe: any) => {
       // 1. Fetch full details to get ingredient names
       try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        const res = await fetch(`${apiURL}/api/favorites/custom/${recipe.id}`);
+        const res = await authedFetch(`/api/favorites/custom/${recipe.id}`, { getToken, clerkId: userId });
         const fullRecipe = await res.json();
-        
+
         // 2. Extract Names
         const items = fullRecipe.ingredients.map((ing: any) => ing.name);
 
         // 3. Create List
-        await fetch(`${apiURL}/api/shopping/create`, {
+        await authedFetch(`/api/shopping/create`, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            getToken,
+            clerkId: userId,
             body: JSON.stringify({ clerkId: userId, title: `Shopping for ${recipe.title}`, items: items })
         });
         setShowImportModal(false);

@@ -6,6 +6,8 @@
 // - Mutations (add/delete meal) must call `markMealsSummaryDirty` so the next
 //   focus refetches the source of truth instead of trusting stale data.
 
+import { authedFetch, type GetToken } from "./authedFetch";
+
 type MealsSnapshot = {
   meals: any[];
   fetchedAt: number;
@@ -91,6 +93,7 @@ type FetchMealsSummaryArgs = {
   date: string;
   ttlMs?: number;
   force?: boolean;
+  getToken?: GetToken;
 };
 
 export const fetchMealsSummaryWithCache = async ({
@@ -99,6 +102,7 @@ export const fetchMealsSummaryWithCache = async ({
   date,
   ttlMs = 15_000,
   force = false,
+  getToken,
 }: FetchMealsSummaryArgs): Promise<any[] | null> => {
   if (!apiURL || !userId || !date) return null;
 
@@ -116,8 +120,9 @@ export const fetchMealsSummaryWithCache = async ({
 
   const pending = (async () => {
     try {
-      const response = await fetch(
-        `${apiURL}/api/meals/summary/${userId}/${date}`
+      const response = await authedFetch(
+        `/api/meals/summary/${userId}/${date}`,
+        { baseUrl: apiURL, getToken, clerkId: userId }
       );
       if (!response.ok) return null;
       const data = await response.json();

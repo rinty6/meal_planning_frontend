@@ -5,6 +5,7 @@ import { View, Text, Modal, TouchableOpacity, ScrollView, ActivityIndicator, Ima
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import IngredientIcon from './IngredientIcon';
+import { authedFetch } from '../services/authedFetch';
 
 interface RecentMealsModalProps {
   visible: boolean;
@@ -13,7 +14,7 @@ interface RecentMealsModalProps {
 }
 
 const RecentMealsModal = ({ visible, onClose, onAddSelected }: RecentMealsModalProps) => {
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const [loading, setLoading] = useState(false);
   const [recentMeals, setRecentMeals] = useState<any>({ breakfast: [], lunch: [], dinner: [] });
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -30,8 +31,7 @@ const RecentMealsModal = ({ visible, onClose, onAddSelected }: RecentMealsModalP
     if (!userId) return;
     setLoading(true);
     try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      const res = await fetch(`${apiURL}/api/meals/recent/${userId}`);
+      const res = await authedFetch(`/api/meals/recent/${userId}`, { getToken, clerkId: userId });
       const data = await res.json();
       if (res.ok) {
         setRecentMeals(data);

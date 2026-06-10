@@ -1,3 +1,5 @@
+import { authedFetch } from "./authedFetch";
+
 type DeleteAccountArgs = {
   apiURL?: string;
   clerkId?: string | null;
@@ -71,19 +73,12 @@ export const deleteCurrentAccount = async ({
   }
 
   try {
-    const token = (await getToken?.()) || null;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "x-clerk-id": normalizedClerkId,
-    };
-
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    const response = await fetch(`${normalizedApiUrl}/api/users/me`, {
+    const response = await authedFetch("/api/users/me", {
       method: "DELETE",
-      headers,
+      baseUrl: normalizedApiUrl,
+      clerkId: normalizedClerkId,
+      getToken,
+      headers: { "Content-Type": "application/json" },
     });
 
     const payload = await parseResponsePayload(response);

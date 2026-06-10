@@ -12,6 +12,7 @@ import FoodFactsCard from "../../../components/FoodFactsCard";
 import { buildNutritionFactsFromFood, fetchFoodDetailForFacts } from "../../../services/mealAPI";
 import { peekCachedRecommendations } from "../../../services/recommendation";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
+import { authedFetch } from "../../../services/authedFetch";
 
 type ComboDetailItem = Record<string, any>;
 type ComboDetailPayload = ComboDetailItem & { items?: ComboDetailItem[] };
@@ -127,7 +128,7 @@ const getCachedRecommendationItems = (result?: CachedRecommendationResult | null
 const FoodDetailScreen = () => {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
 
   const [adding, setAdding] = useState(false);
   const [showMealSelector, setShowMealSelector] = useState(false);
@@ -321,7 +322,6 @@ const FoodDetailScreen = () => {
   const saveItemsToDB = async (mealType: string) => {
     if (!userId) return;
     setAdding(true);
-    const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
     const dateStr = dateFromPlanning || formatLocalYYYYMMDD(new Date());
 
     try {
@@ -344,9 +344,10 @@ const FoodDetailScreen = () => {
           image: comboItem.image || "",
         };
 
-        const res = await fetch(`${apiURL}/api/meals/add`, {
+        const res = await authedFetch(`/api/meals/add`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          getToken,
+          clerkId: userId,
           body: JSON.stringify(payload),
         });
 

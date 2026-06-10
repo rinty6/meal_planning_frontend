@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import CustomAlert from '../../../components/customAlert';
 import { markProfileDirty, setCachedProfileDemographics } from '../../../services/profileStore';
+import { authedFetch } from '../../../services/authedFetch';
 
 const ACTIVITY_LEVELS = [
     { label: 'Sedentary', value: 'sedentary' },
@@ -25,8 +26,8 @@ const GOALS = [
 
 const EditProfileScreen = () => {
     const router = useRouter();
-    const { userId } = useAuth();
-    
+    const { userId, getToken } = useAuth();
+
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [baseDemographics, setBaseDemographics] = useState<any>(null);
@@ -45,8 +46,7 @@ const EditProfileScreen = () => {
     useEffect(() => {
         const fetchCurrentData = async () => {
             try {
-                const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-                const res = await fetch(`${apiURL}/api/profile/${userId}`);
+                const res = await authedFetch(`/api/profile/${userId}`, { getToken, clerkId: userId });
                 if (res.ok) {
                     const data = await res.json();
                     if (data.demographics) {
@@ -80,11 +80,11 @@ const EditProfileScreen = () => {
 
         setSaving(true);
         try {
-            const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-            const response = await fetch(`${apiURL}/api/profile/update/${userId}`, {
+            const response = await authedFetch(`/api/profile/update/${userId}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData) 
+                getToken,
+                clerkId: userId,
+                body: JSON.stringify(formData)
             });
 
             if (response.ok) {

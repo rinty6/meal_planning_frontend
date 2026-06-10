@@ -43,6 +43,7 @@ import {
   markMealsSummaryDirty,
 } from "../../../services/mealsSummaryStore";
 import { markFavoritesDirty } from "../../../services/favoritesStore";
+import { authedFetch } from "../../../services/authedFetch";
 
 const ALLERGEN_OPTIONS = [
   "Egg",
@@ -245,7 +246,7 @@ const DishCard = ({
 
 const PlanningScreen = () => {
   const router = useRouter();
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const configuredApiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
   const isMountedRef = useRef(true);
   const addRequestInFlightRef = useRef(false);
@@ -321,6 +322,7 @@ const PlanningScreen = () => {
         apiURL: configuredApiURL,
         userId,
         date: dateKey,
+        getToken,
       });
       const total = (meals || []).reduce((sum: number, item: any) => sum + Number(item?.calories || 0), 0);
       if (isMountedRef.current) setConsumedCalories(Math.round(total));
@@ -335,6 +337,7 @@ const PlanningScreen = () => {
       apiURL: configuredApiURL,
       clerkId: userId,
       limit: 10,
+      getToken,
     });
     if (isMountedRef.current) setMostConsumedItems(items);
   }, [configuredApiURL, userId]);
@@ -342,7 +345,9 @@ const PlanningScreen = () => {
   const loadFavoriteStatuses = useCallback(async () => {
     if (!userId || !configuredApiURL) return;
     try {
-      const response = await fetch(`${configuredApiURL}/api/favorites/list/${encodeURIComponent(userId)}`, {
+      const response = await authedFetch(`/api/favorites/list/${encodeURIComponent(userId)}`, {
+        getToken,
+        clerkId: userId,
         cache: "no-store",
       });
       if (!response.ok) return;
@@ -399,6 +404,7 @@ const PlanningScreen = () => {
         const payload = await fetchMealPlanRecommendations({
           apiURL: configuredApiURL,
           clerkId: userId,
+          getToken,
           date: formatLocalYYYYMMDD(selectedDate),
           mealType: mealType === "all" ? undefined : mealType,
           forceExploration,
@@ -430,6 +436,7 @@ const PlanningScreen = () => {
       void fetchMealPlanRecommendations({
         apiURL: configuredApiURL,
         clerkId: userId,
+        getToken,
         date,
         preferences: nextPreferences,
       }).catch(() => {
@@ -454,7 +461,7 @@ const PlanningScreen = () => {
       }
       try {
         const [preferencesPayload] = await Promise.all([
-          fetchMealPlanPreferences({ apiURL: configuredApiURL, clerkId: userId }),
+          fetchMealPlanPreferences({ apiURL: configuredApiURL, clerkId: userId, getToken }),
           loadMostConsumed(),
         ]);
         if (!isMountedRef.current) return;
@@ -545,6 +552,7 @@ const PlanningScreen = () => {
       const payload = await saveMealPlanPreferences({
         apiURL: configuredApiURL,
         clerkId: userId,
+        getToken,
         preferences: draftPreferences,
       });
       const savedPreferences = payload?.preferences || draftPreferences;
@@ -565,6 +573,7 @@ const PlanningScreen = () => {
       await saveMealPlanPreferences({
         apiURL: configuredApiURL,
         clerkId: userId,
+        getToken,
         preferences: defaults,
       });
       setPreferences(defaults);
@@ -596,6 +605,7 @@ const PlanningScreen = () => {
       void sendMealPlanEvent({
         apiURL: configuredApiURL,
         clerkId: userId,
+        getToken,
         eventType: "shuffled",
         mealType: selectedMealType,
         items: displayedItems,
@@ -620,6 +630,7 @@ const PlanningScreen = () => {
     void sendMealPlanEvent({
       apiURL: configuredApiURL,
       clerkId: userId,
+      getToken,
       eventType: "skipped",
       mealType: selectedMealType,
       item,
@@ -638,9 +649,10 @@ const PlanningScreen = () => {
 
     setFavoriteLoadingKey(key);
     try {
-      const response = await fetch(`${configuredApiURL}/api/favorites/toggle`, {
+      const response = await authedFetch(`/api/favorites/toggle`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        getToken,
+        clerkId: userId,
         body: JSON.stringify({
           clerkId: userId,
           item: {
@@ -735,6 +747,7 @@ const PlanningScreen = () => {
       const payload = await addMealsBatch([
         {
           apiURL: configuredApiURL,
+          getToken,
           clerkId: userId,
           date,
           mealType: selectedMealType,
@@ -759,6 +772,7 @@ const PlanningScreen = () => {
       void sendMealPlanEvent({
         apiURL: configuredApiURL,
         clerkId: userId,
+        getToken,
         eventType: "accepted",
         mealType: selectedMealType,
         item,
@@ -781,6 +795,7 @@ const PlanningScreen = () => {
       const payload = await addMealsBatch(
         selectedItems.map((item: any) => ({
           apiURL: configuredApiURL,
+          getToken,
           clerkId: userId,
           date,
           mealType: selectedMealType,
@@ -805,6 +820,7 @@ const PlanningScreen = () => {
       void sendMealPlanEvent({
         apiURL: configuredApiURL,
         clerkId: userId,
+        getToken,
         eventType: "accepted",
         mealType: selectedMealType,
         items: selectedItems,
@@ -822,9 +838,10 @@ const PlanningScreen = () => {
     if (!userId || !configuredApiURL) return;
     try {
       const date = formatLocalYYYYMMDD(selectedDate);
-      const response = await fetch(`${configuredApiURL}/api/meals/add`, {
+      const response = await authedFetch(`/api/meals/add`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        getToken,
+        clerkId: userId,
         body: JSON.stringify({
           clerkId: userId,
           date,
@@ -864,6 +881,7 @@ const PlanningScreen = () => {
       const payload = await addMealsBatch(
         mealsToAdd.map((meal) => ({
           apiURL: configuredApiURL,
+          getToken,
           clerkId: userId,
           date,
           mealType: selectedMealType,

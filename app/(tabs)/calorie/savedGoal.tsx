@@ -5,10 +5,11 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import CustomAlert from '../../../components/customAlert';
+import { authedFetch } from '../../../services/authedFetch';
 
 const SavedGoalScreen = () => {
     const router = useRouter();
-    const { userId } = useAuth();
+    const { userId, getToken } = useAuth();
     const [goals, setGoals] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     const [alertVisible, setAlertVisible] = useState(false);
@@ -18,8 +19,7 @@ const SavedGoalScreen = () => {
         if (!userId) return;
         setLoading(true);
         try {
-            const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-            const res = await fetch(`${apiURL}/api/calorie/list/${userId}`);
+            const res = await authedFetch(`/api/calorie/list/${userId}`, { getToken, clerkId: userId });
             const data = await res.json();
             if (res.ok) setGoals(data);
         } catch (e) { console.error(e); }
@@ -36,8 +36,7 @@ const SavedGoalScreen = () => {
     const handleDelete = async () => {
         if (!goalToDelete) return;
         try {
-            const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-            await fetch(`${apiURL}/api/calorie/delete/${goalToDelete}`, { method: 'DELETE' });
+            await authedFetch(`/api/calorie/delete/${goalToDelete}`, { method: 'DELETE', getToken, clerkId: userId });
             setGoals(prev => prev.filter(g => g.id !== goalToDelete));
         } catch (e) { console.error(e); }
         finally { setAlertVisible(false); }

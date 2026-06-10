@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, Modal, TouchableOpacity, FlatList, ActivityIndicator } from 'react-native';
 import { useAuth } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
+import { authedFetch } from '../services/authedFetch';
 
 interface ImportRecipeModalProps {
   visible: boolean;
@@ -12,7 +13,7 @@ interface ImportRecipeModalProps {
 }
 
 const ImportRecipeModal = ({ visible, onClose, onSelect }: ImportRecipeModalProps) => {
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const [recipes, setRecipes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -24,8 +25,7 @@ const ImportRecipeModal = ({ visible, onClose, onSelect }: ImportRecipeModalProp
     if (!userId) return;
     setLoading(true);
     try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      const res = await fetch(`${apiURL}/api/favorites/list/${userId}`);
+      const res = await authedFetch(`/api/favorites/list/${userId}`, { getToken, clerkId: userId });
       const data = await res.json();
       setRecipes(data.savedRecipes || []);
     } catch (e) {

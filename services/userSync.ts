@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { authedFetch } from "./authedFetch";
 
 type BootstrapBackendUserArgs = {
   apiURL?: string;
@@ -143,34 +144,15 @@ const runBootstrapBackendUserRequest = async ({
   }
 
   try {
-    const token = (await getToken?.()) || null;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "x-clerk-id": normalizedClerkId,
-    };
     // Bound the startup bootstrap request so the app cannot spin forever.
-    const abortController =
-      typeof AbortController === "function" ? new AbortController() : null;
-    const timeoutId = setTimeout(() => {
-      abortController?.abort();
-    }, BOOTSTRAP_REQUEST_TIMEOUT_MS);
-
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    let response: Response;
-
-    try {
-      response = await fetch(`${normalizedApiUrl}/api/users/bootstrap`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({}),
-        signal: abortController?.signal,
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    const response = await authedFetch("/api/users/bootstrap", {
+      method: "POST",
+      baseUrl: normalizedApiUrl,
+      clerkId: normalizedClerkId,
+      getToken,
+      body: JSON.stringify({}),
+      timeoutMs: BOOTSTRAP_REQUEST_TIMEOUT_MS,
+    });
 
     const payload = await parseResponsePayload(response);
 

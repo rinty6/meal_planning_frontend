@@ -25,6 +25,7 @@ import {
     markMealsSummaryDirty,
 } from '../../services/mealsSummaryStore';
 import { markFavoritesDirty } from '../../services/favoritesStore';
+import { authedFetch } from '../../services/authedFetch';
 
 type MacroSet = {
     calories: number;
@@ -142,7 +143,7 @@ const getFavoriteExternalId = (item: any) =>
 
 const HomeScreen = () => {
     const router = useRouter();
-    const { userId } = useAuth(); // Clerk ID
+    const { userId, getToken } = useAuth(); // Clerk ID
     const { user: clerkUser } = useUser();
     
     const [loading, setLoading] = useState(true);
@@ -221,8 +222,8 @@ const HomeScreen = () => {
             const today = getTodayFormatted();
 
             const [profileResult, summaryResult] = await Promise.allSettled([
-                fetch(`${apiURL}/api/profile/${userId}`),
-                fetch(`${apiURL}/api/calorie/summary/${userId}/${today}`)
+                authedFetch(`/api/profile/${userId}`, { getToken, clerkId: userId }),
+                authedFetch(`/api/calorie/summary/${userId}/${today}`, { getToken, clerkId: userId })
             ]);
 
             let resolvedUserName = clerkUser?.firstName || 'User';
@@ -253,6 +254,7 @@ const HomeScreen = () => {
                     apiURL,
                     userId,
                     date: today,
+                    getToken,
                 });
                 if (meals) {
                     consumedMacros = aggregateMeals(meals);
@@ -305,7 +307,9 @@ const HomeScreen = () => {
         try {
             const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
             if (!apiURL) return;
-            const response = await fetch(`${apiURL}/api/favorites/list/${encodeURIComponent(userId)}`, {
+            const response = await authedFetch(`/api/favorites/list/${encodeURIComponent(userId)}`, {
+                getToken,
+                clerkId: userId,
                 cache: 'no-store',
             });
             if (!response.ok) return;
@@ -376,9 +380,10 @@ const HomeScreen = () => {
             if (!apiURL) throw new Error('Missing backend URL');
             const mealType = mealTypeOverride || activeMealType;
 
-            const response = await fetch(`${apiURL}/api/meals/add`, {
+            const response = await authedFetch(`/api/meals/add`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                getToken,
+                clerkId: userId,
                 body: JSON.stringify({
                     clerkId: userId,
                     date: getTodayFormatted(),

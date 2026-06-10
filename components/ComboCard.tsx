@@ -6,6 +6,7 @@ import { Image as ExpoImage } from "expo-image";
 
 import Food3DIcon from "./Food3DIcon";
 import { markFavoritesDirty } from "../services/favoritesStore";
+import { authedFetch } from "../services/authedFetch";
 
 const FOOD_IMAGE_BLURHASH = "L6Pj0^i_.AyE_3t7t7R**0o#DgR4";
 
@@ -34,7 +35,7 @@ const ComboCard = ({
   onFavoriteChange,
   onFavoriteError,
 }: RecommendedFoodCardProps) => {
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const [isFavorite, setIsFavorite] = useState(controlledFavorite);
   const [isLoading, setIsLoading] = useState(false);
   const [failedImageKeys, setFailedImageKeys] = useState<Record<string, true>>({});
@@ -69,9 +70,10 @@ const ComboCard = ({
       if (!apiURL) return;
 
       if (comboItems.length > 1) {
-        const response = await fetch(`${apiURL}/api/favorites/save-combo`, {
+        const response = await authedFetch(`/api/favorites/save-combo`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          getToken,
+          clerkId: userId,
           body: JSON.stringify({
             clerkId: userId,
             items: comboItems,
@@ -85,9 +87,10 @@ const ComboCard = ({
         }
       } else {
         const externalId = getExternalId(item);
-        const response = await fetch(`${apiURL}/api/favorites/toggle`, {
+        const response = await authedFetch(`/api/favorites/toggle`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          getToken,
+          clerkId: userId,
           body: JSON.stringify({
             clerkId: userId,
             item: {

@@ -3,11 +3,14 @@ import React, { useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import CustomAlert from '../../../components/customAlert'; 
+import { useAuth } from '@clerk/clerk-expo';
+import CustomAlert from '../../../components/customAlert';
+import { authedFetch } from '../../../services/authedFetch';
 
 const ShoppingListDetail = () => {
   const { listId, title } = useLocalSearchParams();
   const router = useRouter();
+  const { userId, getToken } = useAuth();
   const [items, setItems] = useState<any[]>([]);
   const [newItemText, setNewItemText] = useState("");
 
@@ -31,8 +34,7 @@ const ShoppingListDetail = () => {
 
   const loadItems = async () => {
     try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        const res = await fetch(`${apiURL}/api/shopping/detail/${listId}`);
+        const res = await authedFetch(`/api/shopping/detail/${listId}`, { getToken, clerkId: userId });
         const data = await res.json();
         if (res.ok) setItems(data);
     } catch (e) { console.error(e); }
@@ -41,10 +43,10 @@ const ShoppingListDetail = () => {
   const toggleItem = async (id: number, currentStatus: boolean) => {
     setItems(prev => prev.map(i => i.id === id ? { ...i, isChecked: !currentStatus } : i));
     try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        await fetch(`${apiURL}/api/shopping/toggle/${id}`, {
+        await authedFetch(`/api/shopping/toggle/${id}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            getToken,
+            clerkId: userId,
             body: JSON.stringify({ isChecked: !currentStatus })
         });
     } catch (e) { console.error(e); }
@@ -56,10 +58,10 @@ const ShoppingListDetail = () => {
 
   const saveItemName = async (id: number, name: string) => {
       try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        await fetch(`${apiURL}/api/shopping/update-item/${id}`, {
+        await authedFetch(`/api/shopping/update-item/${id}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            getToken,
+            clerkId: userId,
             body: JSON.stringify({ name: name })
         });
       } catch (e) { console.error("Failed to save name", e); }
@@ -68,8 +70,7 @@ const ShoppingListDetail = () => {
   const deleteItem = async (id: number) => {
       setItems(prev => prev.filter(i => i.id !== id));
       try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        await fetch(`${apiURL}/api/shopping/delete-item/${id}`, { method: 'DELETE' });
+        await authedFetch(`/api/shopping/delete-item/${id}`, { method: 'DELETE', getToken, clerkId: userId });
       } catch (e) { console.error(e); }
   };
 
@@ -83,8 +84,7 @@ const ShoppingListDetail = () => {
               setAlertVisible(false);
               setItems(prev => prev.map(i => ({ ...i, isChecked: false }))); // Optimistic
               try {
-                const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-                await fetch(`${apiURL}/api/shopping/reset-list/${listId}`, { method: 'PUT' });
+                await authedFetch(`/api/shopping/reset-list/${listId}`, { method: 'PUT', getToken, clerkId: userId });
               } catch (e) { console.error(e); }
           }
       );
@@ -93,10 +93,10 @@ const ShoppingListDetail = () => {
   const addItem = async () => {
     if (!newItemText.trim()) return;
     try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        await fetch(`${apiURL}/api/shopping/add-item`, {
+        await authedFetch(`/api/shopping/add-item`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            getToken,
+            clerkId: userId,
             body: JSON.stringify({ listId: listId, name: newItemText })
         });
         setNewItemText("");
@@ -113,8 +113,7 @@ const ShoppingListDetail = () => {
           async () => {
               setAlertVisible(false);
               try {
-                const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-                await fetch(`${apiURL}/api/shopping/delete/${listId}`, { method: 'DELETE' });
+                await authedFetch(`/api/shopping/delete/${listId}`, { method: 'DELETE', getToken, clerkId: userId });
                 router.back();
               } catch (e) { console.error(e); }
           }

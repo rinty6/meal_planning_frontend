@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { getRecipeDetails } from '../../../services/mealAPI'; 
 import { markFavoritesDirty } from '../../../services/favoritesStore';
 import { useAuth } from '@clerk/clerk-expo';
+import { authedFetch } from '../../../services/authedFetch';
 import IngredientIcon from '../../../components/IngredientIcon';
 import SuccessModal from '../../../components/sucessmodal'; 
 import { markMealsSummaryDirty } from '../../../services/mealsSummaryStore';
@@ -31,7 +32,7 @@ const RecipeDetailScreen = () => {
   // 1. GET PARAMS
   const { id, previewImage, savedRecipeId, isCreating } = useLocalSearchParams(); 
   const router = useRouter();
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const scrollViewRef = useRef<ScrollView>(null);
   const caloriesInputRef = useRef<TextInput>(null);
   const stepOffsetsRef = useRef<Record<number, number>>({});
@@ -95,10 +96,9 @@ const RecipeDetailScreen = () => {
   const loadSavedRecipe = async () => {
     setLoading(true);
     try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        const res = await fetch(`${apiURL}/api/favorites/custom/${savedRecipeId}`);
+        const res = await authedFetch(`/api/favorites/custom/${savedRecipeId}`, { getToken, clerkId: userId });
         const data = await res.json();
-        
+
         if (data) {
             setRecipeTitle(data.title);
             setRecipeCalories(normalizeCaloriesInput(data.calories));
@@ -158,14 +158,14 @@ const RecipeDetailScreen = () => {
   const handleSaveOrUpdate = async () => {
     if (!userId) return;
     setActiveAction('recipe');
-    const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
     try {
         if (savedRecipeId) {
             // --- UPDATE EXISTING ---
-            const res = await fetch(`${apiURL}/api/favorites/update-recipe/${savedRecipeId}`, {
+            const res = await authedFetch(`/api/favorites/update-recipe/${savedRecipeId}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                getToken,
+                clerkId: userId,
                 body: JSON.stringify({
                     title: recipeTitle,
                     calories: caloriesFromInput(recipeCalories),
@@ -198,9 +198,10 @@ const RecipeDetailScreen = () => {
                 instructions: instructions 
             };
 
-            const res = await fetch(`${apiURL}/api/favorites/save-custom`, {
+            const res = await authedFetch(`/api/favorites/save-custom`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                getToken,
+                clerkId: userId,
                 body: JSON.stringify(payload)
             });
 
@@ -233,10 +234,10 @@ const RecipeDetailScreen = () => {
 
     setActiveAction('shopping');
     try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      const response = await fetch(`${apiURL}/api/shopping/create`, {
+      const response = await authedFetch(`/api/shopping/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        getToken,
+        clerkId: userId,
         body: JSON.stringify({
           clerkId: userId,
           title,
@@ -275,15 +276,15 @@ const RecipeDetailScreen = () => {
   const saveRecipeToMealLog = async (mealType: 'breakfast' | 'lunch' | 'dinner') => {
     if (!userId) return;
 
-    const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
     const date = formatLocalYYYYMMDD(new Date());
     const recipeName = recipeTitle.trim() || baseRecipeInfo?.title || "My Custom Recipe";
 
     setActiveAction('meal');
     try {
-      const response = await fetch(`${apiURL}/api/meals/add`, {
+      const response = await authedFetch(`/api/meals/add`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        getToken,
+        clerkId: userId,
         body: JSON.stringify({
           clerkId: userId,
           date,

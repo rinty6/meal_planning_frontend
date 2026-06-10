@@ -7,6 +7,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import Svg, { Path, Circle } from 'react-native-svg';
 import InfoButton from '../../../components/InforButton';
 import CustomAlert from '../../../components/customAlert';
+import { authedFetch } from '../../../services/authedFetch';
 
 const ITEM_WIDTH = 48; // Width of the date box (w-12 is ~48px)
 const ITEM_MARGIN = 12; // Margin right (mr-3 is ~12px)
@@ -232,9 +233,12 @@ const MacroPieChart = ({ protein, carbs, fats }: { protein: number; carbs: numbe
   );
 };
 
-const fetchJson = async (url: string) => {
+const fetchJson = async (
+  url: string,
+  getToken?: (() => Promise<string | null>) | null
+) => {
   try {
-    const response = await fetch(url);
+    const response = await authedFetch(url, { getToken });
     const payload = await response.json();
     return { ok: response.ok, payload };
   } catch (error) {
@@ -366,7 +370,7 @@ const InsightCard = ({
 
 const CalorieSummaryScreen = () => {
   const router = useRouter();
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const flatListRef = useRef<FlatList>(null);
   const latestSummaryRequestRef = useRef(0);
 
@@ -412,7 +416,8 @@ const CalorieSummaryScreen = () => {
       const dateStr = formatLocalYYYYMMDD(selectedDate);
 
       const dashboardResult = await fetchJson(
-        `${apiURL}/api/calorie/dashboard/${userId}/${dateStr}?window=${INSIGHTS_WINDOW_DAYS}`
+        `${apiURL}/api/calorie/dashboard/${userId}/${dateStr}?window=${INSIGHTS_WINDOW_DAYS}`,
+        getToken
       );
 
       if (latestSummaryRequestRef.current !== requestId) return;
@@ -425,9 +430,9 @@ const CalorieSummaryScreen = () => {
       }
 
       const [dailyResult, weeklyResult, insightsResult] = await Promise.all([
-        fetchJson(`${apiURL}/api/calorie/summary/${userId}/${dateStr}`),
-        fetchJson(`${apiURL}/api/calorie/weekly/${userId}/${dateStr}`),
-        fetchJson(`${apiURL}/api/calorie/insights/${userId}/${dateStr}?window=${INSIGHTS_WINDOW_DAYS}`),
+        fetchJson(`${apiURL}/api/calorie/summary/${userId}/${dateStr}`, getToken),
+        fetchJson(`${apiURL}/api/calorie/weekly/${userId}/${dateStr}`, getToken),
+        fetchJson(`${apiURL}/api/calorie/insights/${userId}/${dateStr}?window=${INSIGHTS_WINDOW_DAYS}`, getToken),
       ]);
 
       if (latestSummaryRequestRef.current !== requestId) return;

@@ -8,14 +8,15 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import FavoriteCard from '../../../components/FavoriteCard';
+import { authedFetch } from '../../../services/authedFetch';
 import { getCachedFavorites, setCachedFavorites, shouldRefreshFavorites } from '../../../services/favoritesStore';
 
 const FAVORITES_REFRESH_TTL_MS = 60 * 1000;
 
 const FavoritesScreen = () => {
   const router = useRouter();
-  const { userId } = useAuth();
-  
+  const { userId, getToken } = useAuth();
+
   const [activeTab, setActiveTab] = useState<'foods' | 'recipes'>('foods');
   const [favoriteFoods, setFavoriteFoods] = useState<any[]>([]);
   const [savedRecipes, setSavedRecipes] = useState<any[]>([]);
@@ -37,8 +38,7 @@ const FavoritesScreen = () => {
 
     if (showSpinner) setLoading(true);
     try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        const res = await fetch(`${apiURL}/api/favorites/list/${userId}`);
+        const res = await authedFetch(`/api/favorites/list/${userId}`, { getToken, clerkId: userId });
         const data = await res.json();
         
         if (res.ok) {
@@ -70,7 +70,6 @@ const FavoritesScreen = () => {
   const handleDelete = async (id: number) => {
     const isFood = activeTab === 'foods';
     const endpoint = isFood ? 'delete-food' : 'delete-recipe';
-    const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
     const nextFavoriteFoods = isFood
       ? favoriteFoods.filter((item) => item.id !== id)
       : favoriteFoods;
@@ -90,7 +89,7 @@ const FavoritesScreen = () => {
 
     // 2. Call Backend
     try {
-        const response = await fetch(`${apiURL}/api/favorites/${endpoint}/${id}`, { method: 'DELETE' });
+        const response = await authedFetch(`/api/favorites/${endpoint}/${id}`, { method: 'DELETE', getToken, clerkId: userId });
         if (!response.ok) {
           throw new Error(`Failed to delete favorite ${id}`);
         }

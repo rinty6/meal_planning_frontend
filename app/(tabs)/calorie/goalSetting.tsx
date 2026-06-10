@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
+import { authedFetch } from '../../../services/authedFetch';
 import DateTimePicker from '@react-native-community/datetimepicker'; 
 
 import TextInputArea from '../../../components/TextInput';
@@ -29,7 +30,7 @@ const isSameLocalDay = (left: Date, right: Date) =>
 
 const GoalSettingScreen = () => {
   const router = useRouter();
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const { goalId } = useLocalSearchParams();
 
   // Form State
@@ -59,10 +60,9 @@ const GoalSettingScreen = () => {
     if (goalId) {
         const loadGoal = async () => {
             try {
-                const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-                const res = await fetch(`${apiURL}/api/calorie/detail/${goalId}`);
+                const res = await authedFetch(`/api/calorie/detail/${goalId}`, { getToken, clerkId: userId });
                 const data = await res.json();
-                
+
                 if (res.ok) {
                     setGoalName(data.goalName);
                     setDailyCalories(String(data.dailyCalories));
@@ -132,9 +132,10 @@ const GoalSettingScreen = () => {
               method = 'PUT';
           }
 
-          const res = await fetch(url, {
+          const res = await authedFetch(url, {
               method: method,
-              headers: { 'Content-Type': 'application/json' },
+              getToken,
+              clerkId: userId,
               body: JSON.stringify(payload)
           });
 

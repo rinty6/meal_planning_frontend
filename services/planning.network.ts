@@ -1,6 +1,9 @@
+import { authedFetch, type GetToken } from "./authedFetch";
+
 export type AddMealPayload = {
   apiURL: string;
   clerkId: string;
+  getToken?: GetToken;
   date: string;
   mealType: string;
   foodName: string;
@@ -43,10 +46,12 @@ const readResponseJson = async (response: Response) => {
 };
 
 export const addMealLog = async (payload: AddMealPayload) => {
-  const { apiURL, ...bodyPayload } = payload;
-  const response = await fetch(`${apiURL}/api/meals/add`, {
+  const { apiURL, getToken, ...bodyPayload } = payload;
+  const response = await authedFetch(`/api/meals/add`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    baseUrl: apiURL,
+    getToken,
+    clerkId: bodyPayload.clerkId,
     body: JSON.stringify(bodyPayload),
   });
 
@@ -64,16 +69,18 @@ export const fetchMostConsumedFromMealLogs = async ({
   apiURL,
   clerkId,
   limit = 10,
+  getToken,
 }: {
   apiURL: string;
   clerkId: string;
   limit?: number;
+  getToken?: GetToken;
 }): Promise<any[]> => {
   if (!apiURL || !clerkId) return [];
   try {
-    const response = await fetch(
-      `${apiURL}/api/meals/most-consumed/${encodeURIComponent(clerkId)}?limit=${limit}`,
-      { cache: "no-store" }
+    const response = await authedFetch(
+      `/api/meals/most-consumed/${encodeURIComponent(clerkId)}?limit=${limit}`,
+      { baseUrl: apiURL, getToken, clerkId, cache: "no-store" }
     );
     if (!response.ok) return [];
     const data = await readResponseJson(response);
@@ -89,10 +96,12 @@ export const addMealsBatch = async (inputs: AddMealPayload[]): Promise<AddMealRe
     throw new Error("No meals to add");
   }
 
-  const { apiURL, clerkId, date, mealType } = inputs[0];
-  const response = await fetch(`${apiURL}/api/meals/add-batch`, {
+  const { apiURL, clerkId, date, mealType, getToken } = inputs[0];
+  const response = await authedFetch(`/api/meals/add-batch`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    baseUrl: apiURL,
+    getToken,
+    clerkId,
     body: JSON.stringify({
       clerkId,
       date,
@@ -128,11 +137,17 @@ export const addMealsBatch = async (inputs: AddMealPayload[]): Promise<AddMealRe
 export const fetchMealPlanPreferences = async ({
   apiURL,
   clerkId,
+  getToken,
 }: {
   apiURL: string;
   clerkId: string;
+  getToken?: GetToken;
 }) => {
-  const response = await fetch(`${apiURL}/api/meal-plan/preferences/${encodeURIComponent(clerkId)}`);
+  const response = await authedFetch(`/api/meal-plan/preferences/${encodeURIComponent(clerkId)}`, {
+    baseUrl: apiURL,
+    getToken,
+    clerkId,
+  });
   const data = await readResponseJson(response);
   if (!response.ok) {
     throw new Error(data?.error || "Could not fetch meal plan preferences");
@@ -144,14 +159,18 @@ export const saveMealPlanPreferences = async ({
   apiURL,
   clerkId,
   preferences,
+  getToken,
 }: {
   apiURL: string;
   clerkId: string;
   preferences: MealPlanPreferences;
+  getToken?: GetToken;
 }) => {
-  const response = await fetch(`${apiURL}/api/meal-plan/preferences/${encodeURIComponent(clerkId)}`, {
+  const response = await authedFetch(`/api/meal-plan/preferences/${encodeURIComponent(clerkId)}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    baseUrl: apiURL,
+    getToken,
+    clerkId,
     body: JSON.stringify({ preferences }),
   });
   const data = await readResponseJson(response);
@@ -169,6 +188,7 @@ export const fetchMealPlanRecommendations = async ({
   forceExploration = false,
   explorationSeed,
   preferences,
+  getToken,
 }: {
   apiURL: string;
   clerkId: string;
@@ -177,15 +197,16 @@ export const fetchMealPlanRecommendations = async ({
   forceExploration?: boolean;
   explorationSeed?: string | number;
   preferences?: MealPlanPreferences;
+  getToken?: GetToken;
 }) => {
   const params = new URLSearchParams({ date });
   if (mealType) params.set("mealType", mealType);
   if (forceExploration) params.set("force_exploration", "true");
   if (explorationSeed !== undefined) params.set("exploration_seed", String(explorationSeed));
   if (preferences) params.set("preferences", JSON.stringify(preferences));
-  const response = await fetch(
-    `${apiURL}/api/meal-plan/recommendations/${encodeURIComponent(clerkId)}?${params.toString()}`,
-    { cache: "no-store" }
+  const response = await authedFetch(
+    `/api/meal-plan/recommendations/${encodeURIComponent(clerkId)}?${params.toString()}`,
+    { baseUrl: apiURL, getToken, clerkId, cache: "no-store" }
   );
   const data = await readResponseJson(response);
   if (!response.ok) {
@@ -203,6 +224,7 @@ export const sendMealPlanEvent = async ({
   items,
   preferences,
   context,
+  getToken,
 }: {
   apiURL?: string;
   clerkId?: string | null;
@@ -212,12 +234,15 @@ export const sendMealPlanEvent = async ({
   items?: any[];
   preferences?: MealPlanPreferences;
   context?: Record<string, any>;
+  getToken?: GetToken;
 }) => {
   if (!apiURL || !clerkId) return false;
   try {
-    const response = await fetch(`${apiURL}/api/meal-plan/events`, {
+    const response = await authedFetch(`/api/meal-plan/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      baseUrl: apiURL,
+      getToken,
+      clerkId,
       body: JSON.stringify({
         clerkId,
         eventType,

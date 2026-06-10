@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
+import { authedFetch } from '../../../services/authedFetch';
 import AddFoodModal from '../../../components/addfoodmodal';
 import {
   fetchMealsSummaryWithCache,
@@ -103,8 +104,8 @@ const MealSection = ({ title, items, colorClass, icon, onRemoveOne, onAddOne, on
 // ---------------------------------------------------------
 export default function SummaryScreen() {
   const router = useRouter();
-  const { userId } = useAuth();
-  
+  const { userId, getToken } = useAuth();
+
   // Ref for Calendar Scroll
   const flatListRef = useRef<FlatList>(null);
   const removedTempIdsRef = useRef<Set<string>>(new Set());
@@ -163,6 +164,7 @@ export default function SummaryScreen() {
         apiURL,
         userId,
         date: dateStr,
+        getToken,
       });
       if (meals) setMeals(meals);
     } catch (error) {
@@ -188,13 +190,12 @@ export default function SummaryScreen() {
     });
 
     try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
       const idText = String(id);
       if (idText.startsWith('temp-')) {
         removedTempIdsRef.current.add(idText);
         return;
       }
-      const response = await fetch(`${apiURL}/api/meals/delete/${encodeURIComponent(idText)}`, { method: 'DELETE' });
+      const response = await authedFetch(`/api/meals/delete/${encodeURIComponent(idText)}`, { method: 'DELETE', getToken, clerkId: userId });
       if (!response.ok) throw new Error(`Failed to delete meal item ${idText}`);
       markMealsSummaryDirty(userId, formatLocalYYYYMMDD(selectedDate));
     } catch (e) { console.error(e); }
@@ -222,7 +223,6 @@ export default function SummaryScreen() {
 
     // 3. Send to Backend in Background
     try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
       const payload = {
         clerkId: userId,
         date: newTempMeal.date,
@@ -236,9 +236,10 @@ export default function SummaryScreen() {
       };
       // We don't need to await the fetch for the UI to update, 
       // but waiting ensures data consistency if user leaves page.
-      const response = await fetch(`${apiURL}/api/meals/add`, {
+      const response = await authedFetch(`/api/meals/add`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          getToken,
+          clerkId: userId,
           body: JSON.stringify(payload)
       });
       const data = await response.json().catch(() => ({}));
@@ -248,7 +249,7 @@ export default function SummaryScreen() {
       if (createdMeal?.id) {
         if (removedTempIdsRef.current.has(tempId)) {
           removedTempIdsRef.current.delete(tempId);
-          await fetch(`${apiURL}/api/meals/delete/${encodeURIComponent(String(createdMeal.id))}`, { method: 'DELETE' });
+          await authedFetch(`/api/meals/delete/${encodeURIComponent(String(createdMeal.id))}`, { method: 'DELETE', getToken, clerkId: userId });
         } else {
           setMeals((current) => current.map((meal) => meal.id === tempId ? createdMeal : meal));
         }
@@ -269,7 +270,6 @@ export default function SummaryScreen() {
   // --- HANDLER: ADD NEW FOOD (MODAL) ---
   const handleAddNewFood = async (foodItem: any) => {
     try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
       const formattedDate = formatLocalYYYYMMDD(selectedDate);
 
       const payload = {
@@ -284,9 +284,10 @@ export default function SummaryScreen() {
         image: foodItem.image || ""
       };
       
-      await fetch(`${apiURL}/api/meals/add`, {
+      await authedFetch(`/api/meals/add`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          getToken,
+          clerkId: userId,
           body: JSON.stringify(payload)
       });
       markMealsSummaryDirty(userId, formattedDate);
