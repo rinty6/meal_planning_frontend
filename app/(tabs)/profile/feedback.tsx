@@ -21,11 +21,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { readAsStringAsync } from 'expo-file-system/legacy';
 import { useAuth, useUser } from '@clerk/clerk-expo';
+import { authedFetch } from '../../../services/authedFetch';
 import CustomAlert from '../../../components/customAlert';
 
 const FeedbackScreen = () => {
     const router = useRouter();
-    const { userId } = useAuth();
+    const { userId, getToken } = useAuth();
     const { user } = useUser();
     const [feedback, setFeedback] = useState('');
     const [imageUri, setImageUri] = useState<string | null>(null);
@@ -74,12 +75,11 @@ const FeedbackScreen = () => {
             }
 
             // Send feedback to backend
-            const response = await fetch(`${apiURL}/api/feedback/submit`, {
+            const response = await authedFetch(`/api/feedback/submit`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                getToken,
+                clerkId: userId,
                 body: JSON.stringify({
-                    clerkId: userId,
-                    userEmail: user?.emailAddresses?.[0]?.emailAddress || 'noreply@app.com',
                     feedbackText: feedback,
                     imageBase64: imageBase64,
                 })

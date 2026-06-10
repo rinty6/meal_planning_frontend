@@ -91,28 +91,48 @@ export const authedFetch = async (
     hasJsonBody: body != null && !isFormData,
   });
 
-  let abortController: AbortController | null = null;
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const url = resolveApiUrl(path, baseUrl);
 
-  // Only manage our own timeout when the caller did not provide a signal.
-  if (
-    !signal &&
-    typeof timeoutMs === "number" &&
-    timeoutMs > 0 &&
-    typeof AbortController === "function"
-  ) {
-    abortController = new AbortController();
-    timeoutId = setTimeout(() => abortController?.abort(), timeoutMs);
+  // Run the request with a per-attempt timeout (only when the caller did not
+  // supply its own signal).
+  const runFetch = async (): Promise<Response> => {
+    let controller: AbortController | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    if (
+      !signal &&
+      typeof timeoutMs === "number" &&
+      timeoutMs > 0 &&
+      typeof AbortController === "function"
+    ) {
+      controller = new AbortController();
+      timeoutId = setTimeout(() => controller?.abort(), timeoutMs);
+    }
+    try {
+      return await fetch(url, {
+        ...rest,
+        body,
+        headers: finalHeaders,
+        signal: signal ?? controller?.signal ?? undefined,
+      });
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+
+  let response = await runFetch();
+
+  // One gentle backoff-retry on 429 (rate limited). A 429 means the request was
+  // not processed, so re-sending is safe. Honor Retry-After, capped at 3s. Skip
+  // when the caller manages its own signal or sent a FormData body.
+  if (response.status === 429 && !signal && !isFormData) {
+    const retryAfterSeconds = Number(response.headers.get("Retry-After"));
+    const waitMs =
+      Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        ? retryAfterSeconds * 1000
+        : 1000;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 3000)));
+    response = await runFetch();
   }
 
-  try {
-    return await fetch(resolveApiUrl(path, baseUrl), {
-      ...rest,
-      body,
-      headers: finalHeaders,
-      signal: signal ?? abortController?.signal ?? undefined,
-    });
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
+  return response;
 };
