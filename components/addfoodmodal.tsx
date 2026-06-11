@@ -24,6 +24,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@clerk/clerk-expo';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { searchFoodItems, getFoodById } from '../services/mealAPI';
@@ -43,6 +44,7 @@ interface AddFoodModalProps {
 }
 
 const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalProps) => {
+  const { getToken, userId } = useAuth();
   const [viewMode, setViewMode] = useState<'search' | 'manual' | 'barcode' | 'recognition'>('search');
 
   // --- CUSTOM ALERT ---
@@ -181,10 +183,10 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setRecognitionImageUri(uri);
     setRecognitionLoading(true);
     try {
-      const prediction = await recognizeFood(uri);
+      const prediction = await recognizeFood(uri, { getToken, clerkId: userId });
       setRecognitionResult(prediction);
       setViewMode('recognition');
-    } catch (error) {
+    } catch {
       showCustomAlert('Recognition Failed',
         'Could not analyse the image. Check your connection and try again with a clearer, well-lit photo.');
     } finally {

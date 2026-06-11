@@ -1,4 +1,5 @@
-const FOOD_API_URL = process.env.EXPO_PUBLIC_FOOD_API_URL;
+import { readAsStringAsync } from 'expo-file-system/legacy';
+import { authedFetch, type GetToken } from './authedFetch';
 
 export interface NutritionInfo {
   calories: number | null;
@@ -23,21 +24,41 @@ export interface PredictionResult {
   ood_message: string | null;
 }
 
-export async function recognizeFood(imageUri: string): Promise<PredictionResult> {
-  const formData = new FormData();
-  formData.append("file", {
-    uri: imageUri,
-    type: "image/jpeg",
-    name: "food.jpg",
-  } as any);
+export interface FoodRecognitionAuthOptions {
+  getToken?: GetToken;
+  clerkId?: string | null;
+}
 
-  const response = await fetch(`${FOOD_API_URL}/predict`, {
-    method: "POST",
-    body: formData,
+const imageUriToBase64DataUrl = async (imageUri: string): Promise<string> => {
+  const base64String = await readAsStringAsync(imageUri, {
+    encoding: 'base64',
+  });
+  return `data:image/jpeg;base64,${base64String}`;
+};
+
+export async function recognizeFood(
+  imageUri: string,
+  auth: FoodRecognitionAuthOptions = {},
+): Promise<PredictionResult> {
+  const imageBase64 = await imageUriToBase64DataUrl(imageUri);
+
+  const response = await authedFetch('/api/food-recognition/predict', {
+    method: 'POST',
+    getToken: auth.getToken,
+    clerkId: auth.clerkId,
+    body: JSON.stringify({ imageBase64 }),
+    timeoutMs: 45_000,
   });
 
   if (!response.ok) {
-    throw new Error(`Recognition failed: ${response.status}`);
+    let message = `Recognition failed: ${response.status}`;
+    try {
+      const errorData = await response.json();
+      message = errorData.error || errorData.detail || message;
+    } catch {
+      // Keep the status-based message when the response is not JSON.
+    }
+    throw new Error(message);
   }
 
   return response.json();

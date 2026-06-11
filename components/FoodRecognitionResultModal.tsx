@@ -9,6 +9,7 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Image, TextInput, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@clerk/clerk-expo';
 import type { PredictionResult, FoodCandidate } from '../services/foodRecognitionAPI';
 import { submitFoodFeedback } from '../services/feedbackAPI';
 
@@ -56,6 +57,7 @@ const FeedbackRow = ({
   imageUri: string | null;
   predictedClass: string;
 }) => {
+  const { getToken, userId } = useAuth();
   const [open, setOpen] = useState(false);
   const [correction, setCorrection] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -69,6 +71,8 @@ const FeedbackRow = ({
         imageUri,
         predictedClass,
         correctClass: correction.trim(),
+        getToken,
+        clerkId: userId,
       });
       setSubmitted(true);
     } catch {

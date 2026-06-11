@@ -1,28 +1,36 @@
-const FOOD_API_URL = process.env.EXPO_PUBLIC_FOOD_API_URL;
+import { readAsStringAsync } from 'expo-file-system/legacy';
+import { authedFetch, type GetToken } from './authedFetch';
 
 export interface FeedbackPayload {
   imageUri: string | null;
   predictedClass: string;
   correctClass: string;
+  getToken?: GetToken;
+  clerkId?: string | null;
 }
 
+const imageUriToBase64DataUrl = async (imageUri: string): Promise<string> => {
+  const base64String = await readAsStringAsync(imageUri, {
+    encoding: 'base64',
+  });
+  return `data:image/jpeg;base64,${base64String}`;
+};
+
 export async function submitFoodFeedback(payload: FeedbackPayload): Promise<void> {
-  const formData = new FormData();
+  const imageBase64 = payload.imageUri
+    ? await imageUriToBase64DataUrl(payload.imageUri)
+    : undefined;
 
-  if (payload.imageUri) {
-    formData.append('file', {
-      uri: payload.imageUri,
-      type: 'image/jpeg',
-      name: 'feedback.jpg',
-    } as any);
-  }
-
-  formData.append('predicted_class', payload.predictedClass);
-  formData.append('correct_class', payload.correctClass);
-
-  // Best-effort — caller should not throw on failure
-  await fetch(`${FOOD_API_URL}/feedback`, {
+  // Best-effort - caller should not throw on failure.
+  await authedFetch('/api/food-recognition/feedback', {
     method: 'POST',
-    body: formData,
+    getToken: payload.getToken,
+    clerkId: payload.clerkId,
+    body: JSON.stringify({
+      imageBase64,
+      predictedClass: payload.predictedClass,
+      correctClass: payload.correctClass,
+    }),
+    timeoutMs: 30_000,
   });
 }
