@@ -11,6 +11,8 @@ import SuccessModal from '../../components/sucessmodal';
 import CustomAlert from '../../components/customAlert';
 import GuidanceContent from '../../components/GuidanceContent';
 import SafeFullScreenModal from '../../components/SafeFullScreenModal';
+import NotificationMessage from '../../components/notificationmessage';
+import FeedbackSendingMessage from '../../components/feedbacksendingmessage';
 import { getCurrentFoodSuggestionMealPeriod, searchFoodItemsWithNutrition } from '../../services/mealAPI';
 import {
     getCachedHomeSnapshot,
@@ -163,6 +165,8 @@ const HomeScreen = () => {
     const [showSuccess, setShowSuccess] = useState(false);
     const [showMealSelector, setShowMealSelector] = useState(false);
     const [isGuidanceVisible, setIsGuidanceVisible] = useState(false);
+    const [isNotificationMessagesVisible, setIsNotificationMessagesVisible] = useState(false);
+    const [isFeedbackVisible, setIsFeedbackVisible] = useState(false);
     const [selectedRecommendedFood, setSelectedRecommendedFood] = useState<any | null>(null);
     const [favoriteItemKeys, setFavoriteItemKeys] = useState<Record<string, boolean>>({});
     const [alertVisible, setAlertVisible] = useState(false);
@@ -451,7 +455,7 @@ const HomeScreen = () => {
         { name: 'Profile', icon: 'person-outline', route: '/(tabs)/profile', iconColor: THEME_COLORS.primary, iconBgClass: 'bg-primarySoft' },
         { name: 'Shopping', icon: 'basket-outline', route: '/(tabs)/meal/shopping', iconColor: THEME_COLORS.success, iconBgClass: 'bg-successSoft' },
         { name: 'Recipe', icon: 'book-outline', route: '/(tabs)/meal/recipe', iconColor: THEME_COLORS.secondary, iconBgClass: 'bg-secondarySoft' },
-        { name: 'Feedback', icon: 'chatbubble-outline', route: '/(tabs)/profile/feedback', iconColor: THEME_COLORS.textSecondary, iconBgClass: 'bg-neutralSoft' },
+        { name: 'Feedback', icon: 'chatbubble-outline', onPress: () => setIsFeedbackVisible(true), iconColor: THEME_COLORS.textSecondary, iconBgClass: 'bg-neutralSoft' },
     ];
 
     const consumedCalories = Math.max(0, toNumber(macros.consumed.calories));
@@ -526,7 +530,7 @@ const HomeScreen = () => {
                     </View>
                     
                     {/* Notification Bell */}
-                    <TouchableOpacity onPress={() => router.push('/(tabs)/profile/notifications')} className="relative p-2">
+                    <TouchableOpacity onPress={() => setIsNotificationMessagesVisible(true)} className="relative p-2">
                         <Ionicons name="notifications-outline" size={24} color="#64748B" />
                         <View className="absolute top-1 right-2 w-2.5 h-2.5 rounded-full border border-white" style={{ backgroundColor: '#EF4444' }} />
                     </TouchableOpacity>
@@ -764,6 +768,28 @@ const HomeScreen = () => {
                 statusBarStyle="dark"
             >
                 <GuidanceContent onClose={() => setIsGuidanceVisible(false)} />
+            </SafeFullScreenModal>
+
+            <SafeFullScreenModal
+                visible={isNotificationMessagesVisible}
+                onRequestClose={() => setIsNotificationMessagesVisible(false)}
+                backgroundColor="#F3F4F6"
+                statusBarStyle="dark"
+            >
+                <NotificationMessage onClose={() => setIsNotificationMessagesVisible(false)} />
+            </SafeFullScreenModal>
+
+            <SafeFullScreenModal
+                visible={isFeedbackVisible}
+                onRequestClose={() => setIsFeedbackVisible(false)}
+                backgroundColor="#FFFFFF"
+                statusBarStyle="dark"
+            >
+                <FeedbackSendingMessage
+                    closeIcon="close"
+                    onClose={() => setIsFeedbackVisible(false)}
+                    onSubmitted={() => setIsFeedbackVisible(false)}
+                />
             </SafeFullScreenModal>
         </SafeAreaView>
     );

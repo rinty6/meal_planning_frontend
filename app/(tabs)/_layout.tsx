@@ -12,6 +12,10 @@ const TabLayout = () => {
     router.navigate('/(tabs)/meal')
   }
 
+  const openProfileRoot = () => {
+    router.navigate('/(tabs)/profile')
+  }
+
   // 1. Security Check
   if (!isSignedIn) {
     return <Redirect href="/(auth)/sign-in" />
@@ -67,6 +71,20 @@ const TabLayout = () => {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "person" : "person-outline"} size={24} color={color} />,
+          tabBarButton: ({ children, accessibilityLabel, accessibilityState, onLongPress, style, testID }) => (
+            <TouchableOpacity
+              accessibilityLabel={accessibilityLabel}
+              accessibilityRole="button"
+              accessibilityState={accessibilityState}
+              activeOpacity={0.7}
+              onLongPress={onLongPress || undefined}
+              onPress={openProfileRoot}
+              style={style}
+              testID={testID}
+            >
+              {children}
+            </TouchableOpacity>
+          ),
         }}
       />
     </Tabs>

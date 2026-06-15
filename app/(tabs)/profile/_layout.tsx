@@ -10,6 +10,8 @@ export default function ProfileLayout() {
             <Stack.Screen name="index" />
             <Stack.Screen name="edit" options={{ presentation: 'modal' }} />
             <Stack.Screen name="notifications" />
+            <Stack.Screen name="notification-settings" />
+            <Stack.Screen name="notification-messages" />
             <Stack.Screen name="feedback" />
             <Stack.Screen name="privacy" />
         </Stack>

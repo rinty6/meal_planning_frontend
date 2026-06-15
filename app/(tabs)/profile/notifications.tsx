@@ -1,371 +1,70 @@
-// This file creates the notification page
-// It fetch the notification data from the backend
-// Show all the notification message from the system
+// Profile notification hub.
+// This screen intentionally only offers two choices: settings or messages.
+// Keeping those jobs separate avoids Home's notification shortcut leaving the
+// Profile tab stuck on an inbox/settings child screen.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Linking,
-  RefreshControl,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React from 'react';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '@clerk/clerk-expo';
-import {
-  type InboxNotification,
-  getCachedNotifications,
-  markNotificationReadInCache,
-  setCachedNotifications,
-  shouldRefreshNotifications,
-} from '../../../services/notificationsStore';
-
-const NOTIFICATIONS_REFRESH_TTL_MS = 60 * 1000;
-
-const formatRelativeTime = (dateLike: string) => {
-  const date = new Date(dateLike);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMinutes = Math.floor(diffMs / (1000 * 60));
-
-  if (diffMinutes < 1) return 'Just now';
-  if (diffMinutes < 60) return `${diffMinutes} min ago`;
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
-
-const NotificationCard = ({
-  item,
-  onPress,
-}: {
-  item: InboxNotification;
-  onPress: (item: InboxNotification) => void;
-}) => {
-  const unread = !item.isRead;
-
-  return (
-    <TouchableOpacity
-      onPress={() => onPress(item)}
-      activeOpacity={0.85}
-      className="mb-3 rounded-2xl border p-4"
-      style={{
-        borderColor: unread ? '#B4D3FF' : '#E5E7EB',
-        backgroundColor: unread ? '#F4F8FF' : '#F9FAFB',
-      }}
-    >
-      <View className="flex-row items-start">
-        <View
-          className="w-10 h-10 rounded-xl items-center justify-center mr-3"
-          style={{ backgroundColor: unread ? '#DCEBFF' : '#EEF2F7' }}
-        >
-          <Ionicons name="notifications-outline" size={18} color="#2563EB" />
-        </View>
-
-        <View className="flex-1">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-base font-bold text-[#1F2937] pr-2">{item.title}</Text>
-            {unread ? <View className="w-2.5 h-2.5 rounded-full bg-blue-500" /> : null}
-          </View>
-          <Text className="text-sm text-[#475569] mt-1 leading-5">{item.body}</Text>
-          <Text className="text-xs text-[#94A3B8] mt-3">{formatRelativeTime(item.createdAt)}</Text>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-};
 
 const NotificationsScreen = () => {
   const router = useRouter();
-  const { userId, getToken } = useAuth();
-  const getTokenRef = useRef(getToken);
-  const inFlightRef = useRef(false);
-
-  const [items, setItems] = useState<InboxNotification[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [masterEnabled, setMasterEnabled] = useState(true);
-  const [togglingPref, setTogglingPref] = useState(false);
-
-  useEffect(() => {
-    getTokenRef.current = getToken;
-  }, [getToken]);
-
-  const hydrateFromCache = useCallback(() => {
-    if (!userId) return;
-    const cached = getCachedNotifications(userId);
-    if (!cached) return;
-    setItems(cached.items);
-    setLoading(false);
-  }, [userId]);
-
-  const loadNotifications = useCallback(
-    async ({
-      isRefresh = false,
-      showSpinner = true,
-      force = false,
-    }: {
-      isRefresh?: boolean;
-      showSpinner?: boolean;
-      force?: boolean;
-    } = {}) => {
-      if (!userId) return;
-      if (inFlightRef.current) return;
-      if (!force && !shouldRefreshNotifications(userId, NOTIFICATIONS_REFRESH_TTL_MS)) return;
-
-      inFlightRef.current = true;
-      if (isRefresh) setRefreshing(true);
-      else if (showSpinner) setLoading(true);
-
-      try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        const token = await getTokenRef.current();
-        if (!apiURL || !userId) return;
-
-        const response = await fetch(`${apiURL}/api/notifications/${userId}`, {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            'x-clerk-id': userId,
-          },
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          const message = `Notification fetch failed: ${response.status}`;
-          setErrorMessage(message);
-          console.warn(message, errorText);
-          return;
-        }
-        const data = await response.json();
-        const nextItems = Array.isArray(data) ? data : [];
-        setItems(nextItems);
-        setCachedNotifications(userId, nextItems);
-        setErrorMessage('');
-      } catch (error) {
-        setErrorMessage('Failed to load notifications');
-        console.warn('Failed to load notifications:', error);
-      } finally {
-        if (showSpinner) setLoading(false);
-        setRefreshing(false);
-        inFlightRef.current = false;
-      }
-    },
-    [userId]
-  );
-
-  const loadPreferences = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      const token = await getTokenRef.current();
-      if (!apiURL) return;
-      const response = await fetch(`${apiURL}/api/notifications/preferences/${userId}`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          'x-clerk-id': userId,
-        },
-      });
-      if (!response.ok) return;
-      const data = await response.json();
-      if (typeof data?.notificationsMasterEnabled === 'boolean') {
-        setMasterEnabled(data.notificationsMasterEnabled);
-      }
-    } catch (error) {
-      console.warn('Failed to load notification preferences:', error);
-    }
-  }, [userId]);
-
-  // When the user turns notifications ON, make sure the OS permission is also
-  // granted — the in-app switch cannot override an iOS-level denial.
-  const ensureOsPermissionGranted = useCallback(async () => {
-    try {
-      const Notifications = await import('expo-notifications');
-      const current = await Notifications.getPermissionsAsync();
-      if (current.status === 'granted') return true;
-      const requested = await Notifications.requestPermissionsAsync();
-      if (requested.status === 'granted') return true;
-      Alert.alert(
-        'Allow notifications',
-        'Notifications are turned off for GoodHealthMate in your device settings. Open Settings to enable them.',
-        [
-          { text: 'Not now', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => Linking.openSettings() },
-        ]
-      );
-      return false;
-    } catch (error) {
-      // If the check itself fails (e.g. Expo Go), don't block the saved pref.
-      console.warn('OS permission check failed:', error);
-      return true;
-    }
-  }, []);
-
-  const toggleMaster = useCallback(
-    async (next: boolean) => {
-      if (!userId || togglingPref) return;
-      const previous = masterEnabled;
-      setMasterEnabled(next); // optimistic
-      setTogglingPref(true);
-      try {
-        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-        const token = await getToken();
-        const response = await fetch(`${apiURL}/api/notifications/preferences/${userId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            'x-clerk-id': userId,
-          },
-          body: JSON.stringify({ clerkId: userId, enabled: next }),
-        });
-        if (!response.ok) throw new Error(`status ${response.status}`);
-        if (next) {
-          await ensureOsPermissionGranted();
-        }
-      } catch (error) {
-        console.warn('Failed to update notification preference:', error);
-        setMasterEnabled(previous); // revert on failure
-        Alert.alert('Error', 'Could not update your notification setting. Please try again.');
-      } finally {
-        setTogglingPref(false);
-      }
-    },
-    [userId, masterEnabled, togglingPref, getToken, ensureOsPermissionGranted]
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      const cached = getCachedNotifications(userId);
-      hydrateFromCache();
-      void loadNotifications({ showSpinner: !cached });
-      void loadPreferences();
-    }, [hydrateFromCache, loadNotifications, loadPreferences, userId])
-  );
-
-  const markAsRead = useCallback(
-    async (notificationId: number) => {
-      const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-      const token = await getToken();
-      if (!apiURL || !userId) return;
-
-      const response = await fetch(`${apiURL}/api/notifications/${notificationId}/read`, {
-        method: 'PATCH',
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          'x-clerk-id': userId,
-        },
-      });
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.warn('Mark-as-read failed:', response.status, errorText);
-      }
-    },
-    [getToken, userId]
-  );
-
-  const onPressNotification = useCallback(
-    async (item: InboxNotification) => {
-      if (!item.isRead) {
-        setItems((prev) =>
-          prev.map((n) => (n.id === item.id ? { ...n, isRead: true } : n))
-        );
-        if (userId) {
-          markNotificationReadInCache(userId, item.id);
-        }
-        try {
-          await markAsRead(item.id);
-        } catch (error) {
-          console.warn('Failed to mark notification as read:', error);
-        }
-      }
-    },
-    [markAsRead]
-  );
 
   return (
     <SafeAreaView className="flex-1 bg-[#F3F4F6]">
       <View className="px-5 py-4 border-b border-gray-200 flex-row items-center justify-between">
         <Text className="text-3xl font-bold text-[#111827]">Notifications</Text>
-        <TouchableOpacity onPress={() => router.push('/(tabs)/profile')} className="p-2">
-          <Ionicons name="close" size={20} color="#6B7280" />
+        <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} className="p-2">
+          <Ionicons name="close" size={22} color="#6B7280" />
         </TouchableOpacity>
       </View>
 
-      {loading ? (
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#2563EB" />
-        </View>
-      ) : (
-        <>
-          {errorMessage ? (
-            <View className="mx-4 mt-4 px-4 py-3 rounded-xl border border-red-200 bg-red-50">
-              <Text className="text-red-700 text-sm">{errorMessage}</Text>
-            </View>
-          ) : null}
-          <FlatList
-            data={items}
-            keyExtractor={(item) => String(item.id)}
-            contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: 28 }}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={() => loadNotifications({ isRefresh: true, showSpinner: false, force: true })}
-                tintColor="#2563EB"
-              />
-            }
-            ListHeaderComponent={
-              <View>
-                {/* Section 1 — master switch */}
-                <View className="mb-5 rounded-2xl border border-gray-200 bg-white p-4">
-                  <View className="flex-row items-center justify-between">
-                    <View className="flex-1 pr-3">
-                      <Text className="text-base font-bold text-[#1F2937]">Enable Notifications</Text>
-                      <Text className="text-sm text-[#64748B] mt-1 leading-5">
-                        Turn all GoodHealthMate notifications on or off. When off, you won&apos;t
-                        receive meal reminders or calorie goal updates.
-                      </Text>
-                    </View>
-                    <Switch
-                      value={masterEnabled}
-                      onValueChange={toggleMaster}
-                      disabled={togglingPref}
-                      trackColor={{ false: '#CBD5E1', true: '#2563EB' }}
-                    />
-                  </View>
-                </View>
+      <View className="px-5 pt-5">
+        <Text className="text-sm text-[#64748B] leading-5 mb-4">
+          Choose what you want to manage. Settings control whether reminders can be sent;
+          messages show the notifications GoodHealthMate has already created for you.
+        </Text>
 
-                {/* Section 2 — messages heading */}
-                <Text className="text-sm font-semibold text-[#475569] mb-2 ml-1">
-                  Recent notifications
-                </Text>
-              </View>
-            }
-            renderItem={({ item }) => (
-              <NotificationCard item={item} onPress={onPressNotification} />
-            )}
-            ListEmptyComponent={
-              <View className="mt-20 items-center px-8">
-                <Ionicons name="notifications-off-outline" size={30} color="#94A3B8" />
-                <Text className="text-gray-500 mt-3 text-center">
-                  No notifications yet. We will show alerts here when available.
-                </Text>
-              </View>
-            }
-          />
-        </>
-      )}
+        <TouchableOpacity
+          onPress={() => router.push('/(tabs)/profile/notification-settings')}
+          activeOpacity={0.85}
+          className="mb-4 rounded-2xl border border-gray-200 bg-white p-4"
+        >
+          <View className="flex-row items-center">
+            <View className="w-11 h-11 rounded-xl bg-blue-100 items-center justify-center mr-4">
+              <Ionicons name="options-outline" size={22} color="#2563EB" />
+            </View>
+            <View className="flex-1">
+              <Text className="text-base font-bold text-[#1F2937]">Notification Settings</Text>
+              <Text className="text-sm text-[#64748B] mt-1 leading-5">
+                Turn all meal reminders and calorie updates on or off.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#94A3B8" />
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => router.push('/(tabs)/profile/notification-messages')}
+          activeOpacity={0.85}
+          className="rounded-2xl border border-gray-200 bg-white p-4"
+        >
+          <View className="flex-row items-center">
+            <View className="w-11 h-11 rounded-xl bg-orange-100 items-center justify-center mr-4">
+              <Ionicons name="notifications-outline" size={22} color="#F97316" />
+            </View>
+            <View className="flex-1">
+              <Text className="text-base font-bold text-[#1F2937]">Notification Messages</Text>
+              <Text className="text-sm text-[#64748B] mt-1 leading-5">
+                View reminders, goal updates, and app alerts in one inbox.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#94A3B8" />
+          </View>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 };
