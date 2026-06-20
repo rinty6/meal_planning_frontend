@@ -8,6 +8,7 @@ import { markFavoritesDirty } from '../../../services/favoritesStore';
 import { useAuth } from '@clerk/clerk-expo';
 import { authedFetch } from '../../../services/authedFetch';
 import IngredientIcon from '../../../components/IngredientIcon';
+import { resolveIngredientImage } from '../../../services/ingredientImages';
 import SuccessModal from '../../../components/sucessmodal'; 
 import { markMealsSummaryDirty } from '../../../services/mealsSummaryStore';
 
@@ -46,6 +47,8 @@ const RecipeDetailScreen = () => {
   const [ingredients, setIngredients] = useState<any[]>([]);
   const [instructions, setInstructions] = useState<any[]>([]);
   const [baseRecipeInfo, setBaseRecipeInfo] = useState<any>(null);
+  // Track ingredient image URLs that fail to load so we fall back to the icon.
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   
   // Modal State
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -398,11 +401,19 @@ const RecipeDetailScreen = () => {
          </View>
 
          <View className="mb-8">
-             {ingredients.map((ing, index) => (
+             {ingredients.map((ing, index) => {
+                 const candidateImage = ing.image || resolveIngredientImage(ing.name);
+                 const resolvedImage = candidateImage && !failedImages[candidateImage] ? candidateImage : null;
+                 return (
                  <View key={index} className="flex-row items-center mb-4 bg-white">
                      <View className="w-16 h-16 bg-gray-50 rounded-2xl items-center justify-center overflow-hidden border border-gray-100 mr-4">
-                        {ing.image ? (
-                             <Image source={{ uri: ing.image }} className="w-full h-full" resizeMode="cover" />
+                        {resolvedImage ? (
+                             <Image
+                                source={{ uri: resolvedImage }}
+                                className="w-full h-full"
+                                resizeMode="contain"
+                                onError={() => setFailedImages((prev) => ({ ...prev, [resolvedImage]: true }))}
+                             />
                         ) : (
                              <IngredientIcon ingredientName={ing.name} size={28} color="#9CA3AF" />
                         )}
@@ -429,7 +440,8 @@ const RecipeDetailScreen = () => {
                          <Ionicons name="trash-outline" size={20} color="#EF4444" />
                      </TouchableOpacity>
                  </View>
-             ))}
+                 );
+             })}
          </View>
 
          {/* STEPS SECTION */}
