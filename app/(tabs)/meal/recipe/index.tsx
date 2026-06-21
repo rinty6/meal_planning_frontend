@@ -360,9 +360,10 @@ const RecipeScreen = () => {
 
       <FatSecretInfoModal
         visible={isRecipeInfoVisible}
-        title="Recipe images"
-        description="Some recipe images are provided by the FatSecret Platform API."
+        title="Recipe & ingredient images"
+        description="Recipe data and some recipe images are provided by the FatSecret Platform API."
         note="Note: Recipe images are symbolic illustrations and may not match the exact dish. Some recipes may also be displayed without images."
+        mealDb
         onClose={() => setIsRecipeInfoVisible(false)}
       />
 

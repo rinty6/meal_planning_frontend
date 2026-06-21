@@ -7,10 +7,13 @@ interface FatSecretInfoModalProps {
   description: string;
   note: string;
   onClose: () => void;
+  // When true, also credit TheMealDB (ingredient/recipe images & data source).
+  mealDb?: boolean;
 }
 
 const FATSECRET_ATTRIBUTION_URL = 'https://platform.fatsecret.com';
 const FATSECRET_BADGE_URL = 'https://platform.fatsecret.com/api/static/images/powered_by_fatsecret_horizontal_brand.png';
+const THEMEALDB_URL = 'https://www.themealdb.com';
 
 const FatSecretInfoModal = ({
   visible,
@@ -18,9 +21,16 @@ const FatSecretInfoModal = ({
   description,
   note,
   onClose,
+  mealDb = false,
 }: FatSecretInfoModalProps) => {
   const handleOpenFatSecret = () => {
     Linking.openURL(FATSECRET_ATTRIBUTION_URL).catch(() => {
+      // Ignore link-open failures on this informational modal.
+    });
+  };
+
+  const handleOpenTheMealDb = () => {
+    Linking.openURL(THEMEALDB_URL).catch(() => {
       // Ignore link-open failures on this informational modal.
     });
   };
@@ -45,6 +55,23 @@ const FatSecretInfoModal = ({
               resizeMode="contain"
             />
           </TouchableOpacity>
+
+          {/* TheMealDB credit (ingredient images now; recipe data once integrated). */}
+          {mealDb && (
+            <View className="mb-4">
+              <Text className="text-gray-500 text-center text-sm leading-6">
+                Ingredients are also provided by TheMealDB.
+              </Text>
+              <TouchableOpacity
+                accessibilityRole="link"
+                accessibilityLabel="Open TheMealDB website"
+                className="self-center mt-1"
+                onPress={handleOpenTheMealDb}
+              >
+                <Text className="text-primary font-semibold text-center underline">TheMealDB.com</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <Text className="text-xs text-gray-400 text-center leading-5 mb-6">{note}</Text>
 

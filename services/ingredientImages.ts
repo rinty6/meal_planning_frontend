@@ -31,7 +31,19 @@ const QUALIFIER_WORDS = new Set([
   'ripe', 'unripe', 'plain', 'natural', 'light', 'dark', 'mini', 'jumbo',
 ]);
 
-const normalize = (raw: string): { full: string; tokens: string[] } => {
+// Words that change an ingredient's IDENTITY (a processed/derived product), so
+// the base-noun image would be wrong: "garlic powder" is not a garlic bulb,
+// "tomato sauce" is not a tomato, "lime juice" is not a lime. When a name
+// contains one of these, we only accept a specific multi-word match (e.g. a
+// dedicated "tomato sauce" entry); otherwise we fall back to the icon rather
+// than show the misleading base image.
+const FORM_WORDS = new Set([
+  'powder', 'sauce', 'juice', 'paste', 'puree', 'extract', 'vinegar', 'stock',
+  'broth', 'syrup', 'ketchup', 'concentrate', 'granules', 'seasoning', 'oil',
+  'dressing', 'gravy', 'marinade', 'glaze',
+]);
+
+const normalize = (raw: string): { full: string; tokens: string[]; rawFull: string } => {
   const cleaned = (raw || '')
     .toLowerCase()
     .replace(/\([^)]*\)/g, ' ')      // drop parenthetical notes e.g. "(NS as to ...)"
@@ -39,12 +51,25 @@ const normalize = (raw: string): { full: string; tokens: string[] } => {
     .replace(/\s+/g, ' ')
     .trim();
 
-  const tokens = cleaned
-    .split(' ')
-    .map((t) => t.replace(/s$/, ''))   // crude singularize: avocados -> avocado
-    .filter((t) => t.length > 1 && !QUALIFIER_WORDS.has(t));
+  const rawTokens = cleaned.split(' ').filter((t) => t.length > 1);
+  const tokens = rawTokens.filter((t) => !QUALIFIER_WORDS.has(t));
 
-  return { full: tokens.join(' '), tokens };
+  // rawFull keeps qualifier words (so keys like "ground mustard", "dried dill",
+  // "lamb fat" can match); full/tokens drop them (so "fresh spinach" -> spinach).
+  return { full: tokens.join(' '), tokens, rawFull: rawTokens.join(' ') };
+};
+
+// Singular/plural variants of a word for forgiving matching. Keys are stored in
+// mixed forms (e.g. "oats" plural, "tomato" singular), and FatSecret names vary
+// too ("old fashioned oats", "tomatoes"), so we try several forms per token.
+const wordForms = (t: string): string[] => {
+  const forms = new Set<string>([t]);
+  if (t.endsWith('ies')) forms.add(t.slice(0, -3) + 'y'); // strawberries -> strawberry
+  else if (t.endsWith('es')) forms.add(t.slice(0, -2));   // tomatoes -> tomato
+  if (t.endsWith('s')) forms.add(t.slice(0, -1));          // avocados -> avocado
+  forms.add(t + 's');                                      // oat -> oats
+  forms.add(t + 'es');
+  return [...forms];
 };
 
 // Base URL for hosted ingredient images. An explicit baseUrl in the JSON wins;
@@ -68,11 +93,22 @@ const buildUrl = (filename: string): string | null => {
  */
 export const resolveIngredientImage = (name: string): string | null => {
   if (!name) return null;
-  const { full, tokens } = normalize(name);
+  const { full, tokens, rawFull } = normalize(name);
   if (!full) return null;
 
   const images = DATA.images || {};
   const aliases = DATA.aliases || {};
+
+  // 0. Qualifier-inclusive match: keys that legitimately contain a qualifier word
+  //    ("ground mustard", "dried dill", "lamb fat") must match before the
+  //    qualifier-stripping steps below remove that word.
+  if (rawFull !== full) {
+    if (images[rawFull]) return buildUrl(images[rawFull]);
+    if (aliases[rawFull] && images[aliases[rawFull]]) return buildUrl(images[aliases[rawFull]]);
+    for (const key of Object.keys(images)) {
+      if (key.includes(' ') && rawFull.includes(key)) return buildUrl(images[key]);
+    }
+  }
 
   // 1. Exact canonical match on the normalized full string.
   if (images[full]) return buildUrl(images[full]);
@@ -91,10 +127,19 @@ export const resolveIngredientImage = (name: string): string | null => {
     }
   }
 
-  // 4. Single-token match: any token equals a canonical key or alias.
-  for (const token of tokens) {
-    if (images[token]) return buildUrl(images[token]);
-    if (aliases[token] && images[aliases[token]]) return buildUrl(images[aliases[token]]);
+  // 4. Single-token match: any token (or its singular/plural form) equals a
+  //    canonical key or alias. e.g. "old fashioned oats" -> oats, "tomatoes" -> tomato.
+  //    Guard: if the name contains an identity-changing form word (powder/sauce/
+  //    juice/...), skip this base-noun fallback so "garlic powder" doesn't resolve
+  //    to garlic. Specific entries (steps 1-3) still win when they exist.
+  const hasFormWord = tokens.some((t) => FORM_WORDS.has(t));
+  if (!hasFormWord) {
+    for (const token of tokens) {
+      for (const form of wordForms(token)) {
+        if (images[form]) return buildUrl(images[form]);
+        if (aliases[form] && images[aliases[form]]) return buildUrl(images[aliases[form]]);
+      }
+    }
   }
 
   return null;

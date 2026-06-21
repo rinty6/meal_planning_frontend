@@ -10,6 +10,7 @@ interface TermsOfServiceProps {
 const FATSECRET_ATTRIBUTION_URL = 'https://platform.fatsecret.com';
 const FATSECRET_BADGE_URL = 'https://platform.fatsecret.com/api/static/images/powered_by_fatsecret_horizontal_brand.png';
 const OPEN_FOOD_FACTS_URL = 'https://world.openfoodfacts.org/';
+const THEMEALDB_URL = 'https://www.themealdb.com';
 const USDA_FOODDATA_CENTRAL_URL = 'https://fdc.nal.usda.gov/';
 const AUSNUT_WEBSITE_URL = 'https://www.foodstandards.gov.au/science-data/food-nutrient-databases/ausnut';
 const FOOD_101_DATASET_URL = 'https://data.vision.ee.ethz.ch/cvl/datasets_extra/food-101/';
@@ -333,8 +334,30 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ visible, onClose }) => 
             </TouchableOpacity>
           </View>
 
+          <View className="mb-6">
+            <Text className="text-base font-semibold text-gray-800 mb-2">4.8. TheMealDB</Text>
+            <Text className="text-sm text-textSecondary leading-6 mb-3">
+              The Service uses TheMealDB to provide ingredient images, and may use TheMealDB recipe content (dishes, categories, cuisines, ingredients, and instructions) where available. Some TheMealDB images are processed (for example, background removal) for display within the Service.
+            </Text>
+            <Text className="text-sm text-textSecondary leading-6 mb-3">
+              TheMealDB content remains the property of TheMealDB and its contributors; we do not claim ownership of it and credit TheMealDB as the source. 
+            </Text>
+            <Text className="text-sm text-textSecondary leading-6 mb-3">
+              TheMealDB data is provided on an &quot;as is&quot; basis, and you should independently verify ingredient, recipe, and nutritional information when it matters to your health, allergies, or dietary restrictions.
+            </Text>
+            <TouchableOpacity
+              accessibilityRole="link"
+              className="self-start"
+              onPress={() => handleOpenExternalLink(THEMEALDB_URL)}
+            >
+              <Text className="text-sm font-semibold text-primary underline">
+                TheMealDB website
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Section 5 */}
-          <Text className="text-lg font-bold text-textPrimary mb-3 mt-4">5. Your data rights and privacy</Text>
+          <Text className="text-lg font-bold text-textPrimary mb-3">5. Your data rights and privacy</Text>
 
           <View className="mb-4">
             <Text className="text-base font-semibold text-gray-800 mb-2">5.1. Privacy Policy</Text>
