@@ -1,32 +1,78 @@
 import { View, Text, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import CustomAlert from '../../../components/customAlert';
 import { authedFetch } from '../../../services/authedFetch';
+import {
+    fetchCalorieGoalsWithCache,
+    getCachedCalorieGoals,
+    removeCalorieGoalFromCache,
+    shouldRefreshCalorieGoals,
+    type CalorieGoal,
+} from '../../../services/calorieGoalsStore';
+
+const GOALS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const SavedGoalScreen = () => {
     const router = useRouter();
     const { userId, getToken } = useAuth();
-    const [goals, setGoals] = useState<any[]>([]);
+    const getTokenRef = useRef(getToken);
+    getTokenRef.current = getToken;
+    const [goals, setGoals] = useState<CalorieGoal[]>([]);
     const [loading, setLoading] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
     const [alertVisible, setAlertVisible] = useState(false);
     const [goalToDelete, setGoalToDelete] = useState<number | null>(null);
 
-    const loadGoals = async () => {
-        if (!userId) return;
-        setLoading(true);
-        try {
-            const res = await authedFetch(`/api/calorie/list/${userId}`, { getToken, clerkId: userId });
-            const data = await res.json();
-            if (res.ok) setGoals(data);
-        } catch (e) { console.error(e); }
-        finally { setLoading(false); }
-    };
+    const loadGoals = useCallback(async (force = false) => {
+        if (!userId) {
+            setGoals([]);
+            setLoading(false);
+            setRefreshing(false);
+            return;
+        }
 
-    useFocusEffect(useCallback(() => { loadGoals(); }, []));
+        const cached = getCachedCalorieGoals(userId);
+        const hasRenderableCache = Boolean(cached && cached.fetchedAt > 0);
+        if (cached) {
+            setGoals(cached.goals);
+        } else {
+            setGoals([]);
+        }
+
+        if (!force && !shouldRefreshCalorieGoals(userId, GOALS_CACHE_TTL_MS)) {
+            setLoading(false);
+            setRefreshing(false);
+            return;
+        }
+
+        if (hasRenderableCache) {
+            setRefreshing(true);
+        } else {
+            setLoading(true);
+        }
+
+        try {
+            const data = await fetchCalorieGoalsWithCache({
+                userId,
+                getToken: getTokenRef.current,
+                ttlMs: GOALS_CACHE_TTL_MS,
+                force,
+            });
+            if (data) setGoals(data);
+        } catch (e) { console.error(e); }
+        finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    }, [userId]);
+
+    useFocusEffect(useCallback(() => {
+        void loadGoals();
+    }, [loadGoals]));
 
     const confirmDelete = (id: number) => {
         setGoalToDelete(id);
@@ -34,16 +80,21 @@ const SavedGoalScreen = () => {
     };
 
     const handleDelete = async () => {
-        if (!goalToDelete) return;
+        if (goalToDelete === null || !userId) return;
         try {
-            await authedFetch(`/api/calorie/delete/${goalToDelete}`, { method: 'DELETE', getToken, clerkId: userId });
+            const response = await authedFetch(`/api/calorie/delete/${goalToDelete}`, { method: 'DELETE', getToken, clerkId: userId });
+            if (!response.ok) return;
             setGoals(prev => prev.filter(g => g.id !== goalToDelete));
+            removeCalorieGoalFromCache(userId, goalToDelete);
         } catch (e) { console.error(e); }
-        finally { setAlertVisible(false); }
+        finally {
+            setAlertVisible(false);
+            setGoalToDelete(null);
+        }
     };
 
     // RENDER ITEM MODIFIED TO SHOW STATUS
-    const renderItem = ({ item }: { item: any }) => (
+    const renderItem = ({ item }: { item: CalorieGoal }) => (
         <TouchableOpacity
             onPress={() => router.push({ pathname: '/(tabs)/calorie/goalSetting', params: { goalId: item.id } })}
             className="bg-white border border-gray-200 rounded-2xl p-5 mb-4 shadow-sm"
@@ -96,6 +147,8 @@ const SavedGoalScreen = () => {
                     data={goals}
                     keyExtractor={item => String(item.id)}
                     renderItem={renderItem}
+                    refreshing={refreshing}
+                    onRefresh={() => void loadGoals(true)}
                     contentContainerStyle={{ paddingBottom: 50, flexGrow: 1 }}
                     ListEmptyComponent={
                         <View className="flex-1 items-center justify-center mt-20">

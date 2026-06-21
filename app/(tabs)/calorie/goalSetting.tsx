@@ -1,10 +1,11 @@
 import { View, Text, ScrollView, Switch, TouchableOpacity, Platform, Modal } from 'react-native';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import { authedFetch } from '../../../services/authedFetch';
+import { markCalorieGoalsDirty } from '../../../services/calorieGoalsStore';
 import DateTimePicker from '@react-native-community/datetimepicker'; 
 
 import TextInputArea from '../../../components/TextInput';
@@ -31,6 +32,8 @@ const isSameLocalDay = (left: Date, right: Date) =>
 const GoalSettingScreen = () => {
   const router = useRouter();
   const { userId, getToken } = useAuth();
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
   const { goalId } = useLocalSearchParams();
 
   // Form State
@@ -57,13 +60,18 @@ const GoalSettingScreen = () => {
   });
 
   useEffect(() => {
-    if (goalId) {
+    if (goalId && userId) {
+        const controller = new AbortController();
         const loadGoal = async () => {
             try {
-                const res = await authedFetch(`/api/calorie/detail/${goalId}`, { getToken, clerkId: userId });
+                const res = await authedFetch(`/api/calorie/detail/${goalId}`, {
+                    getToken: getTokenRef.current,
+                    clerkId: userId,
+                    signal: controller.signal,
+                });
                 const data = await res.json();
 
-                if (res.ok) {
+                if (res.ok && !controller.signal.aborted) {
                     setGoalName(data.goalName);
                     setDailyCalories(String(data.dailyCalories));
                     setDescription(data.description || "");
@@ -71,11 +79,14 @@ const GoalSettingScreen = () => {
                     setEndDate(new Date(data.endDate));
                     setNotificationsEnabled(data.notificationsEnabled);
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                if (!controller.signal.aborted) console.error(e);
+            }
         };
-        loadGoal();
+        void loadGoal();
+        return () => controller.abort();
     }
-  }, [goalId]);
+  }, [goalId, userId]);
 
   // HANDLE DATE CHANGE
   const onDateChange = (event: any, selectedDate?: Date) => {
@@ -140,6 +151,7 @@ const GoalSettingScreen = () => {
           });
 
           if (res.ok) {
+              markCalorieGoalsDirty(userId);
               setSuccessMsg(goalId ? "Goal updated successfully!" : "New goal created!");
               setShowSuccess(true);
           } else {
