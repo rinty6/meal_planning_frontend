@@ -357,7 +357,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ visible, onClose }) => 
           </View>
 
           {/* Section 5 */}
-          <Text className="text-lg font-bold text-textPrimary mb-3">5. Your data rights and privacy</Text>
+          <Text className="text-lg font-bold text-textPrimary mb-3 mt-3">5. Your data rights and privacy</Text>
 
           <View className="mb-4">
             <Text className="text-base font-semibold text-gray-800 mb-2">5.1. Privacy Policy</Text>
