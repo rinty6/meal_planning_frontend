@@ -55,7 +55,7 @@ const RecipeScreen = () => {
   const [recipes, setRecipes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchError, setSearchError] = useState('');
-  
+
   // SORT STATE
   const [isSortVisible, setIsSortVisible] = useState(false);
   const [sortOption, setSortOption] = useState<'default' | 'calories_low' | 'calories_high'>('default');
@@ -185,14 +185,14 @@ const RecipeScreen = () => {
   );
 
   const renderItem = ({ item }: { item: any }) => (
-    <TouchableOpacity 
+    <TouchableOpacity
       className="flex-1 m-2 bg-blue-50 rounded-3xl p-3 shadow-sm border border-blue-100"
       onPress={() => router.push({
-        pathname: "/(tabs)/meal/recipedetail", 
-        params: { 
+        pathname: "/(tabs)/meal/recipedetail",
+        params: {
           id: item.id,
           previewImage: item.image,
-         } 
+         }
       })}
     >
       <View className="w-full h-32 bg-white rounded-2xl mb-3 overflow-hidden items-center justify-center">
@@ -216,7 +216,7 @@ const RecipeScreen = () => {
         </TouchableOpacity>
         <View className="flex-1 flex-row items-center bg-gray-100 rounded-2xl px-4 py-3">
             <Ionicons name="search" size={20} color="gray" />
-            <TextInput 
+            <TextInput
               className="flex-1 ml-2 text-base text-black"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -225,10 +225,10 @@ const RecipeScreen = () => {
               placeholderTextColor="#9CA3AF"
             />
         </View>
-        <TouchableOpacity 
+        <TouchableOpacity
             onPress={() => router.push({
                 pathname: "/(tabs)/meal/recipedetail",
-                params: { isCreating: "true" } 
+                params: { isCreating: "true" }
             })}
         >
             <Ionicons name="add-circle" size={32} color="#007BFF" />
@@ -238,7 +238,7 @@ const RecipeScreen = () => {
       {/* FILTERS ROW */}
       <View className="px-5 py-4 flex-row gap-3">
          {/* Sort Button */}
-         <TouchableOpacity 
+         <TouchableOpacity
             onPress={() => setIsSortVisible(true)}
             className="border border-gray-200 rounded-xl px-4 py-2 flex-row items-center"
          >
@@ -267,8 +267,8 @@ const RecipeScreen = () => {
              first, then the navigation arrow lives at the natural end of the row. */}
          <View className="ml-auto flex-row items-center">
             <InfoButton onPress={() => setIsRecipeInfoVisible(true)} />
-            <TouchableOpacity className="ml-3 justify-center" onPress={() => router.push('/(tabs)/meal/favorites')}>
-               <Text className="text-primary font-bold">To My Favorites {'>'}</Text>
+            <TouchableOpacity className="ml-3 justify-center" onPress={() => router.push('/(tabs)/meal/explore')}>
+               <Text className="text-primary font-bold">Explore by cuisine {'>'}</Text>
             </TouchableOpacity>
          </View>
       </View>
@@ -277,7 +277,7 @@ const RecipeScreen = () => {
       {loading ? (
         <ActivityIndicator size="large" color="#007BFF" className="mt-10" />
       ) : (
-        <FlatList 
+        <FlatList
           data={sortedRecipes} // Use the sorted list
           numColumns={2}
           keyExtractor={(item) => String(item.id)}
@@ -293,7 +293,7 @@ const RecipeScreen = () => {
          <TouchableOpacity className="flex-1 bg-black/50 justify-center items-center" onPress={() => setIsSortVisible(false)}>
             <View className="bg-white w-3/4 rounded-2xl p-5">
                 <Text className="text-lg font-bold mb-4 text-center">Sort By</Text>
-                
+
                 <TouchableOpacity onPress={() => {setSortOption('default'); setIsSortVisible(false)}} className="p-3 border-b border-gray-100">
                     <Text className="text-center text-lg">Relevance (Default)</Text>
                 </TouchableOpacity>
@@ -312,7 +312,7 @@ const RecipeScreen = () => {
          <View className="flex-1 bg-white" style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
             {/* HEADER */}
             <View className="flex-row items-center px-5 py-3 border-b border-gray-200">
-               <TouchableOpacity 
+               <TouchableOpacity
                   onPress={() => setIsFilterVisible(false)}
                   className="flex-row items-center justify-center p-2"
                >

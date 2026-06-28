@@ -3,7 +3,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getRecipeDetails } from '../../../services/mealAPI'; 
+import { getRecipeDetails } from '../../../services/mealAPI';
+import { getThemealdbRecipe, type ThemealdbRecipe } from '../../../services/themealdbAPI';
 import { markFavoritesDirty } from '../../../services/favoritesStore';
 import { useAuth } from '@clerk/clerk-expo';
 import { authedFetch } from '../../../services/authedFetch';
@@ -31,7 +32,8 @@ const caloriesFromInput = (value: string) => {
 
 const RecipeDetailScreen = () => {
   // 1. GET PARAMS
-  const { id, previewImage, savedRecipeId, isCreating } = useLocalSearchParams(); 
+  const { id, previewImage, savedRecipeId, isCreating, source } = useLocalSearchParams();
+  const isThemealdb = source === 'themealdb';
   const router = useRouter();
   const { userId, getToken } = useAuth();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -47,6 +49,10 @@ const RecipeDetailScreen = () => {
   const [ingredients, setIngredients] = useState<any[]>([]);
   const [instructions, setInstructions] = useState<any[]>([]);
   const [baseRecipeInfo, setBaseRecipeInfo] = useState<any>(null);
+  // Computed nutrition for a TheMealDB recipe (whole-recipe estimate), or null.
+  const [mealdbNutrition, setMealdbNutrition] = useState<ThemealdbRecipe['nutrition'] | null>(null);
+  // Hero image: real photo if present, else an ingredient-image collage fallback.
+  const [heroFailed, setHeroFailed] = useState(false);
   // Track ingredient image URLs that fail to load so we fall back to the icon.
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   
@@ -70,11 +76,14 @@ const RecipeDetailScreen = () => {
     else if (savedRecipeId) {
         // --- EDIT MODE ---
         loadSavedRecipe();
+    } else if (isThemealdb) {
+        // --- VIEW MODE (TheMealDB / Explore by cuisine) ---
+        loadThemealdbDetails();
     } else {
         // --- VIEW MODE (FatSecret) ---
         loadFatSecretDetails();
     }
-  }, [id, savedRecipeId, isCreating]);
+  }, [id, savedRecipeId, isCreating, isThemealdb]);
 
   // --- LOADERS ---
   const loadFatSecretDetails = async () => {
@@ -91,6 +100,51 @@ const RecipeDetailScreen = () => {
         }
     } catch (e) {
         console.error(e);
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  // TheMealDB recipes arrive in the unified model. Nutrition is intentionally
+  // left as "estimate pending" (calories 0) until Phase 2 precomputes it; the
+  // measure string maps to the editable "quantity" field, and ingredient images
+  // resolve through the same resolver used for FatSecret/custom recipes.
+  const loadThemealdbDetails = async () => {
+    if (!id) return;
+    setLoading(true);
+    try {
+        const data = await getThemealdbRecipe(id as string);
+        if (data) {
+            const n = data.nutrition;
+            const hasComputed = !!n && n.status === "computed" && typeof n.calories === "number";
+            setMealdbNutrition(hasComputed ? n : null);
+            setRecipeTitle(data.title);
+            setRecipeCalories(hasComputed ? normalizeCaloriesInput(n.calories) : "0");
+            setIngredients(
+              (data.ingredients || []).map((ing) => ({
+                name: ing.name,
+                quantity: ing.measure || "",
+                description: "",
+                image: ing.image || null, // TheMealDB ingredient thumbnail; falls back to icon on error
+              }))
+            );
+            setInstructions(
+              (data.instructions || []).map((text, i) => ({ step: i + 1, text }))
+            );
+            setBaseRecipeInfo({
+              id: `themealdb-${data.id}`,
+              image: data.image || (previewImage as string),
+              title: data.title,
+              cuisine: data.cuisine,
+              category: data.category,
+              protein: hasComputed ? n.protein ?? 0 : 0,
+              carbs: hasComputed ? n.carbs ?? 0 : 0,
+              fats: hasComputed ? n.fats ?? 0 : 0,
+              source: 'themealdb',
+            });
+        }
+    } catch (e) {
+        console.error("Error loading TheMealDB recipe", e);
     } finally {
         setLoading(false);
     }
@@ -299,7 +353,9 @@ const RecipeDetailScreen = () => {
           fats: Number(baseRecipeInfo?.fats) || 0,
           image: baseRecipeInfo?.image || (previewImage as string) || "",
           externalId: baseRecipeInfo?.id || savedRecipeId || id || recipeName,
-          source: savedRecipeId || isCreating === "true" ? "custom_recipe" : "fatsecret_recipe",
+          source: savedRecipeId || isCreating === "true"
+            ? "custom_recipe"
+            : isThemealdb ? "themealdb_recipe" : "fatsecret_recipe",
         }),
       });
 
@@ -334,6 +390,18 @@ const RecipeDetailScreen = () => {
     </SafeAreaView>
   );
 
+  // Hero: prefer the recipe photo; fall back to a collage of ingredient images
+  // (reuses the curated ingredient set + TheMealDB thumbnails) for imageless recipes.
+  const heroImage = baseRecipeInfo?.image && String(baseRecipeInfo.image).trim() !== ""
+    ? String(baseRecipeInfo.image) : null;
+  const collageTiles = Array.from(new Set(
+    ingredients
+      .map((i: any) => i.image || resolveIngredientImage(i.name))
+      .filter((u: any): u is string => !!u)
+  )).slice(0, 4);
+  const sourceLabel = isThemealdb ? "Recipe via TheMealDB"
+    : (savedRecipeId || isCreating === "true") ? null : "Recipe via FatSecret";
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       {/* HEADER */}
@@ -359,8 +427,35 @@ const RecipeDetailScreen = () => {
         automaticallyAdjustKeyboardInsets
         contentContainerStyle={{ paddingBottom: 180 }}
       >
+         {/* HERO IMAGE — real photo, else an ingredient-image collage */}
+         {(heroImage && !heroFailed) ? (
+            <Image
+               source={{ uri: heroImage }}
+               className="w-full h-48 rounded-2xl mb-3"
+               resizeMode="cover"
+               onError={() => setHeroFailed(true)}
+            />
+         ) : collageTiles.length > 0 ? (
+            <View className="w-full h-32 rounded-2xl mb-3 overflow-hidden flex-row bg-gray-50 border border-gray-100">
+               {collageTiles.map((uri, idx) => (
+                  <View key={idx} className="flex-1 items-center justify-center border-r border-gray-100 p-2">
+                     <Image source={{ uri }} className="w-full h-full" resizeMode="contain" />
+                  </View>
+               ))}
+            </View>
+         ) : null}
+
+         {/* SOURCE LABEL */}
+         {sourceLabel && (
+            <View className="flex-row mb-2">
+               <View className="bg-gray-100 rounded-full px-2.5 py-1">
+                  <Text className="text-gray-500 text-xs">{sourceLabel}</Text>
+               </View>
+            </View>
+         )}
+
          {/* TITLE INPUT */}
-         <TextInput 
+         <TextInput
             value={recipeTitle}
             onChangeText={setRecipeTitle}
             className="text-2xl font-bold text-gray-900 mb-2 leading-tight border-b border-gray-200 pb-2"
@@ -390,6 +485,39 @@ const RecipeDetailScreen = () => {
               <Ionicons name="create-outline" size={15} color="#007BFF" />
             </TouchableOpacity>
          </View>
+
+         {/* TheMealDB nutrition is computed from ingredients — be honest it's an estimate. */}
+         {isThemealdb && (
+            mealdbNutrition ? (
+               <View className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 -mt-4 mb-6">
+                  <Text className="text-secondary font-bold text-xs">Estimated · whole recipe</Text>
+                  <Text className="text-gray-500 text-xs mt-0.5">
+                     ≈ P {Math.round(mealdbNutrition.protein ?? 0)}g · C {Math.round(mealdbNutrition.carbs ?? 0)}g · F {Math.round(mealdbNutrition.fats ?? 0)}g, calculated from ingredients (USDA).{mealdbNutrition.lowConfidence ? ' Rough estimate.' : ''}
+                  </Text>
+                  <Text className="text-gray-400 text-xs mt-0.5">
+                     Edit the calories above before logging a single portion.
+                  </Text>
+               </View>
+            ) : (
+               <View className="flex-row items-center -mt-4 mb-6">
+                  <Ionicons name="information-circle-outline" size={14} color="#9CA3AF" />
+                  <Text className="text-gray-400 text-xs ml-1">
+                     Nutrition estimate coming soon — edit the calories to log it now.
+                  </Text>
+               </View>
+            )
+         )}
+
+         {/* FatSecret recipes: same box layout, but accurate source data (not our estimate). */}
+         {sourceLabel === "Recipe via FatSecret" && baseRecipeInfo && (
+            <View className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 -mt-4 mb-6">
+               <Text className="text-primary font-bold text-xs">Nutrition via FatSecret · per serving</Text>
+               <Text className="text-gray-500 text-xs mt-0.5">
+                  P {Math.round(Number(baseRecipeInfo.protein) || 0)}g · C {Math.round(Number(baseRecipeInfo.carbs) || 0)}g · F {Math.round(Number(baseRecipeInfo.fats) || 0)}g
+                  {baseRecipeInfo.servings > 1 ? ` · makes ${baseRecipeInfo.servings} servings` : ''}
+               </Text>
+            </View>
+         )}
 
          {/* INGREDIENTS SECTION */}
          <View className="flex-row justify-between items-center mb-4">

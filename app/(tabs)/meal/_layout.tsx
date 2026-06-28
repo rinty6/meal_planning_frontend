@@ -31,8 +31,17 @@ export default function MealLayout() {
         }} 
       />
 
-      <Stack.Screen 
-        name="recipedetail" 
+      <Stack.Screen
+        name="explore"
+        options={{
+          headerShown: false,
+          title: 'Explore by Cuisine',
+          headerBackTitle: 'Recipes'
+        }}
+      />
+
+      <Stack.Screen
+        name="recipedetail"
         options={{ 
           headerShown: false, 
           title: 'Recipe Detail',

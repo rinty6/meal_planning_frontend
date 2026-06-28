@@ -191,7 +191,12 @@
     "noodle": "pasta",
     "white bread": "bread",
     "wholemeal": "bread",
-    "scallions": "onion"
+    "scallions": "onion",
+    "minced steak": "beef",
+    "minced beef": "beef",
+    "beef mince": "beef",
+    "steak": "beef",
+    "prawns": "shrimp"
   },
   "_searchQueryComment": "Per-ingredient Pexels search override used ONLY by the offline image tooling (tools/ingredient_images). Not read by the app. A key here replaces the default query ('<key> isolated white background') for ingredients that return messy stock results. Edit/extend freely while curating.",
   "searchQueries": {
