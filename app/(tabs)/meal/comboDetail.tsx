@@ -176,6 +176,7 @@ const FoodDetailScreen = () => {
   }, [comboItems, selectedDish]);
   const activeSelectedDish = selectedDishInCurrentPayload || comboItems[0] || item || null;
   const activeSelectedDishKey = getDishIdentity(activeSelectedDish);
+  const activeIsRecipeLike = isRecipeLikeItem(activeSelectedDish || item);
   const currentDetailItem =
     detailItemRouteKey === routePayloadKey && detailItemOwnerKey === activeSelectedDishKey ? detailItem : null;
   const resolvedSingleItem = useMemo(
@@ -198,13 +199,14 @@ const FoodDetailScreen = () => {
     const snapshotFacts = nextDish && hasMeaningfulMacroSnapshot(nextDish)
       ? buildNutritionFactsFromFood(nextDish)
       : null;
+    const nextDishIsRecipe = isRecipeLikeItem(nextDish);
 
     setSelectedDish(nextDish);
     setDetailItem(null);
     setDetailItemRouteKey(routePayloadKey);
     setDetailItemOwnerKey(getDishIdentity(nextDish));
     setNutritionFacts(snapshotFacts);
-    setLoadingNutrition(!!nextDish && !snapshotFacts);
+    setLoadingNutrition(!!nextDish && !snapshotFacts && !nextDishIsRecipe);
   }, [comboItems, routePayloadKey]);
 
   // Fetch detailed nutrition facts when item loads, with cache-first strategy
@@ -227,6 +229,10 @@ const FoodDetailScreen = () => {
         setNutritionFacts(snapshotFacts);
       });
       setLoadingNutrition(!snapshotFacts);
+      if (isRecipeLikeItem(selectedDish)) {
+        setLoadingNutrition(false);
+        return;
+      }
       try {
         const explicitFatSecretId = String(selectedDish?.fatsecret_food_id || "").trim();
         const fallbackFoodId = getFallbackFatSecretFoodId(selectedDish);
@@ -342,6 +348,11 @@ const FoodDetailScreen = () => {
           carbs: parseFloat(comboItem.carbs) || 0,
           fats: parseFloat(comboItem.fats) || 0,
           image: comboItem.image || "",
+          externalId: cleanId(comboItem.externalId || comboItem.external_id || comboItem.recipe_id || comboItem.fatsecret_food_id || comboItem.food_id || comboItem.id),
+          source: cleanId(comboItem.source) || (isRecipeLikeItem(comboItem) ? "fatsecret_recipe" : "fatsecret_food"),
+          servingId: cleanId(comboItem.servingId || comboItem.serving_id),
+          servingDescription: cleanId(comboItem.servingDescription || comboItem.serving_description),
+          nutrients: comboItem.nutrients && typeof comboItem.nutrients === "object" ? comboItem.nutrients : {},
         };
 
         const res = await authedFetch(`/api/meals/add`, {
@@ -388,7 +399,34 @@ const FoodDetailScreen = () => {
     displayComboItems.reduce((sum: number, comboItem: any) => sum + Number(comboItem?.fats || 0), 0);
 
   const food = mergeFoodSnapshot(activeSelectedDish || item, currentDetailItem);
-  const comboServingText = `${displayComboItems.length} items`;
+  const primaryImage = displayComboItems[0]?.image || food?.image || item?.image || "";
+  const comboServingText = activeIsRecipeLike
+    ? "1 serving"
+    : cleanId(food?.serving_description) || "1 serving";
+  const recipeId = cleanId(
+    activeSelectedDish?.recipe_id ||
+    item?.recipe_id ||
+    activeSelectedDish?.externalId ||
+    item?.externalId ||
+    (cleanId(activeSelectedDish?.id || item?.id).startsWith("recipe-")
+      ? cleanId(activeSelectedDish?.id || item?.id).replace(/^recipe-/, "")
+      : "")
+  );
+  const handleViewRecipe = () => {
+    if (!recipeId) {
+      showAlert("Recipe", "Recipe details are unavailable for this item.");
+      return;
+    }
+
+    router.push({
+      pathname: "/(tabs)/meal/recipedetail",
+      params: {
+        id: recipeId,
+        source: "fatsecret",
+        previewImage: activeSelectedDish?.image || item?.image || "",
+      },
+    });
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -396,35 +434,36 @@ const FoodDetailScreen = () => {
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={28} color="black" />
         </TouchableOpacity>
-        <Text className="flex-1 text-center text-xl font-bold text-gray-500">Combo detail</Text>
+        <Text className="flex-1 text-center text-xl font-bold text-gray-500">Food detail</Text>
         <View className="w-7" />
       </View>
 
       <ScrollView className="px-5" showsVerticalScrollIndicator={false}>
-        <View className="h-64 rounded-3xl overflow-hidden mb-6 bg-gray-100 items-center justify-center">
-          <View className="flex-row w-full h-full">
-            {displayComboItems.slice(0, 3).map((comboItem: any, index: number) => (
-              <View key={`${comboItem?.id || comboItem?.food_id}-${index}`} className="flex-1">
-                {comboItem?.image ? (
-                  <Image source={{ uri: comboItem.image }} className="w-full h-full" resizeMode="cover" />
-                ) : (
-                  <View className="w-full h-full items-center justify-center">
-                    <IngredientIcon ingredientName={comboItem?.title} size={60} />
-                  </View>
-                )}
+        <View className="flex-row items-start mb-6" style={{ gap: 16 }}>
+          <View className="flex-1" style={{ gap: 14, paddingTop: 2 }}>
+            <Text className="text-2xl font-extrabold text-gray-900" style={{ letterSpacing: -0.4 }}>
+              {item?.title || food?.title}
+            </Text>
+            <View style={{ gap: 9 }}>
+              <View className="flex-row items-center self-start bg-white border border-gray-200 px-4 py-2 rounded-full shadow-sm">
+                <Ionicons name="flame" size={19} color="#FF9500" />
+                <Text className="font-bold ml-2 text-base">{Math.round(Number(totalCalories))} kcal</Text>
               </View>
-            ))}
+              <View className="flex-row items-center self-start bg-white border border-gray-200 px-4 py-2 rounded-full shadow-sm">
+                <Ionicons name="restaurant-outline" size={17} color="#6B7280" />
+                <Text className="font-bold ml-2 text-sm text-gray-900">{comboServingText}</Text>
+              </View>
+            </View>
           </View>
-        </View>
-
-        <View className="flex-row justify-center mb-6">
-          <View className="flex-row items-center bg-white border border-gray-200 px-4 py-2 rounded-full shadow-sm mr-2">
-            <Ionicons name="flame" size={20} color="black" />
-            <Text className="font-bold ml-2 text-lg">{Math.round(Number(totalCalories))} kcal</Text>
-          </View>
-          <View className="flex-row items-center bg-white border border-gray-200 px-4 py-2 rounded-full shadow-sm">
-            <Ionicons name="restaurant-outline" size={20} color="black" />
-            <Text className="font-bold ml-2 text-sm">{comboServingText}</Text>
+          <View
+            className="rounded-3xl overflow-hidden bg-gray-100 items-center justify-center"
+            style={{ width: 138, height: 172 }}
+          >
+            {primaryImage ? (
+              <Image source={{ uri: primaryImage }} className="w-full h-full" resizeMode="cover" />
+            ) : (
+              <IngredientIcon ingredientName={food?.title} size={60} />
+            )}
           </View>
         </View>
 
@@ -443,49 +482,6 @@ const FoodDetailScreen = () => {
           </View>
         </View>
 
-        <Text className="text-center text-2xl font-bold text-gray-800 mb-6">{item?.title || food?.title}</Text>
-
-        <View className="mb-6">
-          <Text className="text-lg font-bold text-gray-900 mb-3">Included Dishes</Text>
-          {displayComboItems.map((dish: any, index: number) => {
-            const category = String(dish?.category || (index === 0 ? "main" : index === 2 ? "drink" : "side")).toLowerCase();
-            const label =
-              category === "main"
-                ? "MAIN DISH"
-                : category === "drink"
-                  ? "SIDE (DRINK/BREAD)"
-                  : "SIDE (VEG/FRUIT)";
-            const isSelected = getDishIdentity(activeSelectedDish) === getDishIdentity(dish);
-
-            return (
-              <TouchableOpacity
-                key={`${dish?.id || dish?.food_id}-${index}`}
-                onPress={() => setSelectedDish(dish)}
-                className={`flex-row items-center p-3 rounded-2xl border mb-3 ${isSelected ? "border-primary" : "border-gray-200"}`}
-              >
-                <View className="w-14 h-14 rounded-xl overflow-hidden bg-gray-100 items-center justify-center mr-3">
-                  {dish?.image ? (
-                    <Image source={{ uri: dish.image }} className="w-full h-full" resizeMode="cover" />
-                  ) : (
-                    <IngredientIcon ingredientName={dish?.title} size={36} />
-                  )}
-                </View>
-                <View className="flex-1">
-                  <Text className="text-xs text-orange-600 font-bold">{label}</Text>
-                  <Text className="text-base font-semibold text-gray-900" numberOfLines={1}>
-                    {dish?.title}
-                  </Text>
-                  <View className="flex-row items-center mt-1">
-                    <Ionicons name="flame-outline" size={14} color="#F97316" />
-                    <Text className="text-gray-500 text-xs ml-1">{Math.round(Number(dish?.calories || 0))} kcal</Text>
-                  </View>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
         {loadingNutrition ? (
           <View className="py-6 items-center">
             <ActivityIndicator size="large" color="#007AFF" />
@@ -495,20 +491,30 @@ const FoodDetailScreen = () => {
           <FoodFactsCard item={food} nutritionFacts={nutritionFacts} />
         )}
 
-        <TouchableOpacity
-          onPress={handleAddToLog}
-          disabled={adding}
-          className="w-full py-4 bg-primary rounded-2xl mb-10 shadow-md flex-row justify-center items-center"
-        >
-          {adding ? (
-            <ActivityIndicator color="white" />
-          ) : (
-            <>
-              <Ionicons name="add-circle" size={24} color="white" />
-              <Text className="text-white text-center font-bold text-lg ml-2">Add to Meal Plan</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {activeIsRecipeLike ? (
+          <TouchableOpacity
+            onPress={handleViewRecipe}
+            className="w-full py-4 bg-primary rounded-2xl mb-10 shadow-md flex-row justify-center items-center"
+          >
+            <Ionicons name="book-outline" size={24} color="white" />
+            <Text className="text-white text-center font-bold text-lg ml-2">View Recipe</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onPress={handleAddToLog}
+            disabled={adding}
+            className="w-full py-4 bg-primary rounded-2xl mb-10 shadow-md flex-row justify-center items-center"
+          >
+            {adding ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <>
+                <Ionicons name="add-circle" size={24} color="white" />
+                <Text className="text-white text-center font-bold text-lg ml-2">Add to Meal Plan</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
       <Modal visible={showMealSelector} transparent animationType="fade">

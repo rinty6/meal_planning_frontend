@@ -362,6 +362,21 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     return `${parsed % 1 === 0 ? parsed.toFixed(0) : parsed.toFixed(1)}${unit}`;
   };
 
+  // FatSecret returns a distinct serving basis per result (e.g. "1 medium (118g)",
+  // "100 g"), which is what makes otherwise-identical foods differ. Surface it so
+  // users can tell the results apart.
+  const buildServingText = (item: any) => {
+    const description = String(item?.serving_description || '').trim();
+    if (description) return description;
+    const amount = Number(item?.metric_serving_amount);
+    const unit = String(item?.metric_serving_unit || '').trim();
+    if (Number.isFinite(amount) && amount > 0) {
+      const amountText = amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(1);
+      return `${amountText} ${unit || 'g'}`.trim();
+    }
+    return '1 serving';
+  };
+
   const buildSearchResultMacroText = (item: any) => {
     const protein = formatMacroValue(item?.protein ?? 0);
     const fats = formatMacroValue(item?.fats ?? item?.fat ?? 0);
@@ -455,6 +470,12 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                       <View className="bg-white border border-gray-200 rounded-2xl p-4 mb-3 shadow-sm flex-row justify-between items-center">
                         <View className="flex-1 mr-4">
                           <Text className="text-lg font-bold text-black">{item.title}</Text>
+                          <View className="flex-row items-center mt-1">
+                            <Ionicons name="restaurant-outline" size={13} color="#9CA3AF" />
+                            <Text className="text-gray-400 text-xs ml-1" numberOfLines={1}>
+                              Per {buildServingText(item)}
+                            </Text>
+                          </View>
                           <Text className="text-gray-500 text-xs mt-1" numberOfLines={2}>
                             {buildSearchResultMacroText(item)}
                           </Text>

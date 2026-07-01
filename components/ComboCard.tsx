@@ -17,8 +17,6 @@ interface RecommendedFoodCardProps {
   onSkip?: () => void;
   onLove?: (item: any) => void;
   isFavorite?: boolean;
-  onFavoriteChange?: (item: any, isFavorite: boolean) => void;
-  onFavoriteError?: () => void;
 }
 
 const macro = (value: any) => `${(Number(value) || 0).toFixed(1)}g`;
@@ -32,8 +30,6 @@ const ComboCard = ({
   onSkip,
   onLove,
   isFavorite: controlledFavorite = false,
-  onFavoriteChange,
-  onFavoriteError,
 }: RecommendedFoodCardProps) => {
   const { userId, getToken } = useAuth();
   const [isFavorite, setIsFavorite] = useState(controlledFavorite);
@@ -60,6 +56,19 @@ const ComboCard = ({
   const totalFats =
     Number(item?.total_fats) ||
     comboItems.reduce((sum: number, comboItem: any) => sum + Number(comboItem?.fats || 0), 0);
+  const isRecipeItem =
+    String(item?.source || "").toLowerCase().includes("recipe") ||
+    String(item?.type || "").toLowerCase().includes("recipe") ||
+    !!String(item?.recipe_id || "").trim() ||
+    String(item?.id || "").trim().toLowerCase().startsWith("recipe-");
+  const servingCount = Math.max(1, Math.round(Number(item?.servings) || 1));
+  // Combos bundle multiple dishes; recipes are a single serving; foods show grams.
+  const servingText =
+    comboItems.length > 1
+      ? `${comboItems.length} items`
+      : isRecipeItem
+        ? `${servingCount} serving${servingCount > 1 ? "s" : ""}`
+        : `${Math.round(Number(item.grams || item.metric_serving_amount || 100))} g`;
 
   const handleToggleFavorite = async () => {
     if (!userId) return;
@@ -82,7 +91,6 @@ const ComboCard = ({
         if (response.ok) {
           markFavoritesDirty(userId);
           setIsFavorite(true);
-          onFavoriteChange?.(item, true);
           onLove?.(item);
         }
       } else {
@@ -112,7 +120,6 @@ const ComboCard = ({
           const data = await response.json();
           markFavoritesDirty(userId);
           setIsFavorite(data.isFavorite);
-          onFavoriteChange?.(item, !!data.isFavorite);
           if (data.isFavorite) {
             onLove?.(item);
           }
@@ -120,7 +127,6 @@ const ComboCard = ({
       }
     } catch (error) {
       console.error("Error toggling favorite:", error);
-      onFavoriteError?.();
     } finally {
       setIsLoading(false);
     }
@@ -174,8 +180,8 @@ const ComboCard = ({
           <View className="flex-row items-center mb-2">
             <Ionicons name="flame-outline" size={15} color="#6B7280" />
             <Text className="text-gray-600 text-xs ml-1 mr-3">{Math.round(Number(totalCalories || 0))} kcal</Text>
-            <Ionicons name="scale-outline" size={15} color="#6B7280" />
-            <Text className="text-gray-600 text-xs ml-1">{Math.round(Number(item.grams || 100))} g</Text>
+            <Ionicons name={isRecipeItem && comboItems.length <= 1 ? "restaurant-outline" : "scale-outline"} size={15} color="#6B7280" />
+            <Text className="text-gray-600 text-xs ml-1">{servingText}</Text>
           </View>
 
           <View className="flex-row gap-2">
@@ -194,14 +200,14 @@ const ComboCard = ({
 
       <View className="px-4 pb-4">
         <View className="border-t border-gray-100 pt-3 flex-row justify-between items-center">
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={handleToggleFavorite}
             disabled={isLoading}
             className="p-2"
           >
-            <Ionicons 
-              name={isFavorite ? "heart" : "heart-outline"} 
-              size={24} 
+            <Ionicons
+              name={isFavorite ? "heart" : "heart-outline"}
+              size={24}
               color={isFavorite ? "#EF4444" : "#A0AEC0"}
             />
           </TouchableOpacity>

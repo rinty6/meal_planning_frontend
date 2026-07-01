@@ -1,11 +1,12 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback } from 'react-native';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import CircularProgress from '../../components/CircularProgress';
-import ComboCard from '../../components/ComboCard';
+import NextFeatureShowcase from '../../components/NextFeatureShowcase';
 import AddFoodModal from '../../components/addfoodmodal';
 import SuccessModal from '../../components/sucessmodal';
 import CustomAlert from '../../components/customAlert';
@@ -13,20 +14,15 @@ import GuidanceContent from '../../components/GuidanceContent';
 import SafeFullScreenModal from '../../components/SafeFullScreenModal';
 import NotificationMessage from '../../components/notificationmessage';
 import FeedbackSendingMessage from '../../components/feedbacksendingmessage';
-import { getCurrentFoodSuggestionMealPeriod, searchFoodItemsWithNutrition } from '../../services/mealAPI';
 import {
     getCachedHomeSnapshot,
-    hydrateHomeFoodItemsFromStorage,
     setCachedHomeDashboard,
-    setCachedHomeFoodItems,
     shouldRefreshHomeDashboard,
-    shouldRefreshHomeFoodItems,
 } from '../../services/homeStore';
 import {
     fetchMealsSummaryWithCache,
     markMealsSummaryDirty,
 } from '../../services/mealsSummaryStore';
-import { markFavoritesDirty } from '../../services/favoritesStore';
 import { authedFetch } from '../../services/authedFetch';
 
 type MacroSet = {
@@ -40,7 +36,13 @@ type MealLogType = 'breakfast' | 'lunch' | 'dinner';
 
 const DEFAULT_CALORIE_TARGET = 2000;
 const HOME_DASHBOARD_REFRESH_TTL_MS = 15 * 1000;
-const HOME_FOOD_ITEMS_REFRESH_TTL_MS = 30 * 60 * 1000;
+const HERO_IMAGE = require('../../assets/images/homepage_hero_image.png');
+// Read straight from the bundled asset's own metadata so the hero container always
+// matches its real proportions, even if the image file is swapped out later.
+const HERO_IMAGE_ASPECT_RATIO = (() => {
+    const { width, height } = Image.resolveAssetSource(HERO_IMAGE);
+    return width / height;
+})();
 const THEME_COLORS = {
     primary: '#007BFF',
     secondary: '#FF9500',
@@ -128,25 +130,25 @@ const getGreeting = () => {
     return 'Good evening';
 };
 
-const getDefaultMealLogType = (): MealLogType => {
-    const currentPeriod = getCurrentFoodSuggestionMealPeriod();
-    if (currentPeriod === 'breakfast' || currentPeriod === 'lunch' || currentPeriod === 'dinner') {
-        return currentPeriod;
-    }
-
-    const hour = new Date().getHours();
-    if (hour < 5) return 'breakfast';
+const getDefaultMealLogType = (date = new Date()): MealLogType => {
+    const hour = date.getHours();
+    if (hour < 11) return 'breakfast';
     if (hour < 17) return 'lunch';
     return 'dinner';
 };
 
-const getFavoriteExternalId = (item: any) =>
-    String(item?.fatsecret_food_id || item?.food_id || item?.externalId || item?.external_id || item?.id || '').trim();
+const getFoodExternalId = (item: any) =>
+    String(item?.externalId || item?.external_id || item?.fatsecret_food_id || item?.food_id || item?.recipe_id || item?.id || '').trim();
 
 const HomeScreen = () => {
     const router = useRouter();
     const { userId, getToken } = useAuth(); // Clerk ID
     const { user: clerkUser } = useUser();
+    const getTokenRef = useRef(getToken);
+
+    useEffect(() => {
+        getTokenRef.current = getToken;
+    }, [getToken]);
     
     const [loading, setLoading] = useState(true);
     const [dbUserName, setDbUserName] = useState('');
@@ -157,18 +159,12 @@ const HomeScreen = () => {
         target: buildTargetMacros(DEFAULT_CALORIE_TARGET)
     });
 
-    // Food Items State
-    const [foodItems, setFoodItems] = useState<any[]>([]);
-    const [loadingFoodItems, setLoadingFoodItems] = useState(false);
     const [isAddFoodModalVisible, setIsAddFoodModalVisible] = useState(false);
     const [activeMealType, setActiveMealType] = useState<MealLogType>('breakfast');
     const [showSuccess, setShowSuccess] = useState(false);
-    const [showMealSelector, setShowMealSelector] = useState(false);
     const [isGuidanceVisible, setIsGuidanceVisible] = useState(false);
     const [isNotificationMessagesVisible, setIsNotificationMessagesVisible] = useState(false);
     const [isFeedbackVisible, setIsFeedbackVisible] = useState(false);
-    const [selectedRecommendedFood, setSelectedRecommendedFood] = useState<any | null>(null);
-    const [favoriteItemKeys, setFavoriteItemKeys] = useState<Record<string, boolean>>({});
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState({
         title: '',
@@ -203,10 +199,6 @@ const HomeScreen = () => {
             setMacros(cached.macros);
             setLoading(false);
         }
-        if (cached.foodItems.length > 0) {
-            setFoodItems(cached.foodItems);
-            setLoadingFoodItems(false);
-        }
     }, [userId]);
 
     const loadDashboardData = useCallback(async ({ showSpinner = true } = {}) => {
@@ -226,8 +218,8 @@ const HomeScreen = () => {
             const today = getTodayFormatted();
 
             const [profileResult, summaryResult] = await Promise.allSettled([
-                authedFetch(`/api/profile/${userId}`, { getToken, clerkId: userId }),
-                authedFetch(`/api/calorie/summary/${userId}/${today}`, { getToken, clerkId: userId })
+                authedFetch(`/api/profile/${userId}`, { getToken: getTokenRef.current, clerkId: userId }),
+                authedFetch(`/api/calorie/summary/${userId}/${today}`, { getToken: getTokenRef.current, clerkId: userId })
             ]);
 
             let resolvedUserName = clerkUser?.firstName || 'User';
@@ -258,7 +250,7 @@ const HomeScreen = () => {
                     apiURL,
                     userId,
                     date: today,
-                    getToken,
+                    getToken: getTokenRef.current,
                 });
                 if (meals) {
                     consumedMacros = aggregateMeals(meals);
@@ -283,90 +275,27 @@ const HomeScreen = () => {
         }
     }, [userId, clerkUser?.firstName]);
 
-    const loadFoodItems = useCallback(async ({ showSpinner = true } = {}) => {
-        if (showSpinner) setLoadingFoodItems(true);
-        try {
-            // Empty query lets mealAPI choose breakfast/lunch/dinner/snack suggestions by current time.
-            const items = await searchFoodItemsWithNutrition('', 5, {
-                hydrateDetails: false,
-                hydrateImages: false,
-            });
-            setFoodItems(items);
-            if (userId) {
-                setCachedHomeFoodItems(
-                    userId,
-                    items,
-                    items[0]?.recommendationMealPeriod || getCurrentFoodSuggestionMealPeriod()
-                );
-            }
-        } catch (error) {
-            console.error("Error loading food items:", error);
-        } finally {
-            if (showSpinner) setLoadingFoodItems(false);
-        }
-    }, [userId]);
-
-    const loadFavoriteItemKeys = useCallback(async () => {
-        if (!userId) return;
-        try {
-            const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-            if (!apiURL) return;
-            const response = await authedFetch(`/api/favorites/list/${encodeURIComponent(userId)}`, {
-                getToken,
-                clerkId: userId,
-                cache: 'no-store',
-            });
-            if (!response.ok) return;
-            const data = await response.json();
-            const next: Record<string, boolean> = {};
-            const favorites = Array.isArray(data?.favoriteFoods) ? data.favoriteFoods : [];
-            favorites.forEach((favorite: any) => {
-                const externalId = String(favorite?.externalId || favorite?.external_id || '').trim();
-                if (externalId) next[externalId] = true;
-            });
-            setFavoriteItemKeys(next);
-        } catch (error) {
-            console.error('Home favorite status load error:', error);
-        }
-    }, [userId]);
-
     useFocusEffect(useCallback(() => {
         let isActive = true;
 
-        const initializeHomeScreen = async () => {
-            let cached = getCachedHomeSnapshot(userId);
+        const initializeHomeScreen = () => {
+            const cached = getCachedHomeSnapshot(userId);
             hydrateFromCache();
-
-            if (!cached?.foodItems?.length) {
-                const persisted = await hydrateHomeFoodItemsFromStorage(userId);
-                if (!isActive) return;
-                if (persisted?.foodItems?.length) {
-                    cached = persisted;
-                    setFoodItems(persisted.foodItems);
-                    setLoadingFoodItems(false);
-                }
-            }
+            if (!isActive) return;
 
             const shouldRefreshDashboard = shouldRefreshHomeDashboard(userId, HOME_DASHBOARD_REFRESH_TTL_MS) || !cached?.macros;
-            const shouldRefreshFoods =
-                shouldRefreshHomeFoodItems(userId, HOME_FOOD_ITEMS_REFRESH_TTL_MS, getCurrentFoodSuggestionMealPeriod()) ||
-                !cached?.foodItems?.length;
 
             if (shouldRefreshDashboard) {
                 void loadDashboardData({ showSpinner: !cached?.macros });
             }
-            if (shouldRefreshFoods) {
-                void loadFoodItems({ showSpinner: !cached?.foodItems?.length });
-            }
-            void loadFavoriteItemKeys();
         };
 
-        void initializeHomeScreen();
+        initializeHomeScreen();
 
         return () => {
             isActive = false;
         };
-    }, [hydrateFromCache, loadDashboardData, loadFavoriteItemKeys, loadFoodItems, userId]));
+    }, [hydrateFromCache, loadDashboardData, userId]));
 
     const handleOpenHomeAddFood = () => {
         setActiveMealType(getDefaultMealLogType());
@@ -386,7 +315,7 @@ const HomeScreen = () => {
 
             const response = await authedFetch(`/api/meals/add`, {
                 method: 'POST',
-                getToken,
+                getToken: getTokenRef.current,
                 clerkId: userId,
                 body: JSON.stringify({
                     clerkId: userId,
@@ -398,6 +327,11 @@ const HomeScreen = () => {
                     carbs: toNumber(foodItem.carbs),
                     fats: firstNumber(foodItem.fats, foodItem.fat),
                     image: foodItem.image || '',
+                    externalId: getFoodExternalId(foodItem),
+                    source: foodItem.source || foodItem.type || '',
+                    servingId: foodItem.servingId || foodItem.serving_id || '',
+                    servingDescription: foodItem.servingDescription || foodItem.serving_description || '',
+                    nutrients: foodItem.nutrients || {},
                 }),
             });
 
@@ -410,40 +344,6 @@ const HomeScreen = () => {
         } catch (error) {
             console.error('Home add food error:', error);
             showCustomAlert('Error', 'Failed to add food item.');
-        }
-    };
-
-    const openRecommendedMealSelector = (item: any) => {
-        setSelectedRecommendedFood(item);
-        setShowMealSelector(true);
-    };
-
-    const handleSelectRecommendedMeal = (mealType: MealLogType) => {
-        const item = selectedRecommendedFood;
-        setShowMealSelector(false);
-        setSelectedRecommendedFood(null);
-        if (item) {
-            void handleAddHomeFood(item, mealType);
-        }
-    };
-
-    const handleFavoriteChange = (item: any, isFavorite: boolean) => {
-        const externalId = getFavoriteExternalId(item);
-        if (externalId) {
-            setFavoriteItemKeys((current) => ({
-                ...current,
-                [externalId]: isFavorite,
-            }));
-        }
-        markFavoritesDirty(userId);
-
-        if (isFavorite) {
-            showCustomAlert('Success!', 'Dish saved to your favorite foods.', {
-                confirmText: 'Confirm',
-                variant: 'success',
-            });
-        } else {
-            showCustomAlert('Favorites', 'Dish removed from your favorite foods.');
         }
     };
 
@@ -467,32 +367,64 @@ const HomeScreen = () => {
 
     if (loading) {
         return (
-            <SafeAreaView className="flex-1 justify-center items-center bg-appBackground">
+            <SafeAreaView className="flex-1 justify-center items-center bg-background">
                 <ActivityIndicator size="large" color={THEME_COLORS.primary} />
             </SafeAreaView>
         );
     }
 
     return (
-        <SafeAreaView className="flex-1 bg-appBackground">
+        <SafeAreaView className="flex-1 bg-background">
             <ScrollView className="px-4 pt-4" showsVerticalScrollIndicator={false}>
-                
-                {/* 1. Hero Image Section */}
-                <View className="mb-6 rounded-2xl overflow-hidden h-48 items-center justify-center flex-row"
+
+                {/* 1. Hero Section */}
+                <View
+                    className="mb-6 rounded-3xl overflow-hidden"
                     style={{
-                        backgroundColor: '#3B82F6',
+                        width: '100%',
+                        aspectRatio: HERO_IMAGE_ASPECT_RATIO,
                         shadowColor: '#0F172A',
                         shadowOpacity: 0.1,
                         shadowRadius: 8,
                         shadowOffset: { width: 0, height: 2 },
                         elevation: 3,
-                    }}>
-                    <View className="absolute inset-0 items-center justify-center">
-                        <Ionicons name="nutrition" size={80} color="#FFFFFF" style={{ opacity: 0.3 }} />
+                    }}
+                >
+                    <Image
+                        source={HERO_IMAGE}
+                        style={{width:'100%', height: 200}}
+                        resizeMode="cover"
+                    />
+                    <LinearGradient
+                        colors={['rgba(11,33,73,0)', 'rgba(11,33,73,0.8)']}
+                        locations={[0.38, 1]}
+                        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+                    />
+                    <View
+                        style={{
+                            position: 'absolute',
+                            top: 14,
+                            left: 14,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: 'rgba(255,255,255,0.92)',
+                            borderRadius: 999,
+                            paddingHorizontal: 11,
+                            paddingVertical: 6,
+                        }}
+                    >
+                        <Ionicons name="restaurant" size={14} color={THEME_COLORS.secondary} style={{ marginRight: 6 }} />
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: THEME_COLORS.textDeep }}>
+                            Balanced plate
+                        </Text>
                     </View>
-                    <View className="items-center z-10">
-                        <Text className="text-white text-2xl font-bold mb-2">Eat Healthy Today</Text>
-                        <Text className="text-white text-sm px-4 text-center">Track your nutrition and reach your fitness goals</Text>
+                    <View style={{ position: 'absolute', left: 18, right: 18, bottom: 17 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.4, color: 'rgba(255,255,255,0.88)', marginBottom: 6 }}>
+                            {"TODAY'S FOCUS"}
+                        </Text>
+                        <Text style={{ fontSize: 22, fontWeight: '800', color: '#FFFFFF', lineHeight: 25 }}>
+                            Small choices add up to big results
+                        </Text>
                     </View>
                 </View>
 
@@ -661,7 +593,7 @@ const HomeScreen = () => {
 
                 {/* 4. Category Grid Section */}
                 <Text className="text-2xl font-bold mb-3 text-textDeep">Category</Text>
-                <View className="flex-row flex-wrap pb-10">
+                <View className="flex-row flex-wrap pb-6">
                     {categories.map((cat, index) => (
                         <TouchableOpacity 
                             key={index}
@@ -677,36 +609,8 @@ const HomeScreen = () => {
                     ))}
                 </View>
 
-                {/* 5. Food Items Section */}
-                <Text className="text-2xl font-bold mb-3 text-textDeep">Recommended Foods</Text>
-                {loadingFoodItems ? (
-                    <View className="items-center py-8">
-                        <ActivityIndicator size="large" color={THEME_COLORS.primary} />
-                    </View>
-                ) : foodItems.length > 0 ? (
-                    <View className="pb-10">
-                        {foodItems.map((item, index) => (
-                            <ComboCard
-                                key={`${item?.fatsecret_food_id || item?.food_id || item?.id || item?.title || 'food'}-${index}`}
-                                item={item}
-                                isFavorite={!!favoriteItemKeys[getFavoriteExternalId(item)]}
-                                onFavoriteChange={handleFavoriteChange}
-                                onFavoriteError={() => showCustomAlert('Error', 'Could not update this favorite food.')}
-                                onPress={() => {
-                                    router.push({
-                                        pathname: '/(tabs)/meal/comboDetail',
-                                        params: { itemData: JSON.stringify(item) }
-                                    });
-                                }}
-                                onAdd={() => openRecommendedMealSelector(item)}
-                            />
-                        ))}
-                    </View>
-                ) : (
-                    <View className="items-center py-8">
-                        <Text style={{ color: '#70819A', fontSize: 14 }}>No food items available</Text>
-                    </View>
-                )}
+                {/* 5. Next Feature Showcase */}
+                <NextFeatureShowcase />
 
             </ScrollView>
 
@@ -726,31 +630,6 @@ const HomeScreen = () => {
                     onAddFood={handleAddHomeFood}
                 />
             )}
-
-            <Modal visible={showMealSelector} transparent animationType="fade">
-                <TouchableWithoutFeedback onPress={() => setShowMealSelector(false)}>
-                    <View className="flex-1 bg-black/50 justify-center items-center px-4">
-                        <TouchableWithoutFeedback>
-                            <View className="bg-white w-full max-w-xs p-6 rounded-3xl items-center shadow-xl">
-                                <Text className="text-xl font-bold text-gray-900 mb-2">Select Meal</Text>
-                                <Text className="text-gray-400 text-center text-sm mb-6">When are you eating this?</Text>
-                                <TouchableOpacity onPress={() => handleSelectRecommendedMeal('breakfast')} className="w-full bg-white py-4 rounded-2xl mb-3 border border-gray-100 px-4">
-                                    <Text className="font-bold text-gray-700 text-base">Breakfast</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={() => handleSelectRecommendedMeal('lunch')} className="w-full bg-white py-4 rounded-2xl mb-3 border border-gray-100 px-4">
-                                    <Text className="font-bold text-gray-700 text-base">Lunch</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={() => handleSelectRecommendedMeal('dinner')} className="w-full bg-white py-4 rounded-2xl mb-6 border border-gray-100 px-4">
-                                    <Text className="font-bold text-gray-700 text-base">Dinner</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={() => setShowMealSelector(false)}>
-                                    <Text className="text-gray-400 font-bold">Cancel</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </TouchableWithoutFeedback>
-                    </View>
-                </TouchableWithoutFeedback>
-            </Modal>
 
             <CustomAlert
                 visible={alertVisible}

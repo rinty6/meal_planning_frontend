@@ -1,16 +1,35 @@
 import { View, Text, TouchableOpacity, FlatList, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import CustomAlert from '../../../components/customAlert';
 import { authedFetch } from '../../../services/authedFetch';
+import {
+  changeCachedShoppingListItemCount,
+  cleanShoppingItemName,
+  clearCachedShoppingItems,
+  fetchShoppingItemsWithCache,
+  getCachedShoppingItems,
+  markShoppingItemsDirty,
+  markShoppingListsDirty,
+  removeCachedShoppingItem,
+  removeCachedShoppingList,
+  resetCachedShoppingItems,
+  setCachedShoppingItemChecked,
+  setCachedShoppingItemName,
+  shouldRefreshShoppingItems,
+} from '../../../services/shoppingStore';
+
+const SHOPPING_ITEMS_REFRESH_TTL_MS = 60 * 1000;
 
 const ShoppingListDetail = () => {
   const { listId, title } = useLocalSearchParams();
+  const listIdParam = Array.isArray(listId) ? listId[0] : listId;
   const router = useRouter();
   const { userId, getToken } = useAuth();
+  const getTokenRef = useRef(getToken);
   const [items, setItems] = useState<any[]>([]);
   const [newItemText, setNewItemText] = useState("");
 
@@ -24,7 +43,9 @@ const ShoppingListDetail = () => {
     onConfirm: () => {},
   });
 
-  useEffect(() => { loadItems(); }, [listId]);
+  useEffect(() => {
+    getTokenRef.current = getToken;
+  }, [getToken]);
 
   // --- HELPER: SHOW ALERT ---
   const showAlert = (title: string, message: string, confirmText: string, onConfirm: () => void) => {
@@ -32,24 +53,57 @@ const ShoppingListDetail = () => {
     setAlertVisible(true);
   };
 
-  const loadItems = async () => {
+  const loadItems = useCallback(async ({ force = false } = {}) => {
+    if (!userId || !listIdParam) {
+      setItems([]);
+      return;
+    }
+
+    if (!force && !shouldRefreshShoppingItems(userId, listIdParam, SHOPPING_ITEMS_REFRESH_TTL_MS)) {
+      return;
+    }
+
     try {
-        const res = await authedFetch(`/api/shopping/detail/${listId}`, { getToken, clerkId: userId });
-        const data = await res.json();
-        if (res.ok) setItems(data);
+        const data = await fetchShoppingItemsWithCache({
+          userId,
+          listId: listIdParam,
+          getToken: getTokenRef.current,
+          ttlMs: SHOPPING_ITEMS_REFRESH_TTL_MS,
+          force,
+        });
+        if (data) setItems(data);
     } catch (e) { console.error(e); }
-  };
+  }, [listIdParam, userId]);
+
+  useEffect(() => {
+    if (!userId || !listIdParam) {
+      setItems([]);
+      return;
+    }
+
+    const cached = getCachedShoppingItems(userId, listIdParam);
+    if (cached) setItems(cached.items);
+    void loadItems({ force: !cached });
+  }, [listIdParam, loadItems, userId]);
 
   const toggleItem = async (id: number, currentStatus: boolean) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, isChecked: !currentStatus } : i));
+    const nextStatus = !currentStatus;
+    setItems(prev => prev.map(i => i.id === id ? { ...i, isChecked: nextStatus } : i));
+    if (userId && listIdParam) {
+      setCachedShoppingItemChecked(userId, listIdParam, id, nextStatus);
+    }
     try {
-        await authedFetch(`/api/shopping/toggle/${id}`, {
+        const response = await authedFetch(`/api/shopping/toggle/${id}`, {
             method: 'PUT',
             getToken,
             clerkId: userId,
-            body: JSON.stringify({ isChecked: !currentStatus })
+            body: JSON.stringify({ isChecked: nextStatus })
         });
-    } catch (e) { console.error(e); }
+        if (!response.ok) throw new Error("Failed to toggle shopping item");
+    } catch (e) {
+      console.error(e);
+      void loadItems({ force: true });
+    }
   };
 
   const handleTextChange = (id: number, text: string) => {
@@ -57,21 +111,40 @@ const ShoppingListDetail = () => {
   };
 
   const saveItemName = async (id: number, name: string) => {
+      const cleanedName = cleanShoppingItemName(name);
+      setItems(prev => prev.map(i => i.id === id ? { ...i, name: cleanedName } : i));
+      if (userId && listIdParam) {
+        setCachedShoppingItemName(userId, listIdParam, id, cleanedName);
+      }
       try {
-        await authedFetch(`/api/shopping/update-item/${id}`, {
+        const response = await authedFetch(`/api/shopping/update-item/${id}`, {
             method: 'PUT',
             getToken,
             clerkId: userId,
-            body: JSON.stringify({ name: name })
+            body: JSON.stringify({ name: cleanedName })
         });
-      } catch (e) { console.error("Failed to save name", e); }
+        if (!response.ok) throw new Error("Failed to save item name");
+      } catch (e) {
+        console.error("Failed to save name", e);
+        void loadItems({ force: true });
+      }
   };
 
   const deleteItem = async (id: number) => {
       setItems(prev => prev.filter(i => i.id !== id));
+      if (userId && listIdParam) {
+        removeCachedShoppingItem(userId, listIdParam, id);
+        changeCachedShoppingListItemCount(userId, listIdParam, -1);
+      }
       try {
-        await authedFetch(`/api/shopping/delete-item/${id}`, { method: 'DELETE', getToken, clerkId: userId });
-      } catch (e) { console.error(e); }
+        const response = await authedFetch(`/api/shopping/delete-item/${id}`, { method: 'DELETE', getToken, clerkId: userId });
+        if (!response.ok) throw new Error("Failed to delete shopping item");
+      } catch (e) {
+        console.error(e);
+        markShoppingListsDirty(userId);
+        markShoppingItemsDirty(userId, listIdParam);
+        void loadItems({ force: true });
+      }
   };
 
   // RESET LIST WITH CUSTOM ALERT
@@ -83,24 +156,37 @@ const ShoppingListDetail = () => {
           async () => {
               setAlertVisible(false);
               setItems(prev => prev.map(i => ({ ...i, isChecked: false }))); // Optimistic
+              if (userId && listIdParam) {
+                resetCachedShoppingItems(userId, listIdParam);
+              }
               try {
-                await authedFetch(`/api/shopping/reset-list/${listId}`, { method: 'PUT', getToken, clerkId: userId });
-              } catch (e) { console.error(e); }
+                const response = await authedFetch(`/api/shopping/reset-list/${listIdParam}`, { method: 'PUT', getToken, clerkId: userId });
+                if (!response.ok) throw new Error("Failed to reset shopping list");
+              } catch (e) {
+                console.error(e);
+                void loadItems({ force: true });
+              }
           }
       );
   };
 
   const addItem = async () => {
-    if (!newItemText.trim()) return;
+    const cleanedName = cleanShoppingItemName(newItemText);
+    if (!cleanedName || !listIdParam) return;
     try {
-        await authedFetch(`/api/shopping/add-item`, {
+        const response = await authedFetch(`/api/shopping/add-item`, {
             method: 'POST',
             getToken,
             clerkId: userId,
-            body: JSON.stringify({ listId: listId, name: newItemText })
+            body: JSON.stringify({ listId: listIdParam, name: cleanedName })
         });
+        if (!response.ok) throw new Error("Failed to add shopping item");
         setNewItemText("");
-        loadItems();
+        if (userId) {
+          changeCachedShoppingListItemCount(userId, listIdParam, 1);
+          markShoppingItemsDirty(userId, listIdParam);
+        }
+        void loadItems({ force: true });
     } catch (e) { console.error(e); }
   };
 
@@ -113,7 +199,12 @@ const ShoppingListDetail = () => {
           async () => {
               setAlertVisible(false);
               try {
-                await authedFetch(`/api/shopping/delete/${listId}`, { method: 'DELETE', getToken, clerkId: userId });
+                const response = await authedFetch(`/api/shopping/delete/${listIdParam}`, { method: 'DELETE', getToken, clerkId: userId });
+                if (!response.ok) throw new Error("Failed to delete shopping list");
+                if (userId && listIdParam) {
+                  removeCachedShoppingList(userId, listIdParam);
+                  clearCachedShoppingItems(userId, listIdParam);
+                }
                 router.back();
               } catch (e) { console.error(e); }
           }

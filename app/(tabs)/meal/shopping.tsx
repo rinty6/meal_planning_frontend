@@ -1,7 +1,7 @@
 // This page shows all the shopping details with functions
 
 import { View, Text, TouchableOpacity, FlatList, ActivityIndicator } from 'react-native';
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,10 +9,20 @@ import { useAuth } from '@clerk/clerk-expo';
 import { authedFetch } from '../../../services/authedFetch';
 import CreateListModal from '../../../components/CreateListModal';
 import ImportRecipeModal from '../../../components/ImportRecipeModal';
+import {
+  cleanShoppingItemName,
+  fetchShoppingListsWithCache,
+  getCachedShoppingLists,
+  markShoppingListsDirty,
+  shouldRefreshShoppingLists,
+} from '../../../services/shoppingStore';
+
+const SHOPPING_LISTS_REFRESH_TTL_MS = 60 * 1000;
 
 const ShoppingScreen = () => {
   const router = useRouter();
   const { userId, getToken } = useAuth();
+  const getTokenRef = useRef(getToken);
 
   const [lists, setLists] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,14 +30,21 @@ const ShoppingScreen = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false); // To toggle the + button menu
-  const hasLoadedListsRef = useRef(false);
-  const latestFetchRef = useRef(0);
+
+  useEffect(() => {
+    getTokenRef.current = getToken;
+  }, [getToken]);
+
+  const hydrateFromCache = useCallback(() => {
+    if (!userId) return;
+    const cached = getCachedShoppingLists(userId);
+    if (!cached) return;
+    setLists(cached.lists);
+    setLoading(false);
+  }, [userId]);
 
   // LOAD LISTS
-  const fetchLists = useCallback(async ({ showInitialLoader = false } = {}) => {
-    const requestId = latestFetchRef.current + 1;
-    latestFetchRef.current = requestId;
-
+  const fetchLists = useCallback(async ({ showSpinner = false, force = false } = {}) => {
     if (!userId) {
       setLists([]);
       setLoading(false);
@@ -35,64 +52,77 @@ const ShoppingScreen = () => {
       return;
     }
 
-    const shouldShowInitialLoader = showInitialLoader && !hasLoadedListsRef.current;
-    if (shouldShowInitialLoader) {
+    if (!force && !shouldRefreshShoppingLists(userId, SHOPPING_LISTS_REFRESH_TTL_MS)) {
+      return;
+    }
+
+    if (showSpinner) {
       setLoading(true);
     } else {
       setRefreshing(true);
     }
 
     try {
-        const res = await authedFetch(`/api/shopping/list/${userId}`, { getToken, clerkId: userId });
-        const data = await res.json();
-        if (latestFetchRef.current !== requestId) return;
-        if (res.ok) setLists(Array.isArray(data) ? data : []);
+        const data = await fetchShoppingListsWithCache({
+          userId,
+          getToken: getTokenRef.current,
+          ttlMs: SHOPPING_LISTS_REFRESH_TTL_MS,
+          force,
+        });
+        if (data) setLists(data);
     } catch(e) { console.error(e); } 
     finally {
-      if (latestFetchRef.current === requestId) {
-        hasLoadedListsRef.current = true;
-        setLoading(false);
-        setRefreshing(false);
-      }
+      setLoading(false);
+      setRefreshing(false);
     }
   }, [userId]);
 
   useFocusEffect(useCallback(() => {
-    void fetchLists({ showInitialLoader: true });
-  }, [fetchLists]));
+    const cached = getCachedShoppingLists(userId);
+    hydrateFromCache();
+    void fetchLists({ showSpinner: !cached });
+  }, [fetchLists, hydrateFromCache, userId]));
 
   // HANDLERS
   const handleCreateList = async (title: string) => {
+      if (!userId) return;
       // Create empty list
       try {
-        await authedFetch(`/api/shopping/create`, {
+        const response = await authedFetch(`/api/shopping/create`, {
             method: 'POST',
             getToken,
             clerkId: userId,
             body: JSON.stringify({ clerkId: userId, title: title, items: [] })
         });
-        await fetchLists();
+        if (!response.ok) throw new Error("Failed to create shopping list");
+        markShoppingListsDirty(userId);
+        await fetchLists({ force: true });
       } catch(e) { console.error(e); }
   };
 
   const handleImportRecipe = async (recipe: any) => {
+      if (!userId) return;
       // 1. Fetch full details to get ingredient names
       try {
         const res = await authedFetch(`/api/favorites/custom/${recipe.id}`, { getToken, clerkId: userId });
         const fullRecipe = await res.json();
 
         // 2. Extract Names
-        const items = fullRecipe.ingredients.map((ing: any) => ing.name);
+        const items = (fullRecipe.ingredients || [])
+          .map((ing: any) => cleanShoppingItemName(ing?.name))
+          .filter(Boolean);
 
         // 3. Create List
-        await authedFetch(`/api/shopping/create`, {
+        const response = await authedFetch(`/api/shopping/create`, {
             method: 'POST',
             getToken,
             clerkId: userId,
             body: JSON.stringify({ clerkId: userId, title: `Shopping for ${recipe.title}`, items: items })
         });
+        if (!response.ok) throw new Error("Failed to import recipe ingredients");
         setShowImportModal(false);
-        await fetchLists();
+        markShoppingListsDirty(userId);
+        await fetchLists({ force: true });
       } catch(e) { console.error(e); }
   };
 
@@ -153,7 +183,7 @@ const ShoppingScreen = () => {
             keyExtractor={item => String(item.id)}
             contentContainerStyle={{ padding: 20 }}
             refreshing={refreshing}
-            onRefresh={() => fetchLists()}
+            onRefresh={() => fetchLists({ force: true })}
             renderItem={({ item }) => (
                 <TouchableOpacity 
                     onPress={() => router.push({ pathname: '/(tabs)/meal/shoppingListDetail', params: { listId: item.id, title: item.title } })}

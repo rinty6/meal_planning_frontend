@@ -169,7 +169,16 @@ const DishCard = ({
   isFavoriteLoading?: boolean;
 }) => {
   const image = typeof item?.image === "string" ? item.image.trim() : "";
+  const isRecipeItem =
+    String(item?.source || "").toLowerCase().includes("recipe") ||
+    String(item?.type || "").toLowerCase().includes("recipe") ||
+    !!String(item?.recipe_id || "").trim() ||
+    String(item?.id || "").trim().toLowerCase().startsWith("recipe-");
   const sourceLabel = item?.source === "fatsecret_recipe" ? "Recipe" : item?.food_type || "Food";
+  const servingCount = Math.max(1, Math.round(toNumber(item?.servings, 1)));
+  const servingText = isRecipeItem
+    ? `${servingCount} serving${servingCount > 1 ? "s" : ""}`
+    : `${Math.round(toNumber(item?.grams || item?.metric_serving_amount || 100))} g`;
 
   return (
     <View className={`mb-4 rounded-3xl border overflow-hidden bg-white shadow-sm ${isSelected ? "border-primary" : "border-gray-100"}`}>
@@ -194,8 +203,8 @@ const DishCard = ({
           <View className="flex-row items-center mb-3">
             <Ionicons name="flame-outline" size={15} color="#6B7280" />
             <Text className="text-gray-600 text-xs ml-1 mr-3">{Math.round(toNumber(item?.calories))} kcal</Text>
-            <Ionicons name="scale-outline" size={15} color="#6B7280" />
-            <Text className="text-gray-600 text-xs ml-1">{Math.round(toNumber(item?.grams || item?.metric_serving_amount || 100))} g</Text>
+            <Ionicons name={isRecipeItem ? "restaurant-outline" : "scale-outline"} size={15} color="#6B7280" />
+            <Text className="text-gray-600 text-xs ml-1">{servingText}</Text>
           </View>
           <View className="flex-row gap-2 flex-wrap">
             <View className="bg-orange-50 px-2 py-1 rounded-full">

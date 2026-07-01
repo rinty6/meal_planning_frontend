@@ -12,6 +12,7 @@ import IngredientIcon from '../../../components/IngredientIcon';
 import { resolveIngredientImage } from '../../../services/ingredientImages';
 import SuccessModal from '../../../components/sucessmodal'; 
 import { markMealsSummaryDirty } from '../../../services/mealsSummaryStore';
+import { cleanShoppingItemName, markShoppingListsDirty } from '../../../services/shoppingStore';
 
 const formatLocalYYYYMMDD = (date: Date) => {
   const year = date.getFullYear();
@@ -282,11 +283,7 @@ const RecipeDetailScreen = () => {
 
     const title = recipeTitle.trim() || baseRecipeInfo?.title || "My Custom Recipe";
     const shoppingItems = ingredients
-      .map((ingredient) => {
-        const quantity = String(ingredient?.quantity || "").trim();
-        const name = String(ingredient?.name || "").trim();
-        return [quantity, name].filter(Boolean).join(" ").trim();
-      })
+      .map((ingredient) => cleanShoppingItemName(ingredient?.name))
       .filter(Boolean);
 
     setActiveAction('shopping');
@@ -308,6 +305,7 @@ const RecipeDetailScreen = () => {
 
       setSuccessAction('shopping');
       setSuccessMessage("Recipe ingredients saved to shopping list!");
+      markShoppingListsDirty(userId);
       setShowSuccessModal(true);
     } catch (error) {
       console.error(error);

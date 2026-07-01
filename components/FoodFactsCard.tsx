@@ -1,5 +1,6 @@
 import React from "react";
 import { Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 
 interface FoodFactsCardProps {
   item: any;
@@ -19,29 +20,77 @@ const formatValue = (value: any, unit: string) => {
   return `${numeric.toFixed(2)}${unit}`;
 };
 
-const NutritionRow = ({
+const DVChip = ({ dv }: { dv?: number }) => {
+  if (dv === undefined) return null;
+  return (
+    <Text
+      className="text-xs font-bold text-textSecondary bg-neutralSoft rounded-lg text-center"
+      style={{ minWidth: 40, paddingVertical: 3, paddingHorizontal: 9 }}
+    >
+      {dv}%
+    </Text>
+  );
+};
+
+const SubRow = ({
   label,
   value,
   unit,
   dv,
-  bold = false,
-  indent = false,
-  thick = false,
 }: {
   label: string;
   value: any;
   unit: string;
   dv?: number;
-  bold?: boolean;
-  indent?: boolean;
-  thick?: boolean;
 }) => (
-  <View className={`flex-row items-center justify-between py-1.5 ${thick ? "border-t-2" : "border-t"} border-gray-400`}>
-    <Text className={`${indent ? "pl-4" : ""} ${bold ? "font-bold text-black" : "text-gray-800"}`}>{label}</Text>
-    <View className="flex-row items-center">
-      <Text className={`${bold ? "font-bold text-black" : "text-gray-800"}`}>{formatValue(value, unit)}</Text>
-      {dv !== undefined && <Text className="font-bold text-black ml-4 min-w-[36px] text-right">{dv}%</Text>}
+  <View
+    className="flex-row items-center justify-between"
+    style={{ paddingVertical: 11, borderTopWidth: 1, borderTopColor: "#F1F4F8" }}
+  >
+    <Text style={{ fontSize: 15, color: "#6B7280" }}>{label}</Text>
+    <View className="flex-row items-center" style={{ gap: 14 }}>
+      <Text className="font-semibold text-deep" style={{ fontSize: 15 }}>{formatValue(value, unit)}</Text>
+      <DVChip dv={dv} />
     </View>
+  </View>
+);
+
+const NutrientGroup = ({
+  icon,
+  iconColor,
+  chipBg,
+  title,
+  value,
+  valueSize = 17,
+  dv,
+  children,
+}: {
+  icon: any;
+  iconColor: string;
+  chipBg: string;
+  title: string;
+  value?: string;
+  valueSize?: number;
+  dv?: number;
+  children?: React.ReactNode;
+}) => (
+  <View className="bg-white border border-borderSoft rounded-2xl mb-3.5" style={{ paddingHorizontal: 18, paddingVertical: 16 }}>
+    <View className="flex-row items-center" style={{ gap: 12 }}>
+      <View
+        className="items-center justify-center rounded-xl"
+        style={{ width: 38, height: 38, backgroundColor: chipBg }}
+      >
+        <Ionicons name={icon} size={20} color={iconColor} />
+      </View>
+      <Text className="flex-1 font-bold text-deep" style={{ fontSize: 16 }}>{title}</Text>
+      {value !== undefined && (
+        <View className="flex-row items-center" style={{ gap: 12 }}>
+          <Text className="font-semibold text-deep" style={{ fontSize: valueSize }}>{value}</Text>
+          <DVChip dv={dv} />
+        </View>
+      )}
+    </View>
+    {children ? <View style={{ marginTop: 8 }}>{children}</View> : null}
   </View>
 );
 
@@ -63,8 +112,8 @@ const FactsFallback = ({ item }: { item: any }) => {
   const categories = Array.isArray(item?.food_sub_categories) ? item.food_sub_categories.filter(Boolean) : [];
 
   return (
-    <View className="bg-white border border-gray-200 rounded-2xl p-4 mb-8">
-      <Text className="text-base font-bold text-black mb-3">Detailed Facts</Text>
+    <View className="bg-white border border-borderSoft rounded-2xl p-4 mb-8">
+      <Text className="text-base font-bold text-deep mb-3">Detailed Facts</Text>
       {!!item?.food_type && (
         <View className="mb-2">
           <Text className="text-gray-400 text-xs uppercase">Food Type</Text>
@@ -111,57 +160,93 @@ const FoodFactsCard = ({ item, nutritionFacts }: FoodFactsCardProps) => {
 
   const n = nutritionFacts;
 
+  const vitaminItems = [
+    { label: "Vitamin D", value: n.vitaminD?.value ?? 0, unit: n.vitaminD?.unit || "mcg", dv: n.vitaminD?.dv ?? 0 },
+    { label: "Calcium", value: n.calcium?.value ?? 0, unit: n.calcium?.unit || "mg", dv: n.calcium?.dv ?? 0 },
+    { label: "Iron", value: n.iron?.value ?? 0, unit: n.iron?.unit || "mg", dv: n.iron?.dv ?? 0 },
+    { label: "Potassium", value: n.potassium?.value ?? 0, unit: n.potassium?.unit || "mg", dv: n.potassium?.dv ?? 0 },
+    { label: "Vitamin A", value: n.vitaminA?.value ?? 0, unit: n.vitaminA?.unit || "mcg", dv: n.vitaminA?.dv ?? 0 },
+    { label: "Vitamin C", value: n.vitaminC?.value ?? 0, unit: n.vitaminC?.unit || "mg", dv: n.vitaminC?.dv ?? 0 },
+  ];
+
   return (
-    <View className="bg-white border-2 border-black rounded-md p-4 mb-8">
-      <Text className="text-3xl font-extrabold text-black">Nutrition Facts</Text>
+    <View className="mb-8">
+      <View className="flex-row items-end justify-between" style={{ marginBottom: 14 }}>
+        <Text className="font-extrabold text-deep" style={{ fontSize: 21, letterSpacing: -0.3 }}>Nutrition Facts</Text>
+        <Text style={{ fontSize: 13, color: "#9AA7BD" }}>Serving size · {n.servingDescription || "1 serving"}</Text>
+      </View>
 
-      <View className="border-t-2 border-gray-500 mt-3 pt-2">
-        <View className="flex-row items-center gap-2">
-          <View>
-            <Text className="text-2xl font-bold text-black">Serving Size:</Text>
-          </View>
-          <Text className="text-xl font-extrabold text-black flex-1 flex-wrap" numberOfLines={0}>
-            {n.servingDescription || "1 serving"}
-          </Text>
+      <View
+        className="bg-primarySoft rounded-2xl flex-row items-center justify-between"
+        style={{ paddingHorizontal: 20, paddingVertical: 18, marginBottom: 14 }}
+      >
+        <View>
+          <Text className="font-bold text-primary" style={{ fontSize: 12, letterSpacing: 1.2 }}>CALORIES</Text>
+          <Text style={{ fontSize: 13, color: "#5B6B8C", marginTop: 2 }}>Amount per serving</Text>
         </View>
+        <Text className="font-extrabold text-deep" style={{ fontSize: 46, letterSpacing: -1 }}>
+          {Math.round(Number(n.calories || 0))}
+        </Text>
       </View>
 
-      <View className="border-t-2 border-gray-500 mt-2 pt-2">
-        <Text className="text-xl font-bold text-black">Amount Per Serving</Text>
-      </View>
+      <NutrientGroup
+        icon="water"
+        iconColor="#FF9500"
+        chipBg="#FFF2E0"
+        title="Total Fat"
+        value={formatValue(n.fat?.value ?? 0, "g")}
+        dv={n.fat?.dv ?? 0}
+      >
+        <SubRow label="Saturated Fat" value={n.saturatedFat?.value ?? 0} unit="g" dv={n.saturatedFat?.dv ?? 0} />
+        <SubRow label="Trans Fat" value={n.transFat?.value ?? 0} unit="g" />
+        <SubRow label="Polyunsaturated" value={n.polyunsaturatedFat ?? 0} unit="g" />
+        <SubRow label="Monounsaturated" value={n.monounsaturatedFat ?? 0} unit="g" />
+      </NutrientGroup>
 
-      <View className="border-t border-gray-500 mt-2 pt-2 flex-row items-end justify-between">
-        <Text className="text-5xl font-extrabold text-black">Calories</Text>
-        <Text className="text-7xl font-extrabold text-black">{Math.round(Number(n.calories || 0))}</Text>
-      </View>
+      <NutrientGroup
+        icon="nutrition-outline"
+        iconColor="#007BFF"
+        chipBg="#E7F1FF"
+        title="Total Carbohydrate"
+        value={formatValue(n.carbs?.value ?? 0, "g")}
+        dv={n.carbs?.dv ?? 0}
+      >
+        <SubRow label="Dietary Fiber" value={n.fiber?.value ?? 0} unit="g" dv={n.fiber?.dv ?? 0} />
+        <SubRow label="Sugars" value={n.sugar ?? 0} unit="g" />
+        <SubRow label="Includes Added Sugars" value={n.addedSugars?.value ?? 0} unit="g" dv={n.addedSugars?.dv ?? 0} />
+      </NutrientGroup>
 
-      <View className="border-t-2 border-gray-500 mt-2 pt-1">
-        <Text className="text-right text-2xl font-extrabold text-black">% Daily Values*</Text>
-      </View>
+      <NutrientGroup
+        icon="barbell-outline"
+        iconColor="#10B981"
+        chipBg="#DFF7EF"
+        title="Protein"
+        value={formatValue(n.protein?.value ?? 0, "g")}
+        valueSize={20}
+      />
 
-      <NutritionRow label="Total Fat" value={n.fat?.value ?? 0} unit="g" dv={n.fat?.dv ?? 0} bold />
-      <NutritionRow label="Saturated Fat" value={n.saturatedFat?.value ?? 0} unit="g" dv={n.saturatedFat?.dv ?? 0} indent />
-      <NutritionRow label="Trans Fat" value={n.transFat?.value ?? 0} unit="g" indent />
-      <NutritionRow label="Polyunsaturated Fat" value={n.polyunsaturatedFat ?? 0} unit="g" indent />
-      <NutritionRow label="Monounsaturated Fat" value={n.monounsaturatedFat ?? 0} unit="g" indent />
+      <NutrientGroup
+        icon="heart-outline"
+        iconColor="#5B6B8C"
+        chipBg="#EEF2F6"
+        title="Cholesterol & Sodium"
+      >
+        <SubRow label="Cholesterol" value={n.cholesterol?.value ?? 0} unit="mg" dv={n.cholesterol?.dv ?? 0} />
+        <SubRow label="Sodium" value={n.sodium?.value ?? 0} unit="mg" dv={n.sodium?.dv ?? 0} />
+      </NutrientGroup>
 
-      <NutritionRow label="Cholesterol" value={n.cholesterol?.value ?? 0} unit="mg" dv={n.cholesterol?.dv ?? 0} bold />
-      <NutritionRow label="Sodium" value={n.sodium?.value ?? 0} unit="mg" dv={n.sodium?.dv ?? 0} bold />
-      <NutritionRow label="Total Carbohydrate" value={n.carbs?.value ?? 0} unit="g" dv={n.carbs?.dv ?? 0} bold />
-      <NutritionRow label="Dietary Fiber" value={n.fiber?.value ?? 0} unit="g" dv={n.fiber?.dv ?? 0} indent />
-      <NutritionRow label="Sugars" value={n.sugar ?? 0} unit="g" indent />
-      <NutritionRow label="Includes Added Sugars" value={n.addedSugars?.value ?? 0} unit="g" dv={n.addedSugars?.dv ?? 0} indent />
+      <NutrientGroup
+        icon="sparkles-outline"
+        iconColor="#FF9500"
+        chipBg="#FFF2E0"
+        title="Vitamins & Minerals"
+      >
+        {vitaminItems.map((vitamin) => (
+          <SubRow key={vitamin.label} label={vitamin.label} value={vitamin.value} unit={vitamin.unit} dv={vitamin.dv} />
+        ))}
+      </NutrientGroup>
 
-      <NutritionRow label="Protein" value={n.protein?.value ?? 0} unit="g" bold thick />
-
-      <NutritionRow label="Vitamin D" value={n.vitaminD?.value ?? 0} unit={n.vitaminD?.unit || "mcg"} dv={n.vitaminD?.dv ?? 0} />
-      <NutritionRow label="Calcium" value={n.calcium?.value ?? 0} unit={n.calcium?.unit || "mg"} dv={n.calcium?.dv ?? 0} />
-      <NutritionRow label="Iron" value={n.iron?.value ?? 0} unit={n.iron?.unit || "mg"} dv={n.iron?.dv ?? 0} />
-      <NutritionRow label="Potassium" value={n.potassium?.value ?? 0} unit={n.potassium?.unit || "mg"} dv={n.potassium?.dv ?? 0} />
-      <NutritionRow label="Vitamin A" value={n.vitaminA?.value ?? 0} unit={n.vitaminA?.unit || "mcg"} dv={n.vitaminA?.dv ?? 0} />
-      <NutritionRow label="Vitamin C" value={n.vitaminC?.value ?? 0} unit={n.vitaminC?.unit || "mg"} dv={n.vitaminC?.dv ?? 0} />
-
-      <Text className="text-xs text-gray-600 mt-4">
+      <Text style={{ fontSize: 11.5, lineHeight: 17, color: "#9AA7BD", marginTop: 2 }}>
         * Percent Daily Values are based on a 2,000 calorie diet.
       </Text>
     </View>
