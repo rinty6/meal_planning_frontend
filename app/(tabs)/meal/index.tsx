@@ -8,7 +8,7 @@ const MealScreen = () => {
     const router = useRouter();
 
     return (
-        <SafeAreaView className='flex-1 bg-white px-5'>
+        <SafeAreaView className='flex-1 bg-white px-5' edges={['top', 'left', 'right']}>
             <ScrollView showsVerticalScrollIndicator={false}>
                 {/* 1. Header Title */}
                 <Text className="text-center text-2xl font-bold my-4">Meal</Text>

@@ -367,14 +367,14 @@ const HomeScreen = () => {
 
     if (loading) {
         return (
-            <SafeAreaView className="flex-1 justify-center items-center bg-background">
+            <SafeAreaView className="flex-1 justify-center items-center bg-background" edges={['top', 'left', 'right']}>
                 <ActivityIndicator size="large" color={THEME_COLORS.primary} />
             </SafeAreaView>
         );
     }
 
     return (
-        <SafeAreaView className="flex-1 bg-background">
+        <SafeAreaView className="flex-1 bg-background" edges={['top', 'left', 'right']}>
             <ScrollView className="px-4 pt-4" showsVerticalScrollIndicator={false}>
 
                 {/* 1. Hero Section */}

@@ -10,7 +10,7 @@ const CalorieMenuScreen = () => {
   const router = useRouter();
 
   return (
-    <SafeAreaView className='flex-1 bg-white px-5'>
+    <SafeAreaView className='flex-1 bg-white px-5' edges={['top', 'left', 'right']}>
       <ScrollView showsVerticalScrollIndicator={false}>
         
         {/* 1. Header Title */}

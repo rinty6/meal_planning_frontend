@@ -63,7 +63,7 @@ export default function RootLayout() {
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <ClerkProvider tokenCache={tokenCache} publishableKey={CLERK_PUBLISHABLE_KEY}>
         <Stack screenOptions={{headerShown: false}}/>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
       </ClerkProvider>
       </SafeAreaProvider>
 )}

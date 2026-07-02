@@ -486,7 +486,7 @@ const CalorieSummaryScreen = () => {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       {/* HEADER */}
       <View className="px-5 py-4 flex-row items-center relative justify-between">
         <TouchableOpacity onPress={() => router.push('/(tabs)/calorie')} className="z-10 p-2 bg-gray-50 rounded-full">

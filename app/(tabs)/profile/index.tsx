@@ -149,14 +149,14 @@ const ProfileScreen = () => {
 
     if (loading) {
         return (
-            <SafeAreaView className="flex-1 bg-white justify-center items-center">
+            <SafeAreaView className="flex-1 bg-white justify-center items-center" edges={['top', 'left', 'right']}>
                 <ActivityIndicator size="large" color="#007BFF" />
             </SafeAreaView>
         );
     }
 
     return (
-        <SafeAreaView className="flex-1 bg-white">
+        <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
             <ScrollView className="px-5 pt-4" showsVerticalScrollIndicator={false}>
                 
                 {/* Avatar & Name Section */}

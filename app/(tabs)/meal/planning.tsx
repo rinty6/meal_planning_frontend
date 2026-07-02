@@ -14,6 +14,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@clerk/clerk-expo";
 import { useFocusEffect } from "@react-navigation/native";
+import { LinearGradient } from "expo-linear-gradient";
+import Svg, { Circle, G } from "react-native-svg";
 
 import AddFoodModal from "../../../components/addfoodmodal";
 import CustomAlert from "../../../components/customAlert";
@@ -147,6 +149,11 @@ const buildNutrientsSnapshot = (item: any) => ({
   per100: item?.per100 || {},
 });
 
+const MACRO_DONUT_SIZE = 78;
+const MACRO_DONUT_STROKE = 14;
+const MACRO_DONUT_RADIUS = (MACRO_DONUT_SIZE - MACRO_DONUT_STROKE) / 2;
+const MACRO_DONUT_CIRCUMFERENCE = 2 * Math.PI * MACRO_DONUT_RADIUS;
+
 const DishCard = ({
   item,
   isSelected,
@@ -175,46 +182,137 @@ const DishCard = ({
     !!String(item?.recipe_id || "").trim() ||
     String(item?.id || "").trim().toLowerCase().startsWith("recipe-");
   const sourceLabel = item?.source === "fatsecret_recipe" ? "Recipe" : item?.food_type || "Food";
-  const servingCount = Math.max(1, Math.round(toNumber(item?.servings, 1)));
+  const servingCount = Math.max(1, Math.round(toNumber(item?.servings)));
   const servingText = isRecipeItem
     ? `${servingCount} serving${servingCount > 1 ? "s" : ""}`
     : `${Math.round(toNumber(item?.grams || item?.metric_serving_amount || 100))} g`;
 
+  const fatGrams = toNumber(item?.fats);
+  const proteinGrams = toNumber(item?.protein);
+  const carbGrams = toNumber(item?.carbs);
+  const totalMacroGrams = fatGrams + proteinGrams + carbGrams;
+  const fatLength = totalMacroGrams > 0 ? (fatGrams / totalMacroGrams) * MACRO_DONUT_CIRCUMFERENCE : 0;
+  const proteinLength = totalMacroGrams > 0 ? (proteinGrams / totalMacroGrams) * MACRO_DONUT_CIRCUMFERENCE : 0;
+  const carbLength = totalMacroGrams > 0 ? (carbGrams / totalMacroGrams) * MACRO_DONUT_CIRCUMFERENCE : 0;
+
   return (
     <View className={`mb-4 rounded-3xl border overflow-hidden bg-white shadow-sm ${isSelected ? "border-primary" : "border-gray-100"}`}>
       <TouchableOpacity onPress={onPress} activeOpacity={0.9}>
-        <View className="h-44 bg-gray-100">
-          {image ? (
-            <Image source={{ uri: image }} className="w-full h-full" resizeMode="cover" />
-          ) : (
-            <View className="w-full h-full items-center justify-center">
-              <Food3DIcon name={item?.title} size={54} />
+        <LinearGradient colors={["#F0F6FF", "#FFFFFF"]} style={{ paddingHorizontal: 16, paddingTop: 18, paddingBottom: 14 }}>
+          <View className="flex-row items-center" style={{ gap: 14 }}>
+            <View className="flex-1">
+              <View style={{ alignSelf: "flex-start", backgroundColor: "#0B2149", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginBottom: 9 }}>
+                <Text style={{ color: "#fff", fontSize: 10, fontWeight: "600", letterSpacing: 0.4 }}>{sourceLabel.toUpperCase()}</Text>
+              </View>
+              <Text className="text-textDeep" style={{ fontSize: 19, fontWeight: "800", marginBottom: 8 }} numberOfLines={2}>
+                {item?.title || "Unknown dish"}
+              </Text>
+              <View className="flex-row items-baseline" style={{ gap: 5 }}>
+                <Text className="text-secondary" style={{ fontSize: 24, fontWeight: "800" }}>
+                  {Math.round(toNumber(item?.calories))}
+                </Text>
+                <Text className="text-gray-500" style={{ fontSize: 12, fontWeight: "600" }}>
+                  kcal · {servingText}
+                </Text>
+              </View>
             </View>
-          )}
-          <View className="absolute top-3 right-3 rounded-full bg-white/95 px-3 py-1">
-            <Text className="text-xs font-bold text-gray-700">{sourceLabel}</Text>
+            <View
+              style={{
+                width: 88,
+                height: 88,
+                borderRadius: 44,
+                overflow: "hidden",
+                borderWidth: 3,
+                borderColor: "#fff",
+                shadowColor: "#0B2149",
+                shadowOpacity: 0.2,
+                shadowRadius: 12,
+                shadowOffset: { width: 0, height: 8 },
+                elevation: 6,
+              }}
+            >
+              {image ? (
+                <Image source={{ uri: image }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+              ) : (
+                <View className="w-full h-full items-center justify-center bg-gray-100">
+                  <Food3DIcon name={item?.title} size={40} />
+                </View>
+              )}
+            </View>
           </View>
-        </View>
+        </LinearGradient>
 
-        <View className="p-4">
-          <Text className="text-lg font-bold text-black mb-1" numberOfLines={2}>
-            {item?.title || "Unknown dish"}
-          </Text>
-          <View className="flex-row items-center mb-3">
-            <Ionicons name="flame-outline" size={15} color="#6B7280" />
-            <Text className="text-gray-600 text-xs ml-1 mr-3">{Math.round(toNumber(item?.calories))} kcal</Text>
-            <Ionicons name={isRecipeItem ? "restaurant-outline" : "scale-outline"} size={15} color="#6B7280" />
-            <Text className="text-gray-600 text-xs ml-1">{servingText}</Text>
+        <View className="flex-row items-center" style={{ padding: 16, gap: 18 }}>
+          <View style={{ width: MACRO_DONUT_SIZE, height: MACRO_DONUT_SIZE }}>
+            <Svg width={MACRO_DONUT_SIZE} height={MACRO_DONUT_SIZE}>
+              <G rotation={-90} origin={`${MACRO_DONUT_SIZE / 2}, ${MACRO_DONUT_SIZE / 2}`}>
+                <Circle
+                  cx={MACRO_DONUT_SIZE / 2}
+                  cy={MACRO_DONUT_SIZE / 2}
+                  r={MACRO_DONUT_RADIUS}
+                  stroke="#FF9500"
+                  strokeWidth={MACRO_DONUT_STROKE}
+                  fill="none"
+                  strokeDasharray={`${fatLength} ${MACRO_DONUT_CIRCUMFERENCE - fatLength}`}
+                />
+                <Circle
+                  cx={MACRO_DONUT_SIZE / 2}
+                  cy={MACRO_DONUT_SIZE / 2}
+                  r={MACRO_DONUT_RADIUS}
+                  stroke="#007BFF"
+                  strokeWidth={MACRO_DONUT_STROKE}
+                  fill="none"
+                  strokeDasharray={`${proteinLength} ${MACRO_DONUT_CIRCUMFERENCE - proteinLength}`}
+                  strokeDashoffset={-fatLength}
+                />
+                <Circle
+                  cx={MACRO_DONUT_SIZE / 2}
+                  cy={MACRO_DONUT_SIZE / 2}
+                  r={MACRO_DONUT_RADIUS}
+                  stroke="#10B981"
+                  strokeWidth={MACRO_DONUT_STROKE}
+                  fill="none"
+                  strokeDasharray={`${carbLength} ${MACRO_DONUT_CIRCUMFERENCE - carbLength}`}
+                  strokeDashoffset={-(fatLength + proteinLength)}
+                />
+              </G>
+            </Svg>
+            <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}>
+              <Text className="text-textDeep" style={{ fontSize: 15, fontWeight: "800", lineHeight: 17 }}>
+                {Math.round(totalMacroGrams)}
+                <Text style={{ fontSize: 9 }}>g</Text>
+              </Text>
+              <Text style={{ fontSize: 8, fontWeight: "500", color: "#98A2B3", letterSpacing: 0.4 }}>MACROS</Text>
+            </View>
           </View>
-          <View className="flex-row gap-2 flex-wrap">
-            <View className="bg-orange-50 px-2 py-1 rounded-full">
-              <Text className="text-[11px] text-orange-700 font-semibold">Fat {toNumber(item?.fats).toFixed(1)}g</Text>
+
+          <View className="flex-1" style={{ gap: 9 }}>
+            <View className="flex-row items-center" style={{ gap: 8 }}>
+              <View style={{ width: 9, height: 9, borderRadius: 3, backgroundColor: "#FF9500" }} />
+              <Text className="text-textDeep flex-1" style={{ fontSize: 12, fontWeight: "600" }}>
+                Fat
+              </Text>
+              <Text className="text-textDeep" style={{ fontSize: 12, fontWeight: "700" }}>
+                {fatGrams.toFixed(1)}g
+              </Text>
             </View>
-            <View className="bg-blue-50 px-2 py-1 rounded-full">
-              <Text className="text-[11px] text-blue-700 font-semibold">Protein {toNumber(item?.protein).toFixed(1)}g</Text>
+            <View className="flex-row items-center" style={{ gap: 8 }}>
+              <View style={{ width: 9, height: 9, borderRadius: 3, backgroundColor: "#007BFF" }} />
+              <Text className="text-textDeep flex-1" style={{ fontSize: 12, fontWeight: "600" }}>
+                Protein
+              </Text>
+              <Text className="text-textDeep" style={{ fontSize: 12, fontWeight: "700" }}>
+                {proteinGrams.toFixed(1)}g
+              </Text>
             </View>
-            <View className="bg-green-50 px-2 py-1 rounded-full">
-              <Text className="text-[11px] text-green-700 font-semibold">Carbs {toNumber(item?.carbs).toFixed(1)}g</Text>
+            <View className="flex-row items-center" style={{ gap: 8 }}>
+              <View style={{ width: 9, height: 9, borderRadius: 3, backgroundColor: "#10B981" }} />
+              <Text className="text-textDeep flex-1" style={{ fontSize: 12, fontWeight: "600" }}>
+                Carbs
+              </Text>
+              <Text className="text-textDeep" style={{ fontSize: 12, fontWeight: "700" }}>
+                {carbGrams.toFixed(1)}g
+              </Text>
             </View>
           </View>
         </View>
@@ -222,30 +320,45 @@ const DishCard = ({
 
       <View className="px-4 pb-4">
         <View className="border-t border-gray-100 pt-3 flex-row justify-between items-center">
-          <View className="flex-row items-center gap-2">
-            <TouchableOpacity onPress={onLove} disabled={isFavoriteLoading} className="p-2">
+          <View className="flex-row items-center" style={{ gap: 8 }}>
+            <TouchableOpacity
+              onPress={onLove}
+              disabled={isFavoriteLoading}
+              style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: "#FFF2F2", alignItems: "center", justifyContent: "center" }}
+            >
               {isFavoriteLoading ? (
                 <ActivityIndicator size="small" color="#EF4444" />
               ) : (
-                <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={24} color={isFavorite ? "#EF4444" : "#A0AEC0"} />
+                <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={22} color={isFavorite ? "#EF4444" : "#A0AEC0"} />
               )}
             </TouchableOpacity>
-            <TouchableOpacity onPress={onSkip} className="p-2">
-              <Ionicons name="close-circle-outline" size={24} color="#9CA3AF" />
+            <TouchableOpacity
+              onPress={onSkip}
+              style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: "#F5F8FB", alignItems: "center", justifyContent: "center" }}
+            >
+              <Ionicons name="close-circle-outline" size={22} color="#9CA3AF" />
             </TouchableOpacity>
           </View>
 
           <TouchableOpacity
             onPress={onToggleSelect}
             disabled={isAdding}
-            className={`flex-row items-center px-4 py-2 rounded-full border ${isSelected ? "bg-primary border-primary" : "bg-gray-50 border-gray-200"}`}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              paddingHorizontal: 20,
+              paddingVertical: 10,
+              borderRadius: 999,
+              backgroundColor: isSelected ? "#0B2149" : "#FF9500",
+            }}
           >
             {isAdding ? (
-              <ActivityIndicator size="small" color={isSelected ? "white" : "#007BFF"} />
+              <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Ionicons name={isSelected ? "checkmark-circle" : "add-circle-outline"} size={18} color={isSelected ? "white" : "#007BFF"} />
+              <Ionicons name="add" size={17} color="#fff" />
             )}
-            <Text className={`font-bold ml-2 ${isSelected ? "text-white" : "text-primary"}`}>Pick</Text>
+            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>{isSelected ? "Added" : "Pick"}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -926,7 +1039,7 @@ const PlanningScreen = () => {
   });
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       <ScrollView className="px-5" contentContainerStyle={{ paddingBottom: selectedItems.length > 0 ? 116 : 24 }} showsVerticalScrollIndicator={false}>
         <View className="flex-row justify-between items-center py-4 mb-4">
           <TouchableOpacity onPress={() => router.push("/(tabs)/meal")} className="p-2">

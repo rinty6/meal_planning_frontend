@@ -25,11 +25,21 @@ const TabLayout = () => {
   return (
     <>
     <NotificationSetup />
-    <Tabs 
-        screenOptions={{ 
+    <Tabs
+        screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: '#FF9500',
-  
+        tabBarInactiveTintColor: '#7C93B5',
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '600',
+        },
+        tabBarStyle: {
+          backgroundColor: '#0B2149',
+          borderTopWidth: 0,
+          borderTopLeftRadius: 26,
+          borderTopRightRadius: 26,
+        },
     }}>
       <Tabs.Screen 
         name="index" 

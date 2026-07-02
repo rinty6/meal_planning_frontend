@@ -308,7 +308,7 @@ export default function SummaryScreen() {
   const dinnerItems = groupMeals(meals.filter(m => m.mealType === 'dinner'));
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       {/* HEADER */}
       <View className="flex-row items-center px-5 py-4 relative justify-between">
         <TouchableOpacity onPress={() => router.back()} className="z-10 p-2 bg-gray-100 rounded-full">

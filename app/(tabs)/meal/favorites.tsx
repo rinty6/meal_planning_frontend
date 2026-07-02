@@ -117,7 +117,7 @@ const FavoritesScreen = () => {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       {/* Header */}
       <View className="px-5 py-4 flex-row items-center relative mb-2">
         <TouchableOpacity onPress={() => router.push('/(tabs)/meal')} className="z-10 bg-gray-50 p-2 rounded-full">

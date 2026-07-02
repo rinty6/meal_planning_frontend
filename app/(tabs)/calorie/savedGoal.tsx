@@ -132,7 +132,7 @@ const SavedGoalScreen = () => {
     );
 
     return (
-        <SafeAreaView className="flex-1 bg-white px-5">
+        <SafeAreaView className="flex-1 bg-white px-5" edges={['top', 'left', 'right']}>
             <View className='py-4 flex-row items-center relative'>
                 <TouchableOpacity onPress={() => router.back()} className="z-10 p-2 bg-gray-50 rounded-full">
                     <Ionicons name="chevron-back" size={24} color="black" />

@@ -13,7 +13,7 @@ const NotificationsScreen = () => {
   const router = useRouter();
 
   return (
-    <SafeAreaView className="flex-1 bg-[#F3F4F6]">
+    <SafeAreaView className="flex-1 bg-[#F3F4F6]" edges={['top', 'left', 'right']}>
       <View className="px-5 py-4 border-b border-gray-200 flex-row items-center justify-between">
         <Text className="text-3xl font-bold text-[#111827]">Notifications</Text>
         <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} className="p-2">

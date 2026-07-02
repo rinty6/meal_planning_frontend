@@ -127,7 +127,7 @@ const ShoppingScreen = () => {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       {/* Header */}
       <View className="px-5 py-4 flex-row items-center justify-between">
         <TouchableOpacity onPress={() => router.push('/(tabs)/meal')}><Ionicons name="chevron-back" size={28} /></TouchableOpacity>

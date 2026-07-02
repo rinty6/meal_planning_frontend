@@ -17,7 +17,14 @@ const FeedbackScreen = () => {
       parent?.setOptions({ tabBarStyle: { display: 'none' } });
 
       return () => {
-        parent?.setOptions({ tabBarStyle: undefined });
+        parent?.setOptions({
+          tabBarStyle: {
+            backgroundColor: '#0B2149',
+            borderTopWidth: 0,
+            borderTopLeftRadius: 26,
+            borderTopRightRadius: 26,
+          },
+        });
       };
     }, [navigation])
   );

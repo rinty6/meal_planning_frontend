@@ -208,7 +208,7 @@ const RecipeScreen = () => {
   );
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       {/* HEADER */}
       <View className="px-5 py-2 flex-row items-center gap-3">
         <TouchableOpacity onPress={() => router.push('/(tabs)/meal')}>
