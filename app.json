@@ -46,7 +46,14 @@
       ],
       "expo-font",
       "@react-native-community/datetimepicker",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to add pictures to your recipes and profile.",
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to take a photo for your recipes."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -16,25 +16,22 @@ import NotificationMessage from '../../components/notificationmessage';
 import FeedbackSendingMessage from '../../components/feedbacksendingmessage';
 import {
     getCachedHomeSnapshot,
-    setCachedHomeDashboard,
     shouldRefreshHomeDashboard,
 } from '../../services/homeStore';
-import {
-    fetchMealsSummaryWithCache,
-    markMealsSummaryDirty,
-} from '../../services/mealsSummaryStore';
+import { markMealsSummaryDirty } from '../../services/mealsSummaryStore';
 import { authedFetch } from '../../services/authedFetch';
-
-type MacroSet = {
-    calories: number;
-    protein: number;
-    carbs: number;
-    fats: number;
-};
+import {
+    fetchAndCacheHomeDashboard,
+    buildTargetMacros,
+    getTodayFormatted,
+    toNumber,
+    firstNumber,
+    DEFAULT_CALORIE_TARGET,
+    type MacroSet,
+} from '../../services/homeDashboard';
 
 type MealLogType = 'breakfast' | 'lunch' | 'dinner';
 
-const DEFAULT_CALORIE_TARGET = 2000;
 const HOME_DASHBOARD_REFRESH_TTL_MS = 15 * 1000;
 const HERO_IMAGE = require('../../assets/images/homepage_hero_image.png');
 // Read straight from the bundled asset's own metadata so the hero container always
@@ -55,64 +52,14 @@ const THEME_COLORS = {
     macroTrack: '#D1D5DB',
 };
 
-const toNumber = (value: unknown) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-};
-
 const formatWholeNumber = (value: number) =>
     Math.round(value).toLocaleString('en-US');
 
 const safeTarget = (value: number) => Math.max(1, toNumber(value));
 
-const firstNumber = (...values: unknown[]) => {
-    for (const value of values) {
-        if (value === null || value === undefined || value === '') continue;
-        const parsed = Number(value);
-        if (Number.isFinite(parsed)) return parsed;
-    }
-    return 0;
-};
-
-const hasMacros = (macroData: MacroSet) =>
-    macroData.calories > 0 || macroData.protein > 0 || macroData.carbs > 0 || macroData.fats > 0;
-
-const extractConsumedMacros = (summaryData: any): MacroSet => {
-    const consumed = summaryData?.consumed ?? summaryData?.summary ?? summaryData?.totals ?? {};
-    return {
-        calories: firstNumber(consumed.calories, consumed.kcal, consumed.totalCalories, summaryData?.calories, summaryData?.totalCalories),
-        protein: firstNumber(consumed.protein, consumed.proteins, consumed.totalProtein, summaryData?.protein, summaryData?.totalProtein),
-        carbs: firstNumber(consumed.carbs, consumed.carbohydrates, consumed.totalCarbs, summaryData?.carbs, summaryData?.totalCarbs),
-        fats: firstNumber(consumed.fats, consumed.fat, consumed.totalFat, summaryData?.fats, summaryData?.fat, summaryData?.totalFats),
-    };
-};
-
-const aggregateMeals = (meals: any[]): MacroSet =>
-    meals.reduce(
-        (totals: MacroSet, meal: any) => ({
-            calories: totals.calories + toNumber(meal?.calories),
-            protein: totals.protein + toNumber(meal?.protein),
-            carbs: totals.carbs + toNumber(meal?.carbs),
-            fats: totals.fats + firstNumber(meal?.fats, meal?.fat),
-        }),
-        { calories: 0, protein: 0, carbs: 0, fats: 0 }
-    );
-
-const buildTargetMacros = (dailyCalories: number): MacroSet => ({
-    calories: dailyCalories,
-    carbs: (dailyCalories * 0.5) / 4,
-    protein: (dailyCalories * 0.3) / 4,
-    fats: (dailyCalories * 0.2) / 9,
-});
-
-// Helper to format date strictly as YYYY-MM-DD for local time
-const getTodayFormatted = () => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
+// Macro helpers (toNumber, firstNumber, buildTargetMacros, getTodayFormatted, …) and the
+// dashboard fetch now live in services/homeDashboard.ts so app/index.tsx can pre-warm the
+// same cache during the startup animation (IMPLEMENTATION_CHECKLIST §4A).
 
 // Helper to get friendly date display matching UI (e.g., "February 2026 Tue")
 const getFriendlyDate = () => {
@@ -150,7 +97,9 @@ const HomeScreen = () => {
         getTokenRef.current = getToken;
     }, [getToken]);
     
-    const [loading, setLoading] = useState(true);
+    // Start already-loaded when the startup screen pre-warmed the cache — avoids a
+    // one-frame white spinner flash on arrival (IMPLEMENTATION_CHECKLIST §4A.5 / E22).
+    const [loading, setLoading] = useState(() => !getCachedHomeSnapshot(userId)?.macros);
     const [dbUserName, setDbUserName] = useState('');
     
     // Macro State
@@ -215,59 +164,18 @@ const HomeScreen = () => {
                 return;
             }
 
-            const today = getTodayFormatted();
-
-            const [profileResult, summaryResult] = await Promise.allSettled([
-                authedFetch(`/api/profile/${userId}`, { getToken: getTokenRef.current, clerkId: userId }),
-                authedFetch(`/api/calorie/summary/${userId}/${today}`, { getToken: getTokenRef.current, clerkId: userId })
-            ]);
-
-            let resolvedUserName = clerkUser?.firstName || 'User';
-            // Set User Name
-            if (profileResult.status === 'fulfilled' && profileResult.value.ok) {
-                const profileData = await profileResult.value.json();
-                resolvedUserName = profileData.user?.username || clerkUser?.firstName || 'User';
-            }
-            setDbUserName(resolvedUserName);
-
-            let summaryPayload: any = null;
-            if (summaryResult.status === 'fulfilled' && summaryResult.value.ok) {
-                summaryPayload = await summaryResult.value.json();
-            }
-
-            let consumedMacros = extractConsumedMacros(summaryPayload);
-            const dailyCalorieTarget =
-                firstNumber(
-                    summaryPayload?.goal?.dailyCalories,
-                    summaryPayload?.target?.dailyCalories,
-                    summaryPayload?.dailyCalories,
-                    summaryPayload?.targetCalories
-                ) || DEFAULT_CALORIE_TARGET;
-
-            // Fallback: if summary payload is empty/zero, compute from today's meal logs directly.
-            if (!hasMacros(consumedMacros)) {
-                const meals = await fetchMealsSummaryWithCache({
-                    apiURL,
-                    userId,
-                    date: today,
-                    getToken: getTokenRef.current,
-                });
-                if (meals) {
-                    consumedMacros = aggregateMeals(meals);
-                }
-            }
-
-            setMacros({
-                consumed: consumedMacros,
-                target: buildTargetMacros(dailyCalorieTarget),
+            // Delegates to the shared fetch (same logic StartScreen pre-warms with).
+            const result = await fetchAndCacheHomeDashboard({
+                apiURL,
+                userId,
+                getToken: getTokenRef.current,
+                fallbackName: clerkUser?.firstName,
             });
-            setCachedHomeDashboard(userId, {
-                dbUserName: resolvedUserName,
-                macros: {
-                    consumed: consumedMacros,
-                    target: buildTargetMacros(dailyCalorieTarget),
-                },
-            });
+
+            if (result.ok) {
+                setDbUserName(result.dbUserName);
+                setMacros(result.macros);
+            }
         } catch (error) {
             console.error("Dashboard Load Error:", error);
         } finally {

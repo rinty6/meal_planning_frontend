@@ -3,11 +3,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { getRecipeDetails } from '../../../services/mealAPI';
 import { getThemealdbRecipe, type ThemealdbRecipe } from '../../../services/themealdbAPI';
 import { markFavoritesDirty } from '../../../services/favoritesStore';
 import { useAuth } from '@clerk/clerk-expo';
 import { authedFetch } from '../../../services/authedFetch';
+import { uploadRecipeImage } from '../../../services/recipeImages';
 import IngredientIcon from '../../../components/IngredientIcon';
 import { resolveIngredientImage } from '../../../services/ingredientImages';
 import SuccessModal from '../../../components/sucessmodal'; 
@@ -54,6 +56,7 @@ const RecipeDetailScreen = () => {
   const [mealdbNutrition, setMealdbNutrition] = useState<ThemealdbRecipe['nutrition'] | null>(null);
   // Hero image: real photo if present, else an ingredient-image collage fallback.
   const [heroFailed, setHeroFailed] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   // Track ingredient image URLs that fail to load so we fall back to the icon.
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   
@@ -171,6 +174,58 @@ const RecipeDetailScreen = () => {
     }
   };
 
+  // --- PHOTO UPLOAD HANDLERS ---
+  const pickAndUploadImage = async (source: 'camera' | 'library') => {
+    try {
+      const permission = source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          'Permission needed',
+          `Please allow access to your ${source === 'camera' ? 'camera' : 'photo library'} to add a recipe photo.`
+        );
+        return;
+      }
+
+      const pickerOptions: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.5,
+        base64: true,
+      };
+
+      const result = source === 'camera'
+        ? await ImagePicker.launchCameraAsync(pickerOptions)
+        : await ImagePicker.launchImageLibraryAsync(pickerOptions);
+
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+
+      setUploadingImage(true);
+      const mimeType = result.assets[0].mimeType || 'image/jpeg';
+      const dataUri = `data:${mimeType};base64,${result.assets[0].base64}`;
+      const uploadedUrl = await uploadRecipeImage({ dataUri, getToken, clerkId: userId });
+
+      setBaseRecipeInfo((prev: any) => ({ ...(prev || {}), image: uploadedUrl }));
+      setHeroFailed(false);
+    } catch (error) {
+      console.error('Recipe photo upload error:', error);
+      Alert.alert('Upload failed', 'Could not upload this photo. Please try again.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleChangePhoto = () => {
+    Alert.alert('Recipe Photo', 'Choose a photo source', [
+      { text: 'Take Photo', onPress: () => void pickAndUploadImage('camera') },
+      { text: 'Choose from Library', onPress: () => void pickAndUploadImage('library') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   // --- EDITING HANDLERS ---
   const handleRemoveIngredient = (index: number) => {
     const updated = [...ingredients];
@@ -228,7 +283,8 @@ const RecipeDetailScreen = () => {
                     title: recipeTitle,
                     calories: caloriesFromInput(recipeCalories),
                     ingredients: ingredients,
-                    instructions: instructions
+                    instructions: instructions,
+                    image: baseRecipeInfo?.image || ""
                 })
             });
 
@@ -383,7 +439,7 @@ const RecipeDetailScreen = () => {
   };
 
   if (loading) return (
-    <SafeAreaView className="flex-1 bg-white justify-center items-center">
+    <SafeAreaView className="flex-1 bg-white justify-center items-center" edges={['top', 'left', 'right']}>
         <ActivityIndicator size="large" color="#007BFF" />
     </SafeAreaView>
   );
@@ -400,8 +456,15 @@ const RecipeDetailScreen = () => {
   const sourceLabel = isThemealdb ? "Recipe via TheMealDB"
     : (savedRecipeId || isCreating === "true") ? null : "Recipe via FatSecret";
 
+  // Photo upload is only for the user's OWN custom recipes — never for FatSecret/TheMealDB
+  // recipes (read-only sources) or saved copies of them. Custom recipes carry an
+  // externalId beginning with "custom-"; sourced recipes carry their provider's ID.
+  const isCustomRecipe =
+    isCreating === "true" ||
+    String(baseRecipeInfo?.externalId || "").startsWith("custom-");
+
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       {/* HEADER */}
       <View className="px-5 py-4 flex-row items-center relative">
         <TouchableOpacity onPress={() => router.back()} className="z-10 p-2">
@@ -425,23 +488,54 @@ const RecipeDetailScreen = () => {
         automaticallyAdjustKeyboardInsets
         contentContainerStyle={{ paddingBottom: 180 }}
       >
-         {/* HERO IMAGE — real photo, else an ingredient-image collage */}
-         {(heroImage && !heroFailed) ? (
-            <Image
-               source={{ uri: heroImage }}
-               className="w-full h-48 rounded-2xl mb-3"
-               resizeMode="cover"
-               onError={() => setHeroFailed(true)}
-            />
-         ) : collageTiles.length > 0 ? (
-            <View className="w-full h-32 rounded-2xl mb-3 overflow-hidden flex-row bg-gray-50 border border-gray-100">
-               {collageTiles.map((uri, idx) => (
-                  <View key={idx} className="flex-1 items-center justify-center border-r border-gray-100 p-2">
-                     <Image source={{ uri }} className="w-full h-full" resizeMode="contain" />
-                  </View>
-               ))}
-            </View>
-         ) : null}
+         {/* HERO IMAGE — user photo if uploaded, else real photo, else an ingredient-image collage */}
+         <View className="relative mb-3">
+            {(heroImage && !heroFailed) ? (
+               <Image
+                  source={{ uri: heroImage }}
+                  className="w-full h-48 rounded-2xl"
+                  resizeMode="cover"
+                  onError={() => setHeroFailed(true)}
+               />
+            ) : collageTiles.length > 0 ? (
+               <View className="w-full h-32 rounded-2xl overflow-hidden flex-row bg-gray-50 border border-gray-100">
+                  {collageTiles.map((uri, idx) => (
+                     <View key={idx} className="flex-1 items-center justify-center border-r border-gray-100 p-2">
+                        <Image source={{ uri }} className="w-full h-full" resizeMode="contain" />
+                     </View>
+                  ))}
+               </View>
+            ) : isCustomRecipe ? (
+               <TouchableOpacity
+                  onPress={handleChangePhoto}
+                  disabled={uploadingImage}
+                  className="w-full h-40 rounded-2xl items-center justify-center bg-gray-50 border border-dashed border-gray-300"
+               >
+                  {uploadingImage ? (
+                     <ActivityIndicator size="small" color="#007BFF" />
+                  ) : (
+                     <>
+                        <Ionicons name="camera-outline" size={28} color="#9CA3AF" />
+                        <Text className="text-gray-400 font-semibold text-sm mt-2">Add a recipe photo</Text>
+                     </>
+                  )}
+               </TouchableOpacity>
+            ) : null}
+
+            {isCustomRecipe && ((heroImage && !heroFailed) || collageTiles.length > 0) ? (
+               <TouchableOpacity
+                  onPress={handleChangePhoto}
+                  disabled={uploadingImage}
+                  className="absolute bottom-3 right-3 w-10 h-10 rounded-full bg-black/60 items-center justify-center"
+               >
+                  {uploadingImage ? (
+                     <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                     <Ionicons name="camera" size={18} color="#fff" />
+                  )}
+               </TouchableOpacity>
+            ) : null}
+         </View>
 
          {/* SOURCE LABEL */}
          {sourceLabel && (

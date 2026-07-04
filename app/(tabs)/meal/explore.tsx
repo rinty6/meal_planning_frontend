@@ -148,7 +148,7 @@ const ExploreCuisineScreen = () => {
   );
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       {/* HEADER (always anchored at top; search sits below it, above the list) */}
       <View className="px-5 py-2 flex-row items-center gap-3">
         <TouchableOpacity onPress={() => router.back()}>
