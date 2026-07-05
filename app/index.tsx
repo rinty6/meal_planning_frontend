@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 
@@ -20,6 +20,17 @@ const StartScreen = () => {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [startupPhase, setStartupPhase] = useState('Waiting for authentication');
   const [retryNonce, setRetryNonce] = useState(0);
+
+  // Clerk's getToken changes identity whenever the session token refreshes. Keeping it
+  // in the startup effect's dependency array made the effect re-fire on every refresh,
+  // which (on slow/cold backends) snowballed the dashboard pre-warm into a request storm
+  // that tripped the rate limiter and outlived the 60s token. Hold it in a ref instead —
+  // the same pattern the Home screen already uses — so the effect only runs on real
+  // auth-state transitions.
+  const getTokenRef = useRef(getToken);
+  useEffect(() => {
+    getTokenRef.current = getToken;
+  }, [getToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,7 +91,7 @@ const StartScreen = () => {
       const bootstrapResult = await bootstrapBackendUser({
         apiURL,
         clerkId: user.id,
-        getToken,
+        getToken: getTokenRef.current,
       });
 
       if (!bootstrapResult.ok) {
@@ -117,7 +128,7 @@ const StartScreen = () => {
         fetchAndCacheHomeDashboard({
           apiURL,
           userId: user.id,
-          getToken,
+          getToken: getTokenRef.current,
           fallbackName: user?.firstName,
         }),
         new Promise((resolve) => setTimeout(resolve, DASHBOARD_PREWARM_TIMEOUT_MS)),
@@ -134,7 +145,11 @@ const StartScreen = () => {
     return () => {
       cancelled = true;
     };
-  }, [getToken, isLoaded, isSignedIn, retryNonce, router, user?.id]);
+    // getToken (held in a ref above) and router are deliberately NOT dependencies —
+    // both change identity on refresh/render and would re-fire the whole bootstrap +
+    // pre-warm flow. The effect only needs to react to real auth-state transitions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, isSignedIn, retryNonce, user?.id]);
 
   const handleRetry = () => {
     setRetryNonce((value) => value + 1);

@@ -2,7 +2,7 @@
   "expo": {
     "name": "GoodHealthMate",
     "slug": "meal_app",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/GoodHealthMate_logo.png",
     "scheme": "mealapp",
