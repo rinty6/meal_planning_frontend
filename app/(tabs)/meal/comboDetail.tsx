@@ -491,30 +491,38 @@ const FoodDetailScreen = () => {
           <FoodFactsCard item={food} nutritionFacts={nutritionFacts} />
         )}
 
-        {activeIsRecipeLike ? (
+        {activeIsRecipeLike && (
           <TouchableOpacity
             onPress={handleViewRecipe}
-            className="w-full py-4 bg-primary rounded-2xl mb-10 shadow-md flex-row justify-center items-center"
+            className="w-full py-4 bg-primary rounded-2xl mb-3 shadow-md flex-row justify-center items-center"
           >
             <Ionicons name="book-outline" size={24} color="white" />
             <Text className="text-white text-center font-bold text-lg ml-2">View Recipe</Text>
           </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            onPress={handleAddToLog}
-            disabled={adding}
-            className="w-full py-4 bg-primary rounded-2xl mb-10 shadow-md flex-row justify-center items-center"
-          >
-            {adding ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <>
-                <Ionicons name="add-circle" size={24} color="white" />
-                <Text className="text-white text-center font-bold text-lg ml-2">Add to Meal Plan</Text>
-              </>
-            )}
-          </TouchableOpacity>
         )}
+
+        <TouchableOpacity
+          onPress={handleAddToLog}
+          disabled={adding}
+          className={`w-full py-4 rounded-2xl mb-10 flex-row justify-center items-center ${
+            activeIsRecipeLike ? "bg-white border-2 border-primary" : "bg-primary shadow-md"
+          }`}
+        >
+          {adding ? (
+            <ActivityIndicator color={activeIsRecipeLike ? "#007BFF" : "white"} />
+          ) : (
+            <>
+              <Ionicons name="add-circle" size={24} color={activeIsRecipeLike ? "#007BFF" : "white"} />
+              <Text
+                className={`text-center font-bold text-lg ml-2 ${
+                  activeIsRecipeLike ? "text-primary" : "text-white"
+                }`}
+              >
+                Add to Meal Plan
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
       </ScrollView>
 
       <Modal visible={showMealSelector} transparent animationType="fade">

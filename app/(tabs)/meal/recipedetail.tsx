@@ -33,6 +33,32 @@ const caloriesFromInput = (value: string) => {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 };
 
+// Macros keep one decimal (e.g. "105.0g" in the design) and clamp to >= 0.
+const normalizeMacroInput = (value: any) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "0";
+  return String(Math.round(Math.max(0, parsed) * 10) / 10);
+};
+
+const macroFromInput = (value: string) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+};
+
+// The serving pill is free text (e.g. "10 servings", "Whole recipe"), but persistence
+// still needs an integer count, so pull the first number out and fall back to 1.
+const parseServingsCount = (text: string) => {
+  const match = String(text || "").match(/\d+(?:\.\d+)?/);
+  const n = match ? Math.round(Number(match[0])) : 0;
+  return n > 0 ? n : 1;
+};
+
+const formatServingsLabel = (count: any) => {
+  const n = Math.round(Number(count));
+  const safe = Number.isFinite(n) && n > 0 ? n : 1;
+  return `${safe} ${safe === 1 ? "serving" : "servings"}`;
+};
+
 const RecipeDetailScreen = () => {
   // 1. GET PARAMS
   const { id, previewImage, savedRecipeId, isCreating, source } = useLocalSearchParams();
@@ -40,7 +66,6 @@ const RecipeDetailScreen = () => {
   const router = useRouter();
   const { userId, getToken } = useAuth();
   const scrollViewRef = useRef<ScrollView>(null);
-  const caloriesInputRef = useRef<TextInput>(null);
   const stepOffsetsRef = useRef<Record<number, number>>({});
 
   // 2. STATE VARIABLES
@@ -49,6 +74,18 @@ const RecipeDetailScreen = () => {
   
   const [recipeTitle, setRecipeTitle] = useState("");
   const [recipeCalories, setRecipeCalories] = useState("0");
+  // Editable macros + free-text serving label (per the redesign, editable in every state).
+  const [recipeProtein, setRecipeProtein] = useState("0");
+  const [recipeCarbs, setRecipeCarbs] = useState("0");
+  const [recipeFats, setRecipeFats] = useState("0");
+  const [servingText, setServingText] = useState("");
+  // Tap-to-edit: each value shows as clean Text (like Food detail) until its pencil
+  // is tapped, which flips just that one field into an inline input while editing.
+  const [editingCalories, setEditingCalories] = useState(false);
+  const [editingServing, setEditingServing] = useState(false);
+  const [editingFat, setEditingFat] = useState(false);
+  const [editingProtein, setEditingProtein] = useState(false);
+  const [editingCarbs, setEditingCarbs] = useState(false);
   const [ingredients, setIngredients] = useState<any[]>([]);
   const [instructions, setInstructions] = useState<any[]>([]);
   const [baseRecipeInfo, setBaseRecipeInfo] = useState<any>(null);
@@ -71,8 +108,12 @@ const RecipeDetailScreen = () => {
     if (isCreating === "true") {
         // --- CREATE MODE ---
         setLoading(false);
-        setRecipeTitle(""); 
+        setRecipeTitle("");
         setRecipeCalories("0");
+        setRecipeProtein("0");
+        setRecipeCarbs("0");
+        setRecipeFats("0");
+        setServingText("");
         setIngredients([{ name: "", quantity: "", description: "", image: null }]);
         setInstructions([{ step: 1, text: "" }]);
         setBaseRecipeInfo({ id: `custom-${Date.now()}` }); 
@@ -98,6 +139,11 @@ const RecipeDetailScreen = () => {
         if (data) {
             setRecipeTitle(data.title);
             setRecipeCalories(normalizeCaloriesInput(data.calories));
+            // FatSecret recipe macros are per serving; number_of_servings falls back to 1.
+            setRecipeProtein(normalizeMacroInput(data.protein));
+            setRecipeCarbs(normalizeMacroInput(data.carbs));
+            setRecipeFats(normalizeMacroInput(data.fats));
+            setServingText(formatServingsLabel(data.servings));
             setIngredients(data.ingredients);
             setInstructions(data.instructions);
             setBaseRecipeInfo({ ...data, image: data.image || (previewImage as string) });
@@ -124,6 +170,11 @@ const RecipeDetailScreen = () => {
             setMealdbNutrition(hasComputed ? n : null);
             setRecipeTitle(data.title);
             setRecipeCalories(hasComputed ? normalizeCaloriesInput(n.calories) : "0");
+            // TheMealDB macros are a whole-recipe estimate (USDA), not per serving.
+            setRecipeProtein(hasComputed ? normalizeMacroInput(n.protein) : "0");
+            setRecipeCarbs(hasComputed ? normalizeMacroInput(n.carbs) : "0");
+            setRecipeFats(hasComputed ? normalizeMacroInput(n.fats) : "0");
+            setServingText("Whole recipe");
             setIngredients(
               (data.ingredients || []).map((ing) => ({
                 name: ing.name,
@@ -163,6 +214,10 @@ const RecipeDetailScreen = () => {
         if (data) {
             setRecipeTitle(data.title);
             setRecipeCalories(normalizeCaloriesInput(data.calories));
+            setRecipeProtein(normalizeMacroInput(data.protein));
+            setRecipeCarbs(normalizeMacroInput(data.carbs));
+            setRecipeFats(normalizeMacroInput(data.fats));
+            setServingText(data.servings ? formatServingsLabel(data.servings) : "");
             setIngredients(data.ingredients);
             setInstructions(data.instructions);
             setBaseRecipeInfo(data);
@@ -282,6 +337,10 @@ const RecipeDetailScreen = () => {
                 body: JSON.stringify({
                     title: recipeTitle,
                     calories: caloriesFromInput(recipeCalories),
+                    protein: macroFromInput(recipeProtein),
+                    carbs: macroFromInput(recipeCarbs),
+                    fats: macroFromInput(recipeFats),
+                    servings: parseServingsCount(servingText),
                     ingredients: ingredients,
                     instructions: instructions,
                     image: baseRecipeInfo?.image || ""
@@ -303,11 +362,11 @@ const RecipeDetailScreen = () => {
                 image: baseRecipeInfo?.image || "",
                 prepTime: baseRecipeInfo?.prepTime || 0,
                 cookTime: baseRecipeInfo?.cookTime || 0,
-                servings: baseRecipeInfo?.servings || 1,
+                servings: parseServingsCount(servingText),
                 calories: caloriesFromInput(recipeCalories),
-                protein: baseRecipeInfo?.protein || 0,
-                carbs: baseRecipeInfo?.carbs || 0,
-                fats: baseRecipeInfo?.fats || 0,
+                protein: macroFromInput(recipeProtein),
+                carbs: macroFromInput(recipeCarbs),
+                fats: macroFromInput(recipeFats),
                 ingredients: ingredients, 
                 instructions: instructions 
             };
@@ -402,9 +461,9 @@ const RecipeDetailScreen = () => {
           mealType,
           foodName: recipeName,
           calories: caloriesFromInput(recipeCalories),
-          protein: Number(baseRecipeInfo?.protein) || 0,
-          carbs: Number(baseRecipeInfo?.carbs) || 0,
-          fats: Number(baseRecipeInfo?.fats) || 0,
+          protein: macroFromInput(recipeProtein),
+          carbs: macroFromInput(recipeCarbs),
+          fats: macroFromInput(recipeFats),
           image: baseRecipeInfo?.image || (previewImage as string) || "",
           externalId: baseRecipeInfo?.id || savedRecipeId || id || recipeName,
           source: savedRecipeId || isCreating === "true"
@@ -444,15 +503,11 @@ const RecipeDetailScreen = () => {
     </SafeAreaView>
   );
 
-  // Hero: prefer the recipe photo; fall back to a collage of ingredient images
-  // (reuses the curated ingredient set + TheMealDB thumbnails) for imageless recipes.
+  // Compact recipe image (130x160 beside the title) — prefer the real photo, else a
+  // neutral placeholder. Fixed dimensions avoid the old full-width hero breaking on
+  // very tall or very wide provider photos.
   const heroImage = baseRecipeInfo?.image && String(baseRecipeInfo.image).trim() !== ""
     ? String(baseRecipeInfo.image) : null;
-  const collageTiles = Array.from(new Set(
-    ingredients
-      .map((i: any) => i.image || resolveIngredientImage(i.name))
-      .filter((u: any): u is string => !!u)
-  )).slice(0, 4);
   const sourceLabel = isThemealdb ? "Recipe via TheMealDB"
     : (savedRecipeId || isCreating === "true") ? null : "Recipe via FatSecret";
 
@@ -462,6 +517,44 @@ const RecipeDetailScreen = () => {
   const isCustomRecipe =
     isCreating === "true" ||
     String(baseRecipeInfo?.externalId || "").startsWith("custom-");
+
+  // Display "6.0g" like the Food detail card so read-only and editable states match.
+  const formatMacroDisplay = (value: string) => `${(Number(value) || 0).toFixed(1)}g`;
+
+  // One tap-to-edit Fat/Protein/Carbs cell (clean Text until its pencil is tapped).
+  const renderMacroCell = (
+    label: string,
+    value: string,
+    onChange: (t: string) => void,
+    normalize: () => void,
+    editing: boolean,
+    setEditing: (v: boolean) => void,
+    withLeftBorder: boolean,
+  ) => (
+    <View className={`flex-1 items-center ${withLeftBorder ? 'border-l border-gray-100' : ''}`}>
+      <Text className="text-gray-400 mb-1">{label}</Text>
+      {editing ? (
+        <TextInput
+          autoFocus
+          value={value}
+          onChangeText={(t) => onChange(t.replace(/[^0-9.]/g, ''))}
+          onBlur={() => { normalize(); setEditing(false); }}
+          onSubmitEditing={() => { normalize(); setEditing(false); }}
+          keyboardType="numeric"
+          returnKeyType="done"
+          className="font-bold text-lg text-gray-900 text-center"
+          style={{ minWidth: 44, padding: 0 }}
+          placeholder="0"
+          placeholderTextColor="#9CA3AF"
+        />
+      ) : (
+        <TouchableOpacity onPress={() => setEditing(true)} className="flex-row items-center">
+          <Text className="font-bold text-lg text-gray-900">{formatMacroDisplay(value)}</Text>
+          <Ionicons name="create-outline" size={12} color="#007BFF" style={{ marginLeft: 4 }} />
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
@@ -488,128 +581,157 @@ const RecipeDetailScreen = () => {
         automaticallyAdjustKeyboardInsets
         contentContainerStyle={{ paddingBottom: 180 }}
       >
-         {/* HERO IMAGE — user photo if uploaded, else real photo, else an ingredient-image collage */}
-         <View className="relative mb-3">
-            {(heroImage && !heroFailed) ? (
-               <Image
-                  source={{ uri: heroImage }}
-                  className="w-full h-48 rounded-2xl"
-                  resizeMode="cover"
-                  onError={() => setHeroFailed(true)}
-               />
-            ) : collageTiles.length > 0 ? (
-               <View className="w-full h-32 rounded-2xl overflow-hidden flex-row bg-gray-50 border border-gray-100">
-                  {collageTiles.map((uri, idx) => (
-                     <View key={idx} className="flex-1 items-center justify-center border-r border-gray-100 p-2">
-                        <Image source={{ uri }} className="w-full h-full" resizeMode="contain" />
-                     </View>
-                  ))}
-               </View>
-            ) : isCustomRecipe ? (
-               <TouchableOpacity
-                  onPress={handleChangePhoto}
-                  disabled={uploadingImage}
-                  className="w-full h-40 rounded-2xl items-center justify-center bg-gray-50 border border-dashed border-gray-300"
-               >
-                  {uploadingImage ? (
-                     <ActivityIndicator size="small" color="#007BFF" />
-                  ) : (
-                     <>
-                        <Ionicons name="camera-outline" size={28} color="#9CA3AF" />
-                        <Text className="text-gray-400 font-semibold text-sm mt-2">Add a recipe photo</Text>
-                     </>
-                  )}
-               </TouchableOpacity>
-            ) : null}
+         {/* TITLE + PILLS + COMPACT IMAGE — mirrors the Food detail (comboDetail) header */}
+         <View className="flex-row items-start mb-6" style={{ gap: 16 }}>
+            <View className="flex-1" style={{ gap: 14, paddingTop: 2, minWidth: 0 }}>
+               {/* TITLE — editable only for custom recipes; read-only for TheMealDB / FatSecret */}
+               {isCustomRecipe ? (
+                  <TextInput
+                     value={recipeTitle}
+                     onChangeText={setRecipeTitle}
+                     className="text-2xl font-extrabold text-gray-900 border-b border-gray-200 pb-2"
+                     style={{ letterSpacing: -0.4 }}
+                     multiline
+                     placeholder="Name your recipe..."
+                     placeholderTextColor="#9CA3AF"
+                  />
+               ) : (
+                  <Text className="text-2xl font-extrabold text-gray-900 border-b border-gray-200 pb-2" style={{ letterSpacing: -0.4 }}>
+                     {recipeTitle}
+                  </Text>
+               )}
 
-            {isCustomRecipe && ((heroImage && !heroFailed) || collageTiles.length > 0) ? (
-               <TouchableOpacity
-                  onPress={handleChangePhoto}
-                  disabled={uploadingImage}
-                  className="absolute bottom-3 right-3 w-10 h-10 rounded-full bg-black/60 items-center justify-center"
-               >
-                  {uploadingImage ? (
-                     <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                     <Ionicons name="camera" size={18} color="#fff" />
-                  )}
-               </TouchableOpacity>
-            ) : null}
-         </View>
+               <View style={{ gap: 9 }}>
+                  {/* CALORIE PILL — clean Text until the pencil flips it to an input */}
+                  <View className="flex-row items-center self-start bg-white border border-gray-200 px-4 py-2 rounded-full shadow-sm">
+                     <Ionicons name="flame" size={19} color="#FF9500" />
+                     {editingCalories ? (
+                        <TextInput
+                           autoFocus
+                           value={recipeCalories}
+                           onChangeText={(text) => setRecipeCalories(text.replace(/[^0-9.]/g, ""))}
+                           onBlur={() => { setRecipeCalories(normalizeCaloriesInput(recipeCalories)); setEditingCalories(false); }}
+                           onSubmitEditing={() => { setRecipeCalories(normalizeCaloriesInput(recipeCalories)); setEditingCalories(false); }}
+                           keyboardType="numeric"
+                           returnKeyType="done"
+                           className="font-bold ml-2 text-base text-gray-900"
+                           style={{ minWidth: 56, padding: 0 }}
+                           placeholder="0"
+                           placeholderTextColor="#9CA3AF"
+                        />
+                     ) : (
+                        <Text className="font-bold ml-2 text-base text-gray-900">{recipeCalories} kcal</Text>
+                     )}
+                     <TouchableOpacity onPress={() => setEditingCalories(true)} className="ml-2 w-6 h-6 rounded-full bg-blue-50 items-center justify-center">
+                        <Ionicons name="create-outline" size={13} color="#007BFF" />
+                     </TouchableOpacity>
+                  </View>
 
-         {/* SOURCE LABEL */}
-         {sourceLabel && (
-            <View className="flex-row mb-2">
-               <View className="bg-gray-100 rounded-full px-2.5 py-1">
-                  <Text className="text-gray-500 text-xs">{sourceLabel}</Text>
+                  {/* SERVING PILL — free text, e.g. "10 servings" or "Whole recipe" */}
+                  <View className="flex-row items-center self-start bg-white border border-gray-200 px-4 py-2 rounded-full shadow-sm">
+                     <Ionicons name="restaurant-outline" size={17} color="#6B7280" />
+                     {editingServing ? (
+                        <TextInput
+                           autoFocus
+                           value={servingText}
+                           onChangeText={setServingText}
+                           onBlur={() => setEditingServing(false)}
+                           onSubmitEditing={() => setEditingServing(false)}
+                           returnKeyType="done"
+                           className="font-bold ml-2 text-sm text-gray-900"
+                           style={{ minWidth: 90, padding: 0 }}
+                           placeholder="Servings…"
+                           placeholderTextColor="#9CA3AF"
+                        />
+                     ) : (
+                        <Text className={`font-bold ml-2 text-sm ${servingText ? 'text-gray-900' : 'text-gray-400'}`}>
+                           {servingText || 'Servings…'}
+                        </Text>
+                     )}
+                     <TouchableOpacity onPress={() => setEditingServing(true)} className="ml-2 w-6 h-6 rounded-full bg-blue-50 items-center justify-center">
+                        <Ionicons name="create-outline" size={13} color="#007BFF" />
+                     </TouchableOpacity>
+                  </View>
                </View>
             </View>
-         )}
 
-         {/* TITLE INPUT */}
-         <TextInput
-            value={recipeTitle}
-            onChangeText={setRecipeTitle}
-            className="text-2xl font-bold text-gray-900 mb-2 leading-tight border-b border-gray-200 pb-2"
-            multiline
-            placeholder="Name your recipe..."
-            placeholderTextColor="#9CA3AF"
-         />
-
-         <View className="flex-row items-center mb-6 h-8">
-            <Ionicons name="flame" size={16} color="#FF9500" />
-            <TextInput
-              ref={caloriesInputRef}
-              value={recipeCalories}
-              onChangeText={(text) => setRecipeCalories(text.replace(/[^0-9.]/g, ""))}
-              onBlur={() => setRecipeCalories(normalizeCaloriesInput(recipeCalories))}
-              keyboardType="numeric"
-              className="ml-2 text-base font-bold text-gray-700 border-b border-gray-200 px-1"
-              style={{ minWidth: 44, height: 28, paddingTop: 0, paddingBottom: 0, lineHeight: 20, textAlignVertical: 'center' }}
-              placeholder="0"
-              placeholderTextColor="#9CA3AF"
-            />
-            <Text className="text-base font-bold text-gray-500 ml-1 leading-5">kcal</Text>
-            <TouchableOpacity
-              onPress={() => caloriesInputRef.current?.focus()}
-              className="ml-2 w-7 h-7 rounded-full bg-blue-50 items-center justify-center"
-            >
-              <Ionicons name="create-outline" size={15} color="#007BFF" />
-            </TouchableOpacity>
+            {/* COMPACT IMAGE (matches comboDetail 138x172) */}
+            <View className="rounded-3xl overflow-hidden items-center justify-center" style={{ width: 138, height: 172 }}>
+               {(heroImage && !heroFailed) ? (
+                  <View style={{ width: 138, height: 172 }}>
+                     <Image
+                        source={{ uri: heroImage }}
+                        className="w-full h-full"
+                        resizeMode="cover"
+                        onError={() => setHeroFailed(true)}
+                     />
+                     {isCustomRecipe ? (
+                        <TouchableOpacity
+                           onPress={handleChangePhoto}
+                           disabled={uploadingImage}
+                           className="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-black/60 items-center justify-center"
+                        >
+                           {uploadingImage ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                           ) : (
+                              <Ionicons name="camera" size={16} color="#fff" />
+                           )}
+                        </TouchableOpacity>
+                     ) : null}
+                  </View>
+               ) : isCustomRecipe ? (
+                  <TouchableOpacity
+                     onPress={handleChangePhoto}
+                     disabled={uploadingImage}
+                     className="items-center justify-center bg-gray-50 border border-dashed border-gray-300 rounded-3xl"
+                     style={{ width: 138, height: 172 }}
+                  >
+                     {uploadingImage ? (
+                        <ActivityIndicator size="small" color="#007BFF" />
+                     ) : (
+                        <>
+                           <Ionicons name="camera-outline" size={24} color="#9CA3AF" />
+                           <Text className="text-gray-400 font-semibold text-xs mt-1.5 text-center px-2">Add a photo</Text>
+                        </>
+                     )}
+                  </TouchableOpacity>
+               ) : (
+                  <View className="items-center justify-center bg-gray-100 w-full h-full">
+                     <Ionicons name="restaurant-outline" size={28} color="#9CA3AF" />
+                  </View>
+               )}
+            </View>
          </View>
 
-         {/* TheMealDB nutrition is computed from ingredients — be honest it's an estimate. */}
-         {isThemealdb && (
-            mealdbNutrition ? (
-               <View className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 -mt-4 mb-6">
-                  <Text className="text-secondary font-bold text-xs">Estimated · whole recipe</Text>
-                  <Text className="text-gray-500 text-xs mt-0.5">
-                     ≈ P {Math.round(mealdbNutrition.protein ?? 0)}g · C {Math.round(mealdbNutrition.carbs ?? 0)}g · F {Math.round(mealdbNutrition.fats ?? 0)}g, calculated from ingredients (USDA).{mealdbNutrition.lowConfidence ? ' Rough estimate.' : ''}
-                  </Text>
-                  <Text className="text-gray-400 text-xs mt-0.5">
-                     Edit the calories above before logging a single portion.
-                  </Text>
-               </View>
-            ) : (
-               <View className="flex-row items-center -mt-4 mb-6">
-                  <Ionicons name="information-circle-outline" size={14} color="#9CA3AF" />
-                  <Text className="text-gray-400 text-xs ml-1">
-                     Nutrition estimate coming soon — edit the calories to log it now.
-                  </Text>
-               </View>
-            )
-         )}
-
-         {/* FatSecret recipes: same box layout, but accurate source data (not our estimate). */}
-         {sourceLabel === "Recipe via FatSecret" && baseRecipeInfo && (
-            <View className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 -mt-4 mb-6">
-               <Text className="text-primary font-bold text-xs">Nutrition via FatSecret · per serving</Text>
-               <Text className="text-gray-500 text-xs mt-0.5">
-                  P {Math.round(Number(baseRecipeInfo.protein) || 0)}g · C {Math.round(Number(baseRecipeInfo.carbs) || 0)}g · F {Math.round(Number(baseRecipeInfo.fats) || 0)}g
-                  {baseRecipeInfo.servings > 1 ? ` · makes ${baseRecipeInfo.servings} servings` : ''}
+         {/* NUTRITION SOURCE NOTE — honest about where the numbers come from */}
+         {isThemealdb ? (
+            <View className="flex-row items-start mb-4">
+               <Ionicons name="information-circle-outline" size={14} color="#9CA3AF" style={{ marginTop: 2 }} />
+               <Text className="text-gray-400 text-xs ml-1.5 flex-1 leading-5">
+                  {mealdbNutrition
+                     ? `Estimated from ingredients (USDA)${mealdbNutrition.lowConfidence ? ' · rough estimate' : ''} - edit values before logging a portion.`
+                     : 'Nutrition estimate coming soon — edit the values to log it now.'}
                </Text>
             </View>
+         ) : sourceLabel === "Recipe via FatSecret" ? (
+            <View className="flex-row items-start mb-4">
+               <Ionicons name="information-circle-outline" size={14} color="#9CA3AF" style={{ marginTop: 2 }} />
+               <Text className="text-gray-400 text-xs ml-1.5 flex-1 leading-5">Nutrition via FatSecret · per serving.</Text>
+            </View>
+         ) : null}
+
+         {/* NUTRITION CARD (editable Fat / Protein / Carbs) */}
+         {isCustomRecipe && (
+            <View className="flex-row justify-between items-center mb-2.5">
+               <Text className="text-lg font-bold text-gray-900">Nutrition</Text>
+               <Text className="text-xs text-gray-400">optional · per whole recipe</Text>
+            </View>
          )}
+         <View className="bg-white border border-gray-200 rounded-2xl p-4 flex-row justify-around shadow-sm mb-6">
+            {renderMacroCell('Fat', recipeFats, setRecipeFats, () => setRecipeFats(normalizeMacroInput(recipeFats)), editingFat, setEditingFat, false)}
+            {renderMacroCell('Protein', recipeProtein, setRecipeProtein, () => setRecipeProtein(normalizeMacroInput(recipeProtein)), editingProtein, setEditingProtein, true)}
+            {renderMacroCell('Carbs', recipeCarbs, setRecipeCarbs, () => setRecipeCarbs(normalizeMacroInput(recipeCarbs)), editingCarbs, setEditingCarbs, true)}
+         </View>
 
          {/* INGREDIENTS SECTION */}
          <View className="flex-row justify-between items-center mb-4">
