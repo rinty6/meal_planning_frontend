@@ -9,7 +9,8 @@ import IngredientIcon from "../../../components/IngredientIcon";
 import CustomAlert from "../../../components/customAlert";
 import SuccessModal from "../../../components/sucessmodal";
 import FoodFactsCard from "../../../components/FoodFactsCard";
-import { buildNutritionFactsFromFood, fetchFoodDetailForFacts } from "../../../services/mealAPI";
+import { buildNutritionFactsFromFood, fetchFoodDetailForFacts, getRecipeDetails } from "../../../services/mealAPI";
+import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
 import { peekCachedRecommendations } from "../../../services/recommendation";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
 import { authedFetch } from "../../../services/authedFetch";
@@ -115,6 +116,18 @@ const getDishIdentity = (dish: any) =>
     .trim()
     .toLowerCase();
 
+// Single id-resolution shared by the View Recipe button and the servings lookup.
+const deriveRecipeId = (dish: any, item: any) =>
+  cleanId(
+    dish?.recipe_id ||
+    item?.recipe_id ||
+    dish?.externalId ||
+    item?.externalId ||
+    (cleanId(dish?.id || item?.id).startsWith("recipe-")
+      ? cleanId(dish?.id || item?.id).replace(/^recipe-/, "")
+      : "")
+  );
+
 const getCachedRecommendationItems = (result?: CachedRecommendationResult | null): ComboDetailItem[] => {
   if (!result?.recommendationsByMeal) return [];
 
@@ -140,6 +153,8 @@ const FoodDetailScreen = () => {
   const [detailItemOwnerKey, setDetailItemOwnerKey] = useState("");
   const [loadingNutrition, setLoadingNutrition] = useState(false);
   const [selectedDish, setSelectedDish] = useState<ComboDetailItem | null>(null);
+  // Real serving count for recipe-like items (null until resolved; pill falls back to "1 serving").
+  const [recipeServings, setRecipeServings] = useState<number | null>(null);
   const latestNutritionRequestRef = useRef(0);
   const [alertConfig, setAlertConfig] = useState<{
     title: string;
@@ -302,6 +317,42 @@ const FoodDetailScreen = () => {
     fetchNutritionData();
   }, [selectedDish, userId, routePayloadKey, activeSelectedDishKey]);
 
+  // Resolve the real serving count for recipe-like items. The recommendation payload
+  // now carries `servings` (backend enrichment) — trust it when it's > 1. A missing
+  // value or exactly 1 is ambiguous (older payloads coerce unknown to 1), so confirm
+  // against the recipe detail — the same source the recipe page reads — ensuring the
+  // two screens always agree (see ERROR_LOG Error 060 follow-up).
+  useEffect(() => {
+    let cancelled = false;
+    setRecipeServings(null);
+    if (!activeIsRecipeLike) return;
+
+    const payloadServings = Math.round(Number(activeSelectedDish?.servings ?? item?.servings));
+    if (Number.isFinite(payloadServings) && payloadServings > 1) {
+      setRecipeServings(payloadServings);
+      return;
+    }
+
+    const recipeIdForServings = deriveRecipeId(activeSelectedDish, item);
+    if (!recipeIdForServings) return;
+
+    (async () => {
+      try {
+        const detail = await getRecipeDetails(recipeIdForServings);
+        const servings = Math.round(Number(detail?.servings));
+        if (!cancelled && Number.isFinite(servings) && servings > 0) {
+          setRecipeServings(servings);
+        }
+      } catch {
+        // Keep the 1-serving fallback.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeIsRecipeLike, activeSelectedDish, item]);
+
   const showAlert = (title: string, message: string, onConfirm = () => setAlertVisible(false), onCancel?: () => void) => {
     setAlertConfig({ title, message, onConfirm, onCancel });
     setAlertVisible(true);
@@ -401,17 +452,9 @@ const FoodDetailScreen = () => {
   const food = mergeFoodSnapshot(activeSelectedDish || item, currentDetailItem);
   const primaryImage = displayComboItems[0]?.image || food?.image || item?.image || "";
   const comboServingText = activeIsRecipeLike
-    ? "1 serving"
-    : cleanId(food?.serving_description) || "1 serving";
-  const recipeId = cleanId(
-    activeSelectedDish?.recipe_id ||
-    item?.recipe_id ||
-    activeSelectedDish?.externalId ||
-    item?.externalId ||
-    (cleanId(activeSelectedDish?.id || item?.id).startsWith("recipe-")
-      ? cleanId(activeSelectedDish?.id || item?.id).replace(/^recipe-/, "")
-      : "")
-  );
+    ? formatServingsLabel(recipeServings ?? activeSelectedDish?.servings ?? item?.servings)
+    : getFoodServingText(food);
+  const recipeId = deriveRecipeId(activeSelectedDish, item);
   const handleViewRecipe = () => {
     if (!recipeId) {
       showAlert("Recipe", "Recipe details are unavailable for this item.");

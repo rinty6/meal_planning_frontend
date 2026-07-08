@@ -46,6 +46,7 @@ import {
 } from "../../../services/mealsSummaryStore";
 import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { authedFetch } from "../../../services/authedFetch";
+import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
 
 const ALLERGEN_OPTIONS = [
   "Egg",
@@ -182,10 +183,9 @@ const DishCard = ({
     !!String(item?.recipe_id || "").trim() ||
     String(item?.id || "").trim().toLowerCase().startsWith("recipe-");
   const sourceLabel = item?.source === "fatsecret_recipe" ? "Recipe" : item?.food_type || "Food";
-  const servingCount = Math.max(1, Math.round(toNumber(item?.servings)));
   const servingText = isRecipeItem
-    ? `${servingCount} serving${servingCount > 1 ? "s" : ""}`
-    : `${Math.round(toNumber(item?.grams || item?.metric_serving_amount || 100))} g`;
+    ? formatServingsLabel(item?.servings)
+    : getFoodServingText(item);
 
   const fatGrams = toNumber(item?.fats);
   const proteinGrams = toNumber(item?.protein);

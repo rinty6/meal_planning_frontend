@@ -15,6 +15,7 @@ import { resolveIngredientImage } from '../../../services/ingredientImages';
 import SuccessModal from '../../../components/sucessmodal'; 
 import { markMealsSummaryDirty } from '../../../services/mealsSummaryStore';
 import { cleanShoppingItemName, markShoppingListsDirty } from '../../../services/shoppingStore';
+import { formatServingsLabel } from '../../../services/servingLabel';
 
 const formatLocalYYYYMMDD = (date: Date) => {
   const year = date.getFullYear();
@@ -51,12 +52,6 @@ const parseServingsCount = (text: string) => {
   const match = String(text || "").match(/\d+(?:\.\d+)?/);
   const n = match ? Math.round(Number(match[0])) : 0;
   return n > 0 ? n : 1;
-};
-
-const formatServingsLabel = (count: any) => {
-  const n = Math.round(Number(count));
-  const safe = Number.isFinite(n) && n > 0 ? n : 1;
-  return `${safe} ${safe === 1 ? "serving" : "servings"}`;
 };
 
 const RecipeDetailScreen = () => {
