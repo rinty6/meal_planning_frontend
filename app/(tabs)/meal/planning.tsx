@@ -958,6 +958,8 @@ const PlanningScreen = () => {
 
   const handleAddManualFood = async (foodItem: any) => {
     if (!userId || !configuredApiURL) return;
+    if (addRequestInFlightRef.current) return; // ignore re-taps / other add actions mid-save
+    addRequestInFlightRef.current = true;
     try {
       const date = formatLocalYYYYMMDD(selectedDate);
       const response = await authedFetch(`/api/meals/add`, {
@@ -991,6 +993,8 @@ const PlanningScreen = () => {
       showMealLogOutcome(payload);
     } catch {
       showCustomAlert("Error", "Network error while adding custom food.");
+    } finally {
+      addRequestInFlightRef.current = false;
     }
   };
 

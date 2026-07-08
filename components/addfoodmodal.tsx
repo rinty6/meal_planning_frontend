@@ -40,7 +40,7 @@ interface AddFoodModalProps {
   visible: boolean;
   onClose: () => void;
   mealType: string;
-  onAddFood: (foodItem: any) => void;
+  onAddFood: (foodItem: any) => void | Promise<any>;
 }
 
 const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalProps) => {
@@ -71,6 +71,9 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   const [manualCarbs, setManualCarbs] = useState('');
   const [manualFat, setManualFat] = useState('');
   const [manualImage, setManualImage] = useState<string | null>(null);
+  // Locks the manual save flow: shows a spinner and blocks close/back/re-tap until
+  // the parent's save + result message have completed (prevents double-add / races).
+  const [savingManual, setSavingManual] = useState(false);
 
   // --- BARCODE ---
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -326,22 +329,31 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
       setManualImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
   };
 
-  const handleSaveManual = () => {
+  const handleSaveManual = async () => {
+    if (savingManual) return;
     if (!manualName || !manualCalories) {
       showCustomAlert('Missing Fields', 'Please enter at least a Food Name and Calories.');
       return;
     }
-    onAddFood({
-      title: manualName,
-      calories: parseFloat(manualCalories) || 0,
-      protein: parseFloat(manualProtein) || 0,
-      carbs: parseFloat(manualCarbs) || 0,
-      fats: parseFloat(manualFat) || 0,
-      image: manualImage || '',
-      food_name: manualName,
-      type: 'manual',
-    });
-    resetManualForm();
+    setSavingManual(true);
+    try {
+      // Wait for the parent to finish the whole save (network + result message).
+      // On success the parent closes this modal, which unmounts and clears the form;
+      // on failure it surfaces an error and leaves the modal open so the entered
+      // details are preserved for another attempt.
+      await onAddFood({
+        title: manualName,
+        calories: parseFloat(manualCalories) || 0,
+        protein: parseFloat(manualProtein) || 0,
+        carbs: parseFloat(manualCarbs) || 0,
+        fats: parseFloat(manualFat) || 0,
+        image: manualImage || '',
+        food_name: manualName,
+        type: 'manual',
+      });
+    } finally {
+      setSavingManual(false);
+    }
   };
 
   const resetManualForm = () => {
@@ -391,6 +403,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   const handleClose = () => {
+    if (savingManual) return; // don't let the user dismiss mid-save
     resetManualForm();
     resetSearchState();
     clearRecognitionState();
@@ -398,6 +411,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   const handleBackPress = () => {
+    if (savingManual) return; // don't leave the form while a save is in flight
     if (viewMode === 'recognition') {
       clearRecognitionState();
       setViewMode('search');
@@ -424,15 +438,15 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
             {/* HEADER */}
             <View className="px-5 pt-5 pb-2 flex-row justify-between items-center border-b border-gray-100">
               {(viewMode === 'manual' || viewMode === 'recognition') ? (
-                <TouchableOpacity onPress={handleBackPress} className="p-2">
-                  <Ionicons name="arrow-back" size={24} color="black" />
+                <TouchableOpacity onPress={handleBackPress} disabled={savingManual} className="p-2">
+                  <Ionicons name="arrow-back" size={24} color={savingManual ? '#D1D5DB' : 'black'} />
                 </TouchableOpacity>
               ) : (
                 <View className="w-8" />
               )}
               <Text className="text-xl font-bold text-black capitalize">{headerTitle}</Text>
-              <TouchableOpacity onPress={handleClose} className="bg-gray-100 p-2 rounded-full">
-                <Ionicons name="close" size={20} color="black" />
+              <TouchableOpacity onPress={handleClose} disabled={savingManual} className="bg-gray-100 p-2 rounded-full">
+                <Ionicons name="close" size={20} color={savingManual ? '#D1D5DB' : 'black'} />
               </TouchableOpacity>
             </View>
 
@@ -587,9 +601,14 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   </View>
                   <TouchableOpacity
                     onPress={handleSaveManual}
-                    className="bg-primary w-full py-4 rounded-xl items-center mt-4"
+                    disabled={savingManual}
+                    className={`w-full py-4 rounded-xl items-center mt-4 flex-row justify-center ${savingManual ? 'bg-blue-300' : 'bg-primary'}`}
                   >
-                    <Text className="text-white font-bold text-lg">Save Food</Text>
+                    {savingManual ? (
+                      <ActivityIndicator color="white" />
+                    ) : (
+                      <Text className="text-white font-bold text-lg">Save Food</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               </ScrollView>
