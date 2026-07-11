@@ -29,6 +29,19 @@ const QUALIFIER_WORDS = new Set([
   'unsalted', 'salted', 'lowfat', 'nonfat', 'reduced', 'fat', 'free', 'low',
   'range', 'lean', 'cooked', 'dried', 'canned', 'roasted', 'toasted', 'baby',
   'ripe', 'unripe', 'plain', 'natural', 'light', 'dark', 'mini', 'jumbo',
+  'original', 'dry', 'hulled', 'shelled', 'pitted', 'drained', 'rinsed',
+  'crushed', 'halves',
+]);
+
+// FatSecret sometimes includes a measure in the ingredient name itself
+// ("2 tbsps chia seeds", "1 scoop whey protein powder"). These tokens are
+// recipe metadata, not part of the ingredient identity.
+const MEASUREMENT_WORDS = new Set([
+  'tbsp', 'tbsps', 'tablespoon', 'tablespoons', 'tsp', 'tsps', 'teaspoon',
+  'teaspoons', 'cup', 'cups', 'scoop', 'scoops', 'drop', 'drops', 'packet',
+  'packets', 'ounce', 'ounces', 'oz', 'gram', 'grams', 'kg', 'kilogram',
+  'kilograms', 'ml', 'milliliter', 'milliliters', 'lb', 'lbs', 'pound',
+  'pounds', 'second', 'seconds',
 ]);
 
 // Words that change an ingredient's IDENTITY (a processed/derived product), so
@@ -40,7 +53,7 @@ const QUALIFIER_WORDS = new Set([
 const FORM_WORDS = new Set([
   'powder', 'sauce', 'juice', 'paste', 'puree', 'extract', 'vinegar', 'stock',
   'broth', 'syrup', 'ketchup', 'concentrate', 'granules', 'seasoning', 'oil',
-  'dressing', 'gravy', 'marinade', 'glaze',
+  'dressing', 'gravy', 'marinade', 'glaze', 'spray',
 ]);
 
 const normalize = (raw: string): { full: string; tokens: string[]; rawFull: string } => {
@@ -52,11 +65,12 @@ const normalize = (raw: string): { full: string; tokens: string[]; rawFull: stri
     .trim();
 
   const rawTokens = cleaned.split(' ').filter((t) => t.length > 1);
-  const tokens = rawTokens.filter((t) => !QUALIFIER_WORDS.has(t));
+  const identityTokens = rawTokens.filter((t) => !MEASUREMENT_WORDS.has(t));
+  const tokens = identityTokens.filter((t) => !QUALIFIER_WORDS.has(t));
 
   // rawFull keeps qualifier words (so keys like "ground mustard", "dried dill",
   // "lamb fat" can match); full/tokens drop them (so "fresh spinach" -> spinach).
-  return { full: tokens.join(' '), tokens, rawFull: rawTokens.join(' ') };
+  return { full: tokens.join(' '), tokens, rawFull: identityTokens.join(' ') };
 };
 
 // Singular/plural variants of a word for forgiving matching. Keys are stored in
@@ -70,6 +84,15 @@ const wordForms = (t: string): string[] => {
   forms.add(t + 's');                                      // oat -> oats
   forms.add(t + 'es');
   return [...forms];
+};
+
+// Multi-word keys need the same forgiveness on their final noun:
+// "chia seed" -> "chia seeds", "hemp seeds" -> "hemp seed".
+const phraseForms = (value: string): string[] => {
+  const parts = value.split(' ').filter(Boolean);
+  if (parts.length < 2) return [value];
+  const last = parts.pop() as string;
+  return wordForms(last).map((form) => [...parts, form].join(' '));
 };
 
 // Base URL for hosted ingredient images. An explicit baseUrl in the JSON wins;
@@ -115,6 +138,12 @@ export const resolveIngredientImage = (name: string): string | null => {
 
   // 2. Alias match (full string), e.g. "almond milk" -> "milk".
   if (aliases[full] && images[aliases[full]]) return buildUrl(images[aliases[full]]);
+
+  // 2b. Exact multi-word singular/plural variant.
+  for (const form of phraseForms(full)) {
+    if (images[form]) return buildUrl(images[form]);
+    if (aliases[form] && images[aliases[form]]) return buildUrl(images[aliases[form]]);
+  }
 
   // 3. Multi-word canonical/alias keys contained in the full string,
   //    e.g. "extra virgin olive oil" -> "olive oil".

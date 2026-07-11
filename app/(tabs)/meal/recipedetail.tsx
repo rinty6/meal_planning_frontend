@@ -167,12 +167,22 @@ const RecipeDetailScreen = () => {
             const hasComputed = !!n && n.status === "computed" && typeof n.calories === "number";
             setMealdbNutrition(hasComputed ? n : null);
             setRecipeTitle(data.title);
-            setRecipeCalories(hasComputed ? normalizeCaloriesInput(n.calories) : "0");
-            // TheMealDB macros are a whole-recipe estimate (USDA), not per serving.
-            setRecipeProtein(hasComputed ? normalizeMacroInput(n.protein) : "0");
-            setRecipeCarbs(hasComputed ? normalizeMacroInput(n.carbs) : "0");
-            setRecipeFats(hasComputed ? normalizeMacroInput(n.fats) : "0");
-            setServingText("Whole recipe");
+            // TheMealDB nutrition is a WHOLE-RECIPE estimate. When the backend could also
+            // estimate a servings count (>1), divide down to PER-SERVING here so this page
+            // renders identically to a FatSecret recipe (totals on top, per-serving editable
+            // macros, "N kcal per serving × servings" formula) — per-serving is the single
+            // canonical basis across both sources. Falls back to whole-recipe (est = 1) when
+            // no servings estimate is available (e.g. backend not yet deployed). See
+            // ERROR_LOG Error 061 Phase 1 + consistency follow-up.
+            const estServings = hasComputed && n.servingsEstimated && Number(n.servings) > 1
+              ? Number(n.servings) : 1;
+            setRecipeCalories(hasComputed ? normalizeCaloriesInput(Number(n.calories) / estServings) : "0");
+            setRecipeProtein(hasComputed ? normalizeMacroInput(Number(n.protein) / estServings) : "0");
+            setRecipeCarbs(hasComputed ? normalizeMacroInput(Number(n.carbs) / estServings) : "0");
+            setRecipeFats(hasComputed ? normalizeMacroInput(Number(n.fats) / estServings) : "0");
+            // "~N servings" (estimate marker) when we scaled; else "Whole recipe". Editable
+            // either way so the user can correct a wrong guess in one tap.
+            setServingText(estServings > 1 ? `~${formatServingsLabel(estServings)}` : "Whole recipe");
             setIngredients(
               (data.ingredients || []).map((ing) => ({
                 name: ing.name,
@@ -210,11 +220,17 @@ const RecipeDetailScreen = () => {
         const data = await res.json();
 
         if (data) {
+            // Saved recipes are stored as WHOLE-RECIPE totals + a servings count. Divide
+            // down to PER-SERVING on load so a reopened saved recipe renders with the same
+            // per-serving scaling as the live FatSecret/MealDB views (totals on top,
+            // editable per-serving sublines, formula) instead of a flat whole-recipe card.
+            // saveMultiplier re-multiplies back to whole on Update. See ERROR_LOG Error 061.
+            const savedServings = Number(data.servings) > 1 ? Number(data.servings) : 1;
             setRecipeTitle(data.title);
-            setRecipeCalories(normalizeCaloriesInput(data.calories));
-            setRecipeProtein(normalizeMacroInput(data.protein));
-            setRecipeCarbs(normalizeMacroInput(data.carbs));
-            setRecipeFats(normalizeMacroInput(data.fats));
+            setRecipeCalories(normalizeCaloriesInput(Number(data.calories) / savedServings));
+            setRecipeProtein(normalizeMacroInput(Number(data.protein) / savedServings));
+            setRecipeCarbs(normalizeMacroInput(Number(data.carbs) / savedServings));
+            setRecipeFats(normalizeMacroInput(Number(data.fats) / savedServings));
             setServingText(data.servings ? formatServingsLabel(data.servings) : "");
             setIngredients(data.ingredients);
             setInstructions(data.instructions);
@@ -334,10 +350,12 @@ const RecipeDetailScreen = () => {
                 clerkId: userId,
                 body: JSON.stringify({
                     title: recipeTitle,
-                    calories: caloriesFromInput(recipeCalories),
-                    protein: macroFromInput(recipeProtein),
-                    carbs: macroFromInput(recipeCarbs),
-                    fats: macroFromInput(recipeFats),
+                    // Store whole-recipe totals (see saveMultiplier) so the saved copy is
+                    // whole-basis like a custom recipe and its meal-log math stays correct.
+                    calories: caloriesFromInput(recipeCalories) * saveMultiplier,
+                    protein: macroFromInput(recipeProtein) * saveMultiplier,
+                    carbs: macroFromInput(recipeCarbs) * saveMultiplier,
+                    fats: macroFromInput(recipeFats) * saveMultiplier,
                     servings: parseServingsCount(servingText),
                     ingredients: ingredients,
                     instructions: instructions,
@@ -361,12 +379,13 @@ const RecipeDetailScreen = () => {
                 prepTime: baseRecipeInfo?.prepTime || 0,
                 cookTime: baseRecipeInfo?.cookTime || 0,
                 servings: parseServingsCount(servingText),
-                calories: caloriesFromInput(recipeCalories),
-                protein: macroFromInput(recipeProtein),
-                carbs: macroFromInput(recipeCarbs),
-                fats: macroFromInput(recipeFats),
-                ingredients: ingredients, 
-                instructions: instructions 
+                // Store whole-recipe totals (see saveMultiplier) — uniform whole basis.
+                calories: caloriesFromInput(recipeCalories) * saveMultiplier,
+                protein: macroFromInput(recipeProtein) * saveMultiplier,
+                carbs: macroFromInput(recipeCarbs) * saveMultiplier,
+                fats: macroFromInput(recipeFats) * saveMultiplier,
+                ingredients: ingredients,
+                instructions: instructions
             };
 
             const res = await authedFetch(`/api/favorites/save-custom`, {
@@ -459,13 +478,16 @@ const RecipeDetailScreen = () => {
           date,
           mealType,
           foodName: recipeName,
-          // Each stored value is one serving of what this screen logs as a unit
-          // (FatSecret = one serving; MealDB/custom = the shown recipe), scaled by the
-          // servings quantity the user picked.
-          calories: caloriesFromInput(recipeCalories) * logServings,
-          protein: macroFromInput(recipeProtein) * logServings,
-          carbs: macroFromInput(recipeCarbs) * logServings,
-          fats: macroFromInput(recipeFats) * logServings,
+          // recipeCalories/macros are per-serving for FatSecret, but a WHOLE-RECIPE
+          // total for TheMealDB/custom. Divide by the recipe's servings count first
+          // so "log 1" always means one true serving — not the entire dish — then
+          // scale by how many the user picked. TheMealDB uses its estimated servings
+          // (ERROR_LOG Error 061 follow-up); custom uses whatever the user typed in
+          // the servings pill; falls back to 1 (whole dish) when no count is known.
+          calories: (caloriesFromInput(recipeCalories) / logUnitDivisor) * logServings,
+          protein: (macroFromInput(recipeProtein) / logUnitDivisor) * logServings,
+          carbs: (macroFromInput(recipeCarbs) / logUnitDivisor) * logServings,
+          fats: (macroFromInput(recipeFats) / logUnitDivisor) * logServings,
           servings: logServings,
           servingDescription: `${logServings} serving${logServings === 1 ? "" : "s"}`,
           image: baseRecipeInfo?.image || (previewImage as string) || "",
@@ -522,12 +544,28 @@ const RecipeDetailScreen = () => {
     isCreating === "true" ||
     String(baseRecipeInfo?.externalId || "").startsWith("custom-");
 
-  // Only FatSecret recipes store PER-SERVING numbers, so only they are scaled up to
-  // whole-recipe totals for the headline. TheMealDB (whole-recipe estimate) and custom
-  // recipes already store totals, so their stored values are shown as-is.
   const isFatSecretRecipe = sourceLabel === "Recipe via FatSecret";
   const recipeServingsNum = getServingsCount(servingText);
-  const scaleFatSecret = isFatSecretRecipe && recipeServingsNum > 1;
+
+  // PER-SERVING basis: recipeCalories/macros in state are for ONE serving. True for
+  // live FatSecret + (servings-estimated) TheMealDB (normalized on load) AND reopened
+  // saved recipes (loadSavedRecipe divides the stored whole-recipe total by servings),
+  // so all of them render + log identically. The only whole-recipe-basis case left is
+  // custom CREATE, where the user types whole-recipe nutrition into the "per whole
+  // recipe" card. See ERROR_LOG Error 061.
+  const perServingBasis = isFatSecretRecipe || isThemealdb || !!savedRecipeId;
+
+  // Show whole-recipe totals on top with per-serving editable sublines + formula
+  // whenever the state is per-serving and the yield is > 1.
+  const scalePerServing = perServingBasis && recipeServingsNum > 1;
+
+  // Logging one serving: per-serving-basis recipes need no division (divisor 1);
+  // custom-create (whole-recipe basis) divides the total by its servings count.
+  const logUnitDivisor = perServingBasis ? 1 : (parseServingsCount(servingText) || 1);
+
+  // Saving to favorites always stores WHOLE-RECIPE totals (uniform whole basis), so
+  // multiply per-serving state back up by the yield; custom-create is already whole (x1).
+  const saveMultiplier = perServingBasis ? recipeServingsNum : 1;
 
   // Display "6.0g" like the Food detail card so read-only and editable states match.
   const formatMacroDisplay = (value: string) => `${(Number(value) || 0).toFixed(1)}g`;
@@ -651,11 +689,11 @@ const RecipeDetailScreen = () => {
                               placeholder="0"
                               placeholderTextColor="#9CA3AF"
                            />
-                           {scaleFatSecret ? <Text className="text-gray-400 ml-1 text-xs">kcal/serving</Text> : null}
+                           {scalePerServing ? <Text className="text-gray-400 ml-1 text-xs">kcal/serving</Text> : null}
                         </>
                      ) : (
                         <Text className="font-bold ml-2 text-base text-gray-900">
-                           {scaleFatSecret ? formatKcal(caloriesFromInput(recipeCalories) * recipeServingsNum) : recipeCalories} kcal
+                           {scalePerServing ? formatKcal(caloriesFromInput(recipeCalories) * recipeServingsNum) : recipeCalories} kcal
                         </Text>
                      )}
                      <TouchableOpacity onPress={() => setEditingCalories(true)} className="ml-2 w-6 h-6 rounded-full bg-blue-50 items-center justify-center">
@@ -690,7 +728,7 @@ const RecipeDetailScreen = () => {
                   </View>
 
                   {/* Anchor the two numbers so the total pill can't be misread as per-serving */}
-                  {scaleFatSecret ? (
+                  {scalePerServing ? (
                      <Text className="text-gray-400" style={{ fontSize: 11 }}>
                         {recipeCalories} kcal per serving × {recipeServingsNum}
                      </Text>
@@ -752,7 +790,7 @@ const RecipeDetailScreen = () => {
                <Ionicons name="information-circle-outline" size={14} color="#9CA3AF" style={{ marginTop: 2 }} />
                <Text className="text-gray-400 text-xs ml-1.5 flex-1 leading-5">
                   {mealdbNutrition
-                     ? `Estimated from ingredients (USDA)${mealdbNutrition.lowConfidence ? ' · rough estimate' : ''} - edit values before logging a portion.`
+                     ? `Estimated from ingredients (USDA)${mealdbNutrition.lowConfidence ? ' · rough estimate' : ''}${mealdbNutrition.servingsEstimated ? ' · servings guessed from recipe size' : ''}. ${scalePerServing ? 'Card shows whole-recipe totals; tap a value to edit per serving.' : 'Edit values before logging a portion.'}`
                      : 'Nutrition estimate coming soon — edit the values to log it now.'}
                </Text>
             </View>
@@ -760,7 +798,7 @@ const RecipeDetailScreen = () => {
             <View className="flex-row items-start mb-4">
                <Ionicons name="information-circle-outline" size={14} color="#9CA3AF" style={{ marginTop: 2 }} />
                <Text className="text-gray-400 text-xs ml-1.5 flex-1 leading-5">
-                  {scaleFatSecret
+                  {scalePerServing
                      ? 'Nutrition via FatSecret · card shows whole-recipe totals; tap a value to edit per serving.'
                      : 'Nutrition via FatSecret · per serving.'}
                </Text>
@@ -768,16 +806,19 @@ const RecipeDetailScreen = () => {
          ) : null}
 
          {/* NUTRITION CARD (editable Fat / Protein / Carbs) */}
-         {isCustomRecipe && (
+         {/* "per whole recipe" header only when the card is NOT scaled to per-serving —
+             i.e. custom CREATE (whole-recipe entry). A saved custom recipe with servings
+             > 1 shows per-serving sublines, so the whole-recipe label would contradict it. */}
+         {isCustomRecipe && !scalePerServing && (
             <View className="flex-row justify-between items-center mb-2.5">
                <Text className="text-lg font-bold text-gray-900">Nutrition</Text>
                <Text className="text-xs text-gray-400">optional · per whole recipe</Text>
             </View>
          )}
          <View className="bg-white border border-gray-200 rounded-2xl p-4 flex-row justify-around shadow-sm mb-6">
-            {renderMacroCell('Fat', recipeFats, setRecipeFats, () => setRecipeFats(normalizeMacroInput(recipeFats)), editingFat, setEditingFat, false, recipeServingsNum, scaleFatSecret)}
-            {renderMacroCell('Protein', recipeProtein, setRecipeProtein, () => setRecipeProtein(normalizeMacroInput(recipeProtein)), editingProtein, setEditingProtein, true, recipeServingsNum, scaleFatSecret)}
-            {renderMacroCell('Carbs', recipeCarbs, setRecipeCarbs, () => setRecipeCarbs(normalizeMacroInput(recipeCarbs)), editingCarbs, setEditingCarbs, true, recipeServingsNum, scaleFatSecret)}
+            {renderMacroCell('Fat', recipeFats, setRecipeFats, () => setRecipeFats(normalizeMacroInput(recipeFats)), editingFat, setEditingFat, false, recipeServingsNum, scalePerServing)}
+            {renderMacroCell('Protein', recipeProtein, setRecipeProtein, () => setRecipeProtein(normalizeMacroInput(recipeProtein)), editingProtein, setEditingProtein, true, recipeServingsNum, scalePerServing)}
+            {renderMacroCell('Carbs', recipeCarbs, setRecipeCarbs, () => setRecipeCarbs(normalizeMacroInput(recipeCarbs)), editingCarbs, setEditingCarbs, true, recipeServingsNum, scalePerServing)}
          </View>
 
          {/* INGREDIENTS SECTION */}
@@ -950,7 +991,7 @@ const RecipeDetailScreen = () => {
                   </TouchableOpacity>
                 </View>
                 <Text className="text-gray-400 text-center text-xs mb-6">
-                  = {Math.round(caloriesFromInput(recipeCalories) * logServings)} kcal
+                  = {Math.round((caloriesFromInput(recipeCalories) / logUnitDivisor) * logServings)} kcal
                 </Text>
 
                 <Text className="text-gray-400 text-center text-sm mb-4">When are you eating this?</Text>

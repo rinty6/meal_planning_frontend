@@ -35,6 +35,12 @@ export type ThemealdbRecipe = {
     basis?: string;           // 'whole_recipe'
     coverage?: number;        // 0..1 share of ingredients resolved
     lowConfidence?: boolean;
+    // Estimated whole-recipe yield (server-derived from parsed ingredient mass +
+    // TheMealDB category, clamped 1-12; TheMealDB has no real servings count).
+    // Always an estimate when present, hence servingsEstimated — the serving pill
+    // stays user-editable so a wrong guess is a one-tap fix, not a dead end.
+    servings?: number;
+    servingsEstimated?: boolean;
   };
 };
 
