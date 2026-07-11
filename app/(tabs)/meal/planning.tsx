@@ -183,9 +183,10 @@ const DishCard = ({
     !!String(item?.recipe_id || "").trim() ||
     String(item?.id || "").trim().toLowerCase().startsWith("recipe-");
   const sourceLabel = item?.source === "fatsecret_recipe" ? "Recipe" : item?.food_type || "Food";
-  const servingText = isRecipeItem
-    ? formatServingsLabel(item?.servings)
-    : getFoodServingText(item);
+  // Recipes list per-serving calories (that's what the grid filters + recommender use),
+  // so we say so explicitly and show the yield separately to avoid "116 kcal for 14 servings".
+  const recipeYieldText = isRecipeItem ? formatServingsLabel(item?.servings) : "";
+  const servingText = isRecipeItem ? "per serving" : getFoodServingText(item);
 
   const fatGrams = toNumber(item?.fats);
   const proteinGrams = toNumber(item?.protein);
@@ -215,6 +216,11 @@ const DishCard = ({
                   kcal · {servingText}
                 </Text>
               </View>
+              {isRecipeItem ? (
+                <Text className="text-gray-400" style={{ fontSize: 11, fontWeight: "600", marginTop: 2 }}>
+                  makes {recipeYieldText}
+                </Text>
+              ) : null}
             </View>
             <View
               style={{

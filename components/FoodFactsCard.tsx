@@ -5,6 +5,9 @@ import { Ionicons } from "@expo/vector-icons";
 interface FoodFactsCardProps {
   item: any;
   nutritionFacts?: any;
+  // Overrides the "Serving size · …" line (e.g. "1 of 14 servings" for a recipe,
+  // making clear these facts are per serving even when the header above shows totals).
+  servingSizeLabel?: string;
 }
 
 const formatValue = (value: any, unit: string) => {
@@ -154,11 +157,17 @@ const FactsFallback = ({ item }: { item: any }) => {
   );
 };
 
-const FoodFactsCard = ({ item, nutritionFacts }: FoodFactsCardProps) => {
+const FoodFactsCard = ({ item, nutritionFacts, servingSizeLabel }: FoodFactsCardProps) => {
   if (!item) return null;
   if (!nutritionFacts) return <FactsFallback item={item} />;
 
   const n = nutritionFacts;
+
+  // Short serving labels sit inline on the right of "Nutrition Facts"; long ones
+  // (e.g. "1 medium piece (yield after cooking, bone removed)") would run off-screen
+  // there, so they drop to their own full-width line below the title instead.
+  const servingLabelText = servingSizeLabel || n.servingDescription || "1 serving";
+  const servingIsLong = servingLabelText.length > 22;
 
   const vitaminItems = [
     { label: "Vitamin D", value: n.vitaminD?.value ?? 0, unit: n.vitaminD?.unit || "mcg", dv: n.vitaminD?.dv ?? 0 },
@@ -171,10 +180,19 @@ const FoodFactsCard = ({ item, nutritionFacts }: FoodFactsCardProps) => {
 
   return (
     <View className="mb-8">
-      <View className="flex-row items-end justify-between" style={{ marginBottom: 14 }}>
-        <Text className="font-extrabold text-deep" style={{ fontSize: 21, letterSpacing: -0.3 }}>Nutrition Facts</Text>
-        <Text style={{ fontSize: 13, color: "#9AA7BD" }}>Serving size · {n.servingDescription || "1 serving"}</Text>
-      </View>
+      {servingIsLong ? (
+        <View style={{ marginBottom: 14 }}>
+          <Text className="font-extrabold text-deep" style={{ fontSize: 21, letterSpacing: -0.3 }}>Nutrition Facts</Text>
+          <Text style={{ fontSize: 13, color: "#9AA7BD", marginTop: 3 }}>
+            Serving size · {servingLabelText}
+          </Text>
+        </View>
+      ) : (
+        <View className="flex-row items-end justify-between" style={{ marginBottom: 14 }}>
+          <Text className="font-extrabold text-deep" style={{ fontSize: 21, letterSpacing: -0.3 }}>Nutrition Facts</Text>
+          <Text style={{ fontSize: 13, color: "#9AA7BD" }}>Serving size · {servingLabelText}</Text>
+        </View>
+      )}
 
       <View
         className="bg-primarySoft rounded-2xl flex-row items-center justify-between"

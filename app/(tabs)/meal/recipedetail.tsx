@@ -16,6 +16,7 @@ import SuccessModal from '../../../components/sucessmodal';
 import { markMealsSummaryDirty } from '../../../services/mealsSummaryStore';
 import { cleanShoppingItemName, markShoppingListsDirty } from '../../../services/shoppingStore';
 import { formatServingsLabel } from '../../../services/servingLabel';
+import { getServingsCount, formatKcal } from '../../../services/recipeNutrition';
 
 const formatLocalYYYYMMDD = (date: Date) => {
   const year = date.getFullYear();
@@ -81,6 +82,8 @@ const RecipeDetailScreen = () => {
   const [editingFat, setEditingFat] = useState(false);
   const [editingProtein, setEditingProtein] = useState(false);
   const [editingCarbs, setEditingCarbs] = useState(false);
+  // How many servings the user is logging (Add-to-meal-log stepper, 0.5 increments).
+  const [logServings, setLogServings] = useState(1);
   const [ingredients, setIngredients] = useState<any[]>([]);
   const [instructions, setInstructions] = useState<any[]>([]);
   const [baseRecipeInfo, setBaseRecipeInfo] = useState<any>(null);
@@ -430,6 +433,7 @@ const RecipeDetailScreen = () => {
       Alert.alert("Error", "You must be logged in to add this recipe to your meal log.");
       return;
     }
+    setLogServings(1); // default to one serving each time the picker opens
     setShowMealSelector(true);
   };
 
@@ -455,10 +459,15 @@ const RecipeDetailScreen = () => {
           date,
           mealType,
           foodName: recipeName,
-          calories: caloriesFromInput(recipeCalories),
-          protein: macroFromInput(recipeProtein),
-          carbs: macroFromInput(recipeCarbs),
-          fats: macroFromInput(recipeFats),
+          // Each stored value is one serving of what this screen logs as a unit
+          // (FatSecret = one serving; MealDB/custom = the shown recipe), scaled by the
+          // servings quantity the user picked.
+          calories: caloriesFromInput(recipeCalories) * logServings,
+          protein: macroFromInput(recipeProtein) * logServings,
+          carbs: macroFromInput(recipeCarbs) * logServings,
+          fats: macroFromInput(recipeFats) * logServings,
+          servings: logServings,
+          servingDescription: `${logServings} serving${logServings === 1 ? "" : "s"}`,
           image: baseRecipeInfo?.image || (previewImage as string) || "",
           externalId: baseRecipeInfo?.id || savedRecipeId || id || recipeName,
           source: savedRecipeId || isCreating === "true"
@@ -513,10 +522,20 @@ const RecipeDetailScreen = () => {
     isCreating === "true" ||
     String(baseRecipeInfo?.externalId || "").startsWith("custom-");
 
+  // Only FatSecret recipes store PER-SERVING numbers, so only they are scaled up to
+  // whole-recipe totals for the headline. TheMealDB (whole-recipe estimate) and custom
+  // recipes already store totals, so their stored values are shown as-is.
+  const isFatSecretRecipe = sourceLabel === "Recipe via FatSecret";
+  const recipeServingsNum = getServingsCount(servingText);
+  const scaleFatSecret = isFatSecretRecipe && recipeServingsNum > 1;
+
   // Display "6.0g" like the Food detail card so read-only and editable states match.
   const formatMacroDisplay = (value: string) => `${(Number(value) || 0).toFixed(1)}g`;
 
-  // One tap-to-edit Fat/Protein/Carbs cell (clean Text until its pencil is tapped).
+  // One tap-to-edit Fat/Protein/Carbs cell. `value` is always the canonical PER-SERVING
+  // number the user edits. When `scale` is on (FatSecret recipe with a yield > 1) the big
+  // number shows the WHOLE-RECIPE total (read-only) and the editable per-serving value sits
+  // beneath it; otherwise the editable value is the headline (MealDB/custom store totals).
   const renderMacroCell = (
     label: string,
     value: string,
@@ -525,31 +544,48 @@ const RecipeDetailScreen = () => {
     editing: boolean,
     setEditing: (v: boolean) => void,
     withLeftBorder: boolean,
-  ) => (
-    <View className={`flex-1 items-center ${withLeftBorder ? 'border-l border-gray-100' : ''}`}>
-      <Text className="text-gray-400 mb-1">{label}</Text>
-      {editing ? (
-        <TextInput
-          autoFocus
-          value={value}
-          onChangeText={(t) => onChange(t.replace(/[^0-9.]/g, ''))}
-          onBlur={() => { normalize(); setEditing(false); }}
-          onSubmitEditing={() => { normalize(); setEditing(false); }}
-          keyboardType="numeric"
-          returnKeyType="done"
-          className="font-bold text-lg text-gray-900 text-center"
-          style={{ minWidth: 44, padding: 0 }}
-          placeholder="0"
-          placeholderTextColor="#9CA3AF"
-        />
-      ) : (
-        <TouchableOpacity onPress={() => setEditing(true)} className="flex-row items-center">
-          <Text className="font-bold text-lg text-gray-900">{formatMacroDisplay(value)}</Text>
-          <Ionicons name="create-outline" size={12} color="#007BFF" style={{ marginLeft: 4 }} />
-        </TouchableOpacity>
-      )}
-    </View>
-  );
+    servings: number,
+    scale: boolean,
+  ) => {
+    const editInput = (
+      <TextInput
+        autoFocus
+        value={value}
+        onChangeText={(t) => onChange(t.replace(/[^0-9.]/g, ''))}
+        onBlur={() => { normalize(); setEditing(false); }}
+        onSubmitEditing={() => { normalize(); setEditing(false); }}
+        keyboardType="numeric"
+        returnKeyType="done"
+        className="font-bold text-gray-900 text-center"
+        style={{ minWidth: 44, padding: 0, fontSize: scale ? 12 : 18 }}
+        placeholder="0"
+        placeholderTextColor="#9CA3AF"
+      />
+    );
+    return (
+      <View className={`flex-1 items-center ${withLeftBorder ? 'border-l border-gray-100' : ''}`}>
+        <Text className="text-gray-400 mb-1">{label}</Text>
+        {scale ? (
+          <>
+            <Text className="font-bold text-lg text-gray-900">{formatMacroDisplay(String((Number(value) || 0) * servings))}</Text>
+            {editing ? editInput : (
+              <TouchableOpacity onPress={() => setEditing(true)} className="flex-row items-center">
+                <Text className="text-gray-400" style={{ fontSize: 11 }}>{formatMacroDisplay(value)}/serving</Text>
+                <Ionicons name="create-outline" size={10} color="#007BFF" style={{ marginLeft: 3 }} />
+              </TouchableOpacity>
+            )}
+          </>
+        ) : (
+          editing ? editInput : (
+            <TouchableOpacity onPress={() => setEditing(true)} className="flex-row items-center">
+              <Text className="font-bold text-lg text-gray-900">{formatMacroDisplay(value)}</Text>
+              <Ionicons name="create-outline" size={12} color="#007BFF" style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+          )
+        )}
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
@@ -601,21 +637,26 @@ const RecipeDetailScreen = () => {
                   <View className="flex-row items-center self-start bg-white border border-gray-200 px-4 py-2 rounded-full shadow-sm">
                      <Ionicons name="flame" size={19} color="#FF9500" />
                      {editingCalories ? (
-                        <TextInput
-                           autoFocus
-                           value={recipeCalories}
-                           onChangeText={(text) => setRecipeCalories(text.replace(/[^0-9.]/g, ""))}
-                           onBlur={() => { setRecipeCalories(normalizeCaloriesInput(recipeCalories)); setEditingCalories(false); }}
-                           onSubmitEditing={() => { setRecipeCalories(normalizeCaloriesInput(recipeCalories)); setEditingCalories(false); }}
-                           keyboardType="numeric"
-                           returnKeyType="done"
-                           className="font-bold ml-2 text-base text-gray-900"
-                           style={{ minWidth: 56, padding: 0 }}
-                           placeholder="0"
-                           placeholderTextColor="#9CA3AF"
-                        />
+                        <>
+                           <TextInput
+                              autoFocus
+                              value={recipeCalories}
+                              onChangeText={(text) => setRecipeCalories(text.replace(/[^0-9.]/g, ""))}
+                              onBlur={() => { setRecipeCalories(normalizeCaloriesInput(recipeCalories)); setEditingCalories(false); }}
+                              onSubmitEditing={() => { setRecipeCalories(normalizeCaloriesInput(recipeCalories)); setEditingCalories(false); }}
+                              keyboardType="numeric"
+                              returnKeyType="done"
+                              className="font-bold ml-2 text-base text-gray-900"
+                              style={{ minWidth: 56, padding: 0 }}
+                              placeholder="0"
+                              placeholderTextColor="#9CA3AF"
+                           />
+                           {scaleFatSecret ? <Text className="text-gray-400 ml-1 text-xs">kcal/serving</Text> : null}
+                        </>
                      ) : (
-                        <Text className="font-bold ml-2 text-base text-gray-900">{recipeCalories} kcal</Text>
+                        <Text className="font-bold ml-2 text-base text-gray-900">
+                           {scaleFatSecret ? formatKcal(caloriesFromInput(recipeCalories) * recipeServingsNum) : recipeCalories} kcal
+                        </Text>
                      )}
                      <TouchableOpacity onPress={() => setEditingCalories(true)} className="ml-2 w-6 h-6 rounded-full bg-blue-50 items-center justify-center">
                         <Ionicons name="create-outline" size={13} color="#007BFF" />
@@ -647,6 +688,13 @@ const RecipeDetailScreen = () => {
                         <Ionicons name="create-outline" size={13} color="#007BFF" />
                      </TouchableOpacity>
                   </View>
+
+                  {/* Anchor the two numbers so the total pill can't be misread as per-serving */}
+                  {scaleFatSecret ? (
+                     <Text className="text-gray-400" style={{ fontSize: 11 }}>
+                        {recipeCalories} kcal per serving × {recipeServingsNum}
+                     </Text>
+                  ) : null}
                </View>
             </View>
 
@@ -711,7 +759,11 @@ const RecipeDetailScreen = () => {
          ) : sourceLabel === "Recipe via FatSecret" ? (
             <View className="flex-row items-start mb-4">
                <Ionicons name="information-circle-outline" size={14} color="#9CA3AF" style={{ marginTop: 2 }} />
-               <Text className="text-gray-400 text-xs ml-1.5 flex-1 leading-5">Nutrition via FatSecret · per serving.</Text>
+               <Text className="text-gray-400 text-xs ml-1.5 flex-1 leading-5">
+                  {scaleFatSecret
+                     ? 'Nutrition via FatSecret · card shows whole-recipe totals; tap a value to edit per serving.'
+                     : 'Nutrition via FatSecret · per serving.'}
+               </Text>
             </View>
          ) : null}
 
@@ -723,9 +775,9 @@ const RecipeDetailScreen = () => {
             </View>
          )}
          <View className="bg-white border border-gray-200 rounded-2xl p-4 flex-row justify-around shadow-sm mb-6">
-            {renderMacroCell('Fat', recipeFats, setRecipeFats, () => setRecipeFats(normalizeMacroInput(recipeFats)), editingFat, setEditingFat, false)}
-            {renderMacroCell('Protein', recipeProtein, setRecipeProtein, () => setRecipeProtein(normalizeMacroInput(recipeProtein)), editingProtein, setEditingProtein, true)}
-            {renderMacroCell('Carbs', recipeCarbs, setRecipeCarbs, () => setRecipeCarbs(normalizeMacroInput(recipeCarbs)), editingCarbs, setEditingCarbs, true)}
+            {renderMacroCell('Fat', recipeFats, setRecipeFats, () => setRecipeFats(normalizeMacroInput(recipeFats)), editingFat, setEditingFat, false, recipeServingsNum, scaleFatSecret)}
+            {renderMacroCell('Protein', recipeProtein, setRecipeProtein, () => setRecipeProtein(normalizeMacroInput(recipeProtein)), editingProtein, setEditingProtein, true, recipeServingsNum, scaleFatSecret)}
+            {renderMacroCell('Carbs', recipeCarbs, setRecipeCarbs, () => setRecipeCarbs(normalizeMacroInput(recipeCarbs)), editingCarbs, setEditingCarbs, true, recipeServingsNum, scaleFatSecret)}
          </View>
 
          {/* INGREDIENTS SECTION */}
@@ -878,8 +930,30 @@ const RecipeDetailScreen = () => {
           <View className="flex-1 bg-black/50 justify-center items-center px-4">
             <TouchableWithoutFeedback>
               <View className="bg-white w-full max-w-xs p-6 rounded-3xl items-center shadow-xl">
-                <Text className="text-xl font-bold text-gray-900 mb-2">Select Meal</Text>
-                <Text className="text-gray-400 text-center text-sm mb-6">When are you eating this?</Text>
+                <Text className="text-xl font-bold text-gray-900 mb-1">Add to meal log</Text>
+
+                {/* SERVINGS STEPPER */}
+                <Text className="text-gray-400 text-center text-sm mb-3">How many servings?</Text>
+                <View className="flex-row items-center justify-center mb-1" style={{ gap: 22 }}>
+                  <TouchableOpacity
+                    onPress={() => setLogServings((s) => Math.max(0.5, Math.round((s - 0.5) * 2) / 2))}
+                    className="w-11 h-11 rounded-full bg-gray-100 items-center justify-center"
+                  >
+                    <Ionicons name="remove" size={22} color="#111827" />
+                  </TouchableOpacity>
+                  <Text className="font-bold text-gray-900" style={{ fontSize: 22, minWidth: 46, textAlign: 'center' }}>{logServings}</Text>
+                  <TouchableOpacity
+                    onPress={() => setLogServings((s) => Math.round((s + 0.5) * 2) / 2)}
+                    className="w-11 h-11 rounded-full bg-primary items-center justify-center"
+                  >
+                    <Ionicons name="add" size={22} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+                <Text className="text-gray-400 text-center text-xs mb-6">
+                  = {Math.round(caloriesFromInput(recipeCalories) * logServings)} kcal
+                </Text>
+
+                <Text className="text-gray-400 text-center text-sm mb-4">When are you eating this?</Text>
                 <TouchableOpacity onPress={() => handleSelectMeal('breakfast')} className="w-full bg-white py-4 rounded-2xl mb-3 border border-gray-100 px-4">
                   <Text className="font-bold text-gray-700 text-base">Breakfast</Text>
                 </TouchableOpacity>

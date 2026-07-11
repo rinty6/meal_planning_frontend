@@ -204,6 +204,7 @@ const RecipeScreen = () => {
       </View>
       <Text className="font-bold text-base text-gray-900 mb-1" numberOfLines={1}>{item.title}</Text>
       <Text className="font-bold text-black">{item.calories} kcal</Text>
+      <Text className="text-gray-400 text-xs">per serving</Text>
     </TouchableOpacity>
   );
 

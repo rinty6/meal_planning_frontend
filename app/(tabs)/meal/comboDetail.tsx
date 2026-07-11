@@ -11,6 +11,7 @@ import SuccessModal from "../../../components/sucessmodal";
 import FoodFactsCard from "../../../components/FoodFactsCard";
 import { buildNutritionFactsFromFood, fetchFoodDetailForFacts, getRecipeDetails } from "../../../services/mealAPI";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
+import { getServingsCount, formatKcal, formatGrams } from "../../../services/recipeNutrition";
 import { peekCachedRecommendations } from "../../../services/recommendation";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
 import { authedFetch } from "../../../services/authedFetch";
@@ -145,6 +146,9 @@ const FoodDetailScreen = () => {
 
   const [adding, setAdding] = useState(false);
   const [showMealSelector, setShowMealSelector] = useState(false);
+  // Servings quantity for the Add-to-meal picker (0.5 increments; one unit = what a
+  // single tap logs today — one serving of this food/recipe).
+  const [logServings, setLogServings] = useState(1);
   const [showSuccess, setShowSuccess] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [nutritionFacts, setNutritionFacts] = useState<NutritionFactsState | null>(null);
@@ -368,6 +372,7 @@ const FoodDetailScreen = () => {
       showAlert("Error", "You must be logged in to save meals.");
       return;
     }
+    setLogServings(1); // default to one serving each time the picker opens
     setShowMealSelector(true);
   };
 
@@ -394,15 +399,19 @@ const FoodDetailScreen = () => {
           date: dateStr,
           mealType,
           foodName: comboItem.title || "Unknown Item",
-          calories: parseFloat(comboItem.calories) || 0,
-          protein: parseFloat(comboItem.protein) || 0,
-          carbs: parseFloat(comboItem.carbs) || 0,
-          fats: parseFloat(comboItem.fats) || 0,
+          // comboItem macros are per serving; scale by the chosen servings quantity.
+          calories: (parseFloat(comboItem.calories) || 0) * logServings,
+          protein: (parseFloat(comboItem.protein) || 0) * logServings,
+          carbs: (parseFloat(comboItem.carbs) || 0) * logServings,
+          fats: (parseFloat(comboItem.fats) || 0) * logServings,
           image: comboItem.image || "",
           externalId: cleanId(comboItem.externalId || comboItem.external_id || comboItem.recipe_id || comboItem.fatsecret_food_id || comboItem.food_id || comboItem.id),
           source: cleanId(comboItem.source) || (isRecipeLikeItem(comboItem) ? "fatsecret_recipe" : "fatsecret_food"),
           servingId: cleanId(comboItem.servingId || comboItem.serving_id),
-          servingDescription: cleanId(comboItem.servingDescription || comboItem.serving_description),
+          servings: logServings,
+          servingDescription: logServings === 1
+            ? (cleanId(comboItem.servingDescription || comboItem.serving_description) || "1 serving")
+            : `${logServings} servings`,
           nutrients: comboItem.nutrients && typeof comboItem.nutrients === "object" ? comboItem.nutrients : {},
         };
 
@@ -454,6 +463,13 @@ const FoodDetailScreen = () => {
   const comboServingText = activeIsRecipeLike
     ? formatServingsLabel(recipeServings ?? activeSelectedDish?.servings ?? item?.servings)
     : getFoodServingText(food);
+  // Recipes store PER-SERVING macros; the header shows WHOLE-RECIPE totals (= per serving
+  // x yield), while the Nutrition Facts panel below stays per serving. Foods have no yield,
+  // so servingsCount is 1 and nothing scales.
+  const recipeServingsCount = activeIsRecipeLike
+    ? getServingsCount(recipeServings ?? activeSelectedDish?.servings ?? item?.servings)
+    : 1;
+  const scaleForTotal = activeIsRecipeLike && recipeServingsCount > 1;
   const recipeId = deriveRecipeId(activeSelectedDish, item);
   const handleViewRecipe = () => {
     if (!recipeId) {
@@ -490,7 +506,10 @@ const FoodDetailScreen = () => {
             <View style={{ gap: 9 }}>
               <View className="flex-row items-center self-start bg-white border border-gray-200 px-4 py-2 rounded-full shadow-sm">
                 <Ionicons name="flame" size={19} color="#FF9500" />
-                <Text className="font-bold ml-2 text-base">{Math.round(Number(totalCalories))} kcal</Text>
+                <Text className="font-bold ml-2 text-base">{formatKcal(Number(totalCalories) * recipeServingsCount)} kcal</Text>
+                {scaleForTotal ? (
+                  <Text className="text-gray-400 ml-1 text-xs">· whole recipe</Text>
+                ) : null}
               </View>
               <View className="flex-row items-center self-start bg-white border border-gray-200 px-4 py-2 rounded-full shadow-sm">
                 <Ionicons name="restaurant-outline" size={17} color="#6B7280" />
@@ -513,15 +532,18 @@ const FoodDetailScreen = () => {
         <View className="bg-white border border-gray-200 rounded-2xl p-4 mb-6 flex-row justify-around shadow-sm">
           <View className="items-center">
             <Text className="text-gray-400 mb-1">Fat</Text>
-            <Text className="font-bold text-lg">{(Number(totalFats) || 0).toFixed(1)}g</Text>
+            <Text className="font-bold text-lg">{formatGrams(Number(totalFats) * recipeServingsCount)}</Text>
+            {scaleForTotal ? <Text className="text-gray-400" style={{ fontSize: 11 }}>{formatGrams(totalFats)}/serving</Text> : null}
           </View>
           <View className="items-center border-l border-gray-100 pl-8">
             <Text className="text-gray-400 mb-1">Protein</Text>
-            <Text className="font-bold text-lg">{(Number(totalProtein) || 0).toFixed(1)}g</Text>
+            <Text className="font-bold text-lg">{formatGrams(Number(totalProtein) * recipeServingsCount)}</Text>
+            {scaleForTotal ? <Text className="text-gray-400" style={{ fontSize: 11 }}>{formatGrams(totalProtein)}/serving</Text> : null}
           </View>
           <View className="items-center border-l border-gray-100 pl-8">
             <Text className="text-gray-400 mb-1">Carbs</Text>
-            <Text className="font-bold text-lg">{(Number(totalCarbs) || 0).toFixed(1)}g</Text>
+            <Text className="font-bold text-lg">{formatGrams(Number(totalCarbs) * recipeServingsCount)}</Text>
+            {scaleForTotal ? <Text className="text-gray-400" style={{ fontSize: 11 }}>{formatGrams(totalCarbs)}/serving</Text> : null}
           </View>
         </View>
 
@@ -531,7 +553,11 @@ const FoodDetailScreen = () => {
             <Text className="text-gray-500 mt-2">Loading nutrition facts...</Text>
           </View>
         ) : (
-          <FoodFactsCard item={food} nutritionFacts={nutritionFacts} />
+          <FoodFactsCard
+            item={food}
+            nutritionFacts={nutritionFacts}
+            servingSizeLabel={scaleForTotal ? `1 of ${recipeServingsCount} servings` : undefined}
+          />
         )}
 
         {activeIsRecipeLike && (
@@ -573,8 +599,30 @@ const FoodDetailScreen = () => {
           <View className="flex-1 bg-black/50 justify-center items-center px-4">
             <TouchableWithoutFeedback>
               <View className="bg-white w-full max-w-xs p-6 rounded-3xl items-center shadow-xl">
-                <Text className="text-xl font-bold text-gray-900 mb-2">Select Meal</Text>
-                <Text className="text-gray-400 text-center text-sm mb-6">When are you eating this?</Text>
+                <Text className="text-xl font-bold text-gray-900 mb-1">Add to meal log</Text>
+
+                {/* SERVINGS STEPPER */}
+                <Text className="text-gray-400 text-center text-sm mb-3">How many servings?</Text>
+                <View className="flex-row items-center justify-center mb-1" style={{ gap: 22 }}>
+                  <TouchableOpacity
+                    onPress={() => setLogServings((s) => Math.max(0.5, Math.round((s - 0.5) * 2) / 2))}
+                    className="w-11 h-11 rounded-full bg-gray-100 items-center justify-center"
+                  >
+                    <Ionicons name="remove" size={22} color="#111827" />
+                  </TouchableOpacity>
+                  <Text className="font-bold text-gray-900" style={{ fontSize: 22, minWidth: 46, textAlign: "center" }}>{logServings}</Text>
+                  <TouchableOpacity
+                    onPress={() => setLogServings((s) => Math.round((s + 0.5) * 2) / 2)}
+                    className="w-11 h-11 rounded-full bg-primary items-center justify-center"
+                  >
+                    <Ionicons name="add" size={22} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+                <Text className="text-gray-400 text-center text-xs mb-6">
+                  = {Math.round(Number(totalCalories) * logServings)} kcal
+                </Text>
+
+                <Text className="text-gray-400 text-center text-sm mb-4">When are you eating this?</Text>
                 <TouchableOpacity onPress={() => handleSelectMeal("breakfast")} className="w-full bg-white py-4 rounded-2xl mb-3 border border-gray-100 px-4">
                   <Text className="font-bold text-gray-700 text-base">Breakfast</Text>
                 </TouchableOpacity>

@@ -23,31 +23,21 @@ const formatLocalYYYYMMDD = (date: Date) => {
 };
 
 // ---------------------------------------------------------
-// 2. HELPER: Grouping Logic
+// 2. HELPERS
 // ---------------------------------------------------------
-const groupMeals = (meals: any[]) => {
-  const grouped: { [key: string]: any } = {};
-
-  meals.forEach((meal) => {
-    // Unique key: Name + MealType + Calories
-    const key = `${meal.foodName}-${meal.mealType}-${meal.calories}`;
-
-    if (!grouped[key]) {
-      grouped[key] = { ...meal, quantity: 1, ids: [meal.id] };
-    } else {
-      grouped[key].quantity += 1;
-      grouped[key].ids.push(meal.id);
-    }
-  });
-
-  return Object.values(grouped);
+const getServings = (item: any) => {
+  const n = Number(item?.servings);
+  return Number.isFinite(n) && n > 0 ? n : 1;
 };
+// Display a servings count without trailing ".0" (1, 1.5, 2).
+const formatServings = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+const round1 = (v: any) => Math.round((Number(v) || 0) * 10) / 10;
 
 // ---------------------------------------------------------
 // 3. HELPER: MealSection Component
 // ---------------------------------------------------------
-const MealSection = ({ title, items, colorClass, icon, onRemoveOne, onAddOne, onOpenAddModal }: any) => {
-  const totalKcal = items ? items.reduce((sum: number, item: any) => sum + (item.calories * item.quantity), 0) : 0;
+const MealSection = ({ title, items, colorClass, icon, onChangeServings, onDelete, onOpenAddModal }: any) => {
+  const totalKcal = items ? items.reduce((sum: number, item: any) => sum + (Number(item.calories) || 0), 0) : 0;
 
   return (
     <View className="mb-6">
@@ -71,29 +61,37 @@ const MealSection = ({ title, items, colorClass, icon, onRemoveOne, onAddOne, on
       {(!items || items.length === 0) ? (
         <Text className="text-gray-400 text-center italic py-4">No food logged yet.</Text>
       ) : (
-        items.map((item: any) => (
+        items.map((item: any) => {
+          const servings = getServings(item);
+          const atMin = servings <= 0.5; // next "minus" removes the item
+          return (
           <View key={item.id} className="bg-white rounded-2xl p-4 mb-3 flex-row justify-between items-center border border-gray-100 shadow-sm">
             <View className="flex-1">
               <Text className="text-gray-900 font-bold text-lg">{item.foodName}</Text>
               <Text className="text-gray-500 text-xs mt-1">
-                {Math.round(item.calories)} kcal | P: {item.protein}g . C: {item.carbs}g . F: {item.fats}g
+                {Math.round(Number(item.calories) || 0)} kcal | P: {round1(item.protein)}g . C: {round1(item.carbs)}g . F: {round1(item.fats)}g
               </Text>
+              <Text className="text-gray-400 text-xs mt-0.5">{formatServings(servings)} serving{servings === 1 ? '' : 's'}</Text>
             </View>
 
-            {/* Controls */}
+            {/* Controls — +/- adjust servings by 0.5 (rescales calories + macros) */}
             <View className="flex-row items-center bg-gray-50 rounded-lg p-1 space-x-3 ml-2">
-              <TouchableOpacity onPress={() => onRemoveOne(item.ids[item.ids.length - 1])} className="p-2 bg-white rounded-md shadow-sm">
-                {item.quantity === 1 ? <Ionicons name="trash-outline" size={18} color="#EF4444" /> : <Ionicons name="remove" size={18} color="#EF4444" />}
+              <TouchableOpacity
+                onPress={() => (atMin ? onDelete(item.id) : onChangeServings(item, -0.5))}
+                className="p-2 bg-white rounded-md shadow-sm"
+              >
+                {atMin ? <Ionicons name="trash-outline" size={18} color="#EF4444" /> : <Ionicons name="remove" size={18} color="#EF4444" />}
               </TouchableOpacity>
 
-              <Text className="font-bold text-lg text-gray-800 w-8 text-center">{item.quantity}</Text>
+              <Text className="font-bold text-lg text-gray-800 w-10 text-center">{formatServings(servings)}</Text>
 
-              <TouchableOpacity onPress={() => onAddOne(item)} className="p-2 bg-white rounded-md shadow-sm">
+              <TouchableOpacity onPress={() => onChangeServings(item, 0.5)} className="p-2 bg-white rounded-md shadow-sm">
                 <Ionicons name="add" size={18} color="#007BFF" />
               </TouchableOpacity>
             </View>
           </View>
-        ))
+          );
+        })
       )}
     </View>
   );
@@ -201,69 +199,58 @@ export default function SummaryScreen() {
     } catch (e) { console.error(e); }
   };
 
-  // --- FIX: OPTIMISTIC ADD DUPLICATE ---
-  const handleAddDuplicate = async (item: any) => {
-    // 1. Create a temp object to update UI instantly
-    const tempId = `temp-${Date.now()}`;
-    const newTempMeal = {
-        id: tempId, // Temporary ID until /api/meals/add returns the real row.
-        userId,
-        date: formatLocalYYYYMMDD(selectedDate),
-        mealType: item.mealType,
-        foodName: item.foodName,
-        calories: item.calories,
-        protein: item.protein,
-        carbs: item.carbs,
-        fats: item.fats,
-        image: item.image || ""
+  // --- HANDLER: CHANGE SERVINGS (optimistic PATCH) ---
+  // Adjusts a logged meal's servings by ±0.5, rescaling calories + macros from the
+  // per-serving value (currentTotal / currentServings). Dropping below 0.5 deletes it.
+  const handleChangeServings = async (item: any, delta: number) => {
+    const currentServings = getServings(item);
+    const newServings = Math.round((currentServings + delta) * 2) / 2;
+    if (newServings < 0.5) {
+      handleRemoveOne(item.id);
+      return;
+    }
+
+    const perCal = (Number(item.calories) || 0) / currentServings;
+    const perProtein = (Number(item.protein) || 0) / currentServings;
+    const perCarbs = (Number(item.carbs) || 0) / currentServings;
+    const perFats = (Number(item.fats) || 0) / currentServings;
+
+    const updated = {
+      ...item,
+      servings: newServings,
+      calories: perCal * newServings,
+      protein: perProtein * newServings,
+      carbs: perCarbs * newServings,
+      fats: perFats * newServings,
+      servingDescription: `${newServings} serving${newServings === 1 ? '' : 's'}`,
     };
 
-    // 2. Update Local State Immediately (No Reload!)
-    setMeals(prev => [...prev, newTempMeal]);
+    // Optimistic UI — update immediately, then persist.
+    setMeals((current) => current.map((m) => (m.id === item.id ? updated : m)));
 
-    // 3. Send to Backend in Background
+    const dateStr = formatLocalYYYYMMDD(selectedDate);
     try {
-      const payload = {
+      const idText = String(item.id);
+      if (idText.startsWith('temp-')) return; // not persisted yet; next fetch reconciles
+      const response = await authedFetch(`/api/meals/update/${encodeURIComponent(idText)}`, {
+        method: 'PUT',
+        getToken,
         clerkId: userId,
-        date: newTempMeal.date,
-        mealType: newTempMeal.mealType,
-        foodName: newTempMeal.foodName,
-        calories: newTempMeal.calories,
-        protein: newTempMeal.protein,
-        carbs: newTempMeal.carbs,
-        fats: newTempMeal.fats,
-        image: newTempMeal.image
-      };
-      // We don't need to await the fetch for the UI to update, 
-      // but waiting ensures data consistency if user leaves page.
-      const response = await authedFetch(`/api/meals/add`, {
-          method: 'POST',
-          getToken,
-          clerkId: userId,
-          body: JSON.stringify(payload)
+        body: JSON.stringify({
+          servings: updated.servings,
+          calories: updated.calories,
+          protein: updated.protein,
+          carbs: updated.carbs,
+          fats: updated.fats,
+          servingDescription: updated.servingDescription,
+        }),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error || "Could not add item.");
-
-      const createdMeal = data?.meal;
-      if (createdMeal?.id) {
-        if (removedTempIdsRef.current.has(tempId)) {
-          removedTempIdsRef.current.delete(tempId);
-          await authedFetch(`/api/meals/delete/${encodeURIComponent(String(createdMeal.id))}`, { method: 'DELETE', getToken, clerkId: userId });
-        } else {
-          setMeals((current) => current.map((meal) => meal.id === tempId ? createdMeal : meal));
-        }
-      } else {
-        fetchMeals();
-      }
-      markMealsSummaryDirty(userId, newTempMeal.date);
-
-    } catch (e) { 
-        console.error(e);
-        removedTempIdsRef.current.delete(tempId);
-        Alert.alert("Error", "Could not update item.");
-        // Optional: Revert local state if error occurs
-        fetchMeals(); 
+      if (!response.ok) throw new Error('Failed to update servings');
+      markMealsSummaryDirty(userId, dateStr);
+    } catch (e) {
+      console.error(e);
+      Alert.alert("Error", "Could not update servings.");
+      fetchMeals(); // revert to source of truth
     }
   };
 
@@ -302,10 +289,10 @@ export default function SummaryScreen() {
     setIsAddModalVisible(true);
   };
 
-  // --- FILTERING ---
-  const breakfastItems = groupMeals(meals.filter(m => m.mealType === 'breakfast'));
-  const lunchItems = groupMeals(meals.filter(m => m.mealType === 'lunch'));
-  const dinnerItems = groupMeals(meals.filter(m => m.mealType === 'dinner'));
+  // --- FILTERING (each row is its own line; servings live on the row) ---
+  const breakfastItems = meals.filter(m => m.mealType === 'breakfast');
+  const lunchItems = meals.filter(m => m.mealType === 'lunch');
+  const dinnerItems = meals.filter(m => m.mealType === 'dinner');
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
@@ -372,13 +359,13 @@ export default function SummaryScreen() {
         ) : (
           <>
             <MealSection title="Breakfast" items={breakfastItems} colorClass="bg-primary" icon="partly-sunny"
-              onRemoveOne={handleRemoveOne} onAddOne={handleAddDuplicate} onOpenAddModal={() => handleOpenAddModal('breakfast')} />
+              onChangeServings={handleChangeServings} onDelete={handleRemoveOne} onOpenAddModal={() => handleOpenAddModal('breakfast')} />
 
             <MealSection title="Lunch" items={lunchItems} colorClass="bg-secondary" icon="sunny"
-              onRemoveOne={handleRemoveOne} onAddOne={handleAddDuplicate} onOpenAddModal={() => handleOpenAddModal('lunch')} />
+              onChangeServings={handleChangeServings} onDelete={handleRemoveOne} onOpenAddModal={() => handleOpenAddModal('lunch')} />
 
             <MealSection title="Dinner" items={dinnerItems} colorClass="bg-dinner" icon="moon"
-              onRemoveOne={handleRemoveOne} onAddOne={handleAddDuplicate} onOpenAddModal={() => handleOpenAddModal('dinner')} />
+              onChangeServings={handleChangeServings} onDelete={handleRemoveOne} onOpenAddModal={() => handleOpenAddModal('dinner')} />
 
             <View className="h-20" />
           </>
