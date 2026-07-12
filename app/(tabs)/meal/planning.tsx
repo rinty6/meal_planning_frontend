@@ -775,6 +775,15 @@ const PlanningScreen = () => {
     const key = createItemKey(item);
     if (!key || favoriteLoadingKey === key) return;
 
+    // Mirror comboDetail's isRecipeLikeItem so a loved recipe keeps its recipe
+    // identity. Recipe items from the API carry `type: "recipe"` (no `source`/
+    // `recipe_id`) with a bare numeric `id`, so checking only source/recipe_id
+    // mis-tagged them as food and sent that id to food.get (404, code 106).
+    const isRecipeLike =
+      String(item?.source || item?.type || "").toLowerCase().includes("recipe") ||
+      !!String(item?.recipe_id || "").trim() ||
+      String(item?.id || "").toLowerCase().startsWith("recipe-");
+
     setFavoriteLoadingKey(key);
     try {
       const response = await authedFetch(`/api/favorites/toggle`, {
@@ -795,6 +804,11 @@ const PlanningScreen = () => {
             grams: toNumber(item.grams || item.metric_serving_amount || 100),
             time: item.time || "",
             servings: item.servings || 1,
+            // Preserve recipe-vs-food identity so the favorites page can reopen a
+            // loved recipe as a recipe (not a FatSecret food_id → 404, code 106).
+            source: isRecipeLike ? "fatsecret_recipe" : "fatsecret_food",
+            type: item.type || "",
+            recipe_id: item.recipe_id || (isRecipeLike ? getExternalId(item) : ""),
           },
         }),
       });
