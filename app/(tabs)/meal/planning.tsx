@@ -27,6 +27,7 @@ import RecentMealsModal from "../../../components/RecentMealModal";
 import SuccessModal from "../../../components/sucessmodal";
 import {
   addMealsBatch,
+  fetchDailyCalorieProgress,
   fetchMealPlanPreferences,
   fetchMealPlanRecommendations,
   fetchMostConsumedFromMealLogs,
@@ -40,10 +41,7 @@ import {
   MEAL_TYPES,
 } from "../../../services/planning.types";
 import type { ItemsByMeal, MealType } from "../../../services/planning.types";
-import {
-  fetchMealsSummaryWithCache,
-  markMealsSummaryDirty,
-} from "../../../services/mealsSummaryStore";
+import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
 import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { authedFetch } from "../../../services/authedFetch";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
@@ -380,6 +378,7 @@ const PlanningScreen = () => {
   const addRequestInFlightRef = useRef(false);
   const prewarmRequestKeyRef = useRef("");
   const shuffleSeedRef = useRef(0);
+  const dailyProgressRequestIdRef = useRef(0);
 
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedMealType, setSelectedMealType] = useState<MealType>("breakfast");
@@ -390,7 +389,8 @@ const PlanningScreen = () => {
   const [hasPlanStarted, setHasPlanStarted] = useState(false);
   const [loadingRecommendations, setLoadingRecommendations] = useState(false);
   const [loadingPreferences, setLoadingPreferences] = useState(true);
-  const [dailyCalorieTarget, setDailyCalorieTarget] = useState(2000);
+  const [dailyCalorieTarget, setDailyCalorieTarget] = useState<number | null>(null);
+  const [loadingDailyProgress, setLoadingDailyProgress] = useState(true);
   const [consumedCalories, setConsumedCalories] = useState(0);
   const [selectedItemKeys, setSelectedItemKeys] = useState<Record<string, any>>({});
 
@@ -424,7 +424,9 @@ const PlanningScreen = () => {
         ? draftPreferences.diets.length
         : Object.keys(draftPreferences.nutrientLimits || {}).length;
   const hasAnyRecommendations = MEAL_TYPES.some((mealType) => (itemsByMeal[mealType] || []).length > 0);
-  const progressRatio = dailyCalorieTarget > 0 ? Math.min(1, consumedCalories / dailyCalorieTarget) : 0;
+  const progressRatio = dailyCalorieTarget && dailyCalorieTarget > 0
+    ? Math.min(1, consumedCalories / dailyCalorieTarget)
+    : 0;
 
   const showCustomAlert = useCallback((
     title: string,
@@ -442,22 +444,36 @@ const PlanningScreen = () => {
     setAlertVisible(true);
   }, []);
 
+  // Refresh consumed and target calories as one authoritative snapshot. The request
+  // id prevents a slower response for the previous selected date from winning a race.
   const refreshDailyProgress = useCallback(async () => {
-    if (!userId || !configuredApiURL) return;
+    if (!userId || !configuredApiURL) {
+      setLoadingDailyProgress(false);
+      return;
+    }
+    const requestId = dailyProgressRequestIdRef.current + 1;
+    dailyProgressRequestIdRef.current = requestId;
+    setLoadingDailyProgress(true);
     try {
       const dateKey = formatLocalYYYYMMDD(selectedDate);
-      const meals = await fetchMealsSummaryWithCache({
+      const progress = await fetchDailyCalorieProgress({
         apiURL: configuredApiURL,
-        userId,
+        clerkId: userId,
         date: dateKey,
         getToken,
       });
-      const total = (meals || []).reduce((sum: number, item: any) => sum + Number(item?.calories || 0), 0);
-      if (isMountedRef.current) setConsumedCalories(Math.round(total));
+      if (isMountedRef.current && dailyProgressRequestIdRef.current === requestId) {
+        setConsumedCalories(progress.consumedCalories);
+        setDailyCalorieTarget(progress.dailyTarget);
+      }
     } catch {
-      // Keep the previous progress if the summary refresh fails.
+      // Keep the previous valid progress if the authoritative summary refresh fails.
+    } finally {
+      if (isMountedRef.current && dailyProgressRequestIdRef.current === requestId) {
+        setLoadingDailyProgress(false);
+      }
     }
-  }, [configuredApiURL, selectedDate, userId]);
+  }, [configuredApiURL, getToken, selectedDate, userId]);
 
   const loadMostConsumed = useCallback(async () => {
     if (!userId || !configuredApiURL) return;
@@ -511,7 +527,6 @@ const PlanningScreen = () => {
     if (Array.isArray(payload?.most_consumed_items) && payload.most_consumed_items.length > 0) {
       setMostConsumedItems(payload.most_consumed_items.slice(0, 10));
     }
-    setDailyCalorieTarget(Math.max(1200, Number(payload?.daily_calorie_target || 2000)));
   }, []);
 
   const loadRecommendations = useCallback(
@@ -613,16 +628,10 @@ const PlanningScreen = () => {
 
   useFocusEffect(
     useCallback(() => {
-      refreshDailyProgress();
+      void refreshDailyProgress();
       void loadFavoriteStatuses();
     }, [loadFavoriteStatuses, refreshDailyProgress])
   );
-
-  useEffect(() => {
-    if (hasPlanStarted && hasAnyRecommendations) {
-      void refreshDailyProgress();
-    }
-  }, [hasPlanStarted, hasAnyRecommendations, refreshDailyProgress]);
 
   const openRefine = () => {
     setDraftPreferences(clonePreferences(preferences));
@@ -909,8 +918,8 @@ const PlanningScreen = () => {
 
       markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
-      setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
       setSelectedItemKeys({});
+      void refreshDailyProgress();
       void sendMealPlanEvent({
         apiURL: configuredApiURL,
         clerkId: userId,
@@ -957,8 +966,8 @@ const PlanningScreen = () => {
 
       markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
-      setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
       setSelectedItemKeys({});
+      void refreshDailyProgress();
       void sendMealPlanEvent({
         apiURL: configuredApiURL,
         clerkId: userId,
@@ -1008,8 +1017,8 @@ const PlanningScreen = () => {
       if (!response.ok) throw new Error(payload?.error || "Could not save food");
       markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories + Number(foodItem?.calories || 0))));
-      setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
       setIsModalVisible(false);
+      void refreshDailyProgress();
       showMealLogOutcome(payload);
     } catch {
       showCustomAlert("Error", "Network error while adding custom food.");
@@ -1047,7 +1056,7 @@ const PlanningScreen = () => {
 
       markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
-      setDailyCalorieTarget(Math.max(1200, Number(payload?.dailyTarget || dailyCalorieTarget)));
+      void refreshDailyProgress();
       showMealLogOutcome(payload);
     } catch {
       showCustomAlert("Error", "Network error while adding recent meals.");
@@ -1094,7 +1103,13 @@ const PlanningScreen = () => {
         </View>
 
         <View className="bg-gray-50 rounded-2xl p-4 mb-5 border border-gray-200">
-          <Text className="text-gray-700 font-bold mb-2">Calorie target: {consumedCalories}/{dailyCalorieTarget} kcal</Text>
+          <Text className="text-gray-700 font-bold mb-2">
+            {dailyCalorieTarget !== null
+              ? `Calorie target: ${consumedCalories}/${dailyCalorieTarget} kcal`
+              : loadingDailyProgress
+                ? "Calorie target: Loading..."
+                : "Calorie target unavailable"}
+          </Text>
           <View className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
             <View style={{ width: `${Math.round(progressRatio * 100)}%` }} className="h-2 bg-primary rounded-full" />
           </View>

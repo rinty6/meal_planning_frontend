@@ -1,3 +1,5 @@
+// Authenticated network boundary for Meal Planning. The progress helper deliberately
+// reads /api/calorie/summary so the planning card cannot invent its own target rules.
 import { authedFetch, type GetToken } from "./authedFetch";
 
 export type AddMealPayload = {
@@ -23,6 +25,12 @@ export type MealPlanPreferences = {
   allergens: string[];
   diets: string[];
   nutrientLimits: Record<string, { min?: number; max?: number }>;
+};
+
+export type DailyCalorieProgress = {
+  consumedCalories: number;
+  dailyTarget: number;
+  targetSource: "goal" | "bmr" | "default" | string;
 };
 
 type AddMealResponse = {
@@ -131,6 +139,41 @@ export const addMealsBatch = async (inputs: AddMealPayload[]): Promise<AddMealRe
     ...(data || {}),
     didExceedLimit: !!data?.exceededLimit,
     didReachTarget: !!data?.reachedTarget,
+  };
+};
+
+export const fetchDailyCalorieProgress = async ({
+  apiURL,
+  clerkId,
+  date,
+  getToken,
+}: {
+  apiURL: string;
+  clerkId: string;
+  date: string;
+  getToken?: GetToken;
+}): Promise<DailyCalorieProgress> => {
+  // no-store ensures a newly created, edited, deleted, or completed goal is visible
+  // as soon as the planning screen regains focus or changes its selected date.
+  const response = await authedFetch(
+    `/api/calorie/summary/${encodeURIComponent(clerkId)}/${encodeURIComponent(date)}`,
+    { baseUrl: apiURL, getToken, clerkId, cache: "no-store" }
+  );
+  const data = await readResponseJson(response);
+  if (!response.ok) {
+    throw new Error(data?.error || "Could not fetch daily calorie progress");
+  }
+
+  const dailyTarget = Number(data?.goal?.dailyCalories ?? data?.target?.dailyCalories);
+  if (!Number.isFinite(dailyTarget) || dailyTarget <= 0) {
+    throw new Error("Daily calorie progress did not include a valid target");
+  }
+
+  const consumedCalories = Number(data?.consumed?.calories);
+  return {
+    consumedCalories: Number.isFinite(consumedCalories) ? Math.max(0, Math.round(consumedCalories)) : 0,
+    dailyTarget: Math.round(dailyTarget),
+    targetSource: String(data?.target?.source || data?.goal?.source || "default"),
   };
 };
 

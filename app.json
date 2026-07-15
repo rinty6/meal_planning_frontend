@@ -50,8 +50,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to add pictures to your recipes and profile.",
-          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to take a photo for your recipes."
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to scan food for recognition, and to add pictures to your recipes, profile, and feedback.",
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to scan food for recognition and to take photos for your recipes."
         }
       ]
     ],

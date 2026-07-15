@@ -12,12 +12,44 @@ import { authedFetch } from '../../../services/authedFetch';
 import { getCachedFavorites, setCachedFavorites, shouldRefreshFavorites } from '../../../services/favoritesStore';
 
 const FAVORITES_REFRESH_TTL_MS = 60 * 1000;
+type FavoritesTab = 'foods' | 'recipes';
+
+// Match the Shopping screen's empty-state language: one neutral icon, one clear
+// status line, and one primary action that takes the user to the relevant discovery page.
+const FavoritesEmptyState = ({
+  activeTab,
+  onPress,
+}: {
+  activeTab: FavoritesTab;
+  onPress: () => void;
+}) => {
+  const isFoodsTab = activeTab === 'foods';
+
+  return (
+    <View className="flex-1 items-center justify-center px-5">
+      <Ionicons
+        name={isFoodsTab ? 'heart-outline' : 'book-outline'}
+        size={80}
+        color="#D1D5DB"
+      />
+      <Text className="text-xl font-bold text-gray-400 mt-4 mb-8">
+        {isFoodsTab ? 'No Favorite Foods Yet' : 'No Saved Recipes Yet'}
+      </Text>
+
+      <TouchableOpacity onPress={onPress} className="bg-primary w-full py-4 rounded-2xl">
+        <Text className="text-white text-center font-bold text-lg">
+          {isFoodsTab ? 'Explore Meal Plans' : 'Browse Recipes'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 const FavoritesScreen = () => {
   const router = useRouter();
   const { userId, getToken } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'foods' | 'recipes'>('foods');
+  const [activeTab, setActiveTab] = useState<FavoritesTab>('foods');
   const [favoriteFoods, setFavoriteFoods] = useState<any[]>([]);
   const [savedRecipes, setSavedRecipes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -116,6 +148,11 @@ const FavoritesScreen = () => {
     }
   };
 
+  const activeItems = activeTab === 'foods' ? favoriteFoods : savedRecipes;
+  const handleEmptyStateAction = () => {
+    router.push(activeTab === 'foods' ? '/(tabs)/meal/planning' : '/(tabs)/meal/recipe');
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       {/* Header */}
@@ -148,9 +185,19 @@ const FavoritesScreen = () => {
           <ActivityIndicator size="large" color="#007BFF" className="mt-10" />
       ) : (
           <FlatList
-            data={activeTab === 'foods' ? favoriteFoods : savedRecipes}
+            data={activeItems}
             keyExtractor={(item) => String(item.id)}
-            contentContainerStyle={{ paddingHorizontal: 20 }}
+            contentContainerStyle={{
+              paddingHorizontal: 20,
+              paddingBottom: 24,
+              flexGrow: activeItems.length === 0 ? 1 : undefined,
+            }}
+            ListEmptyComponent={(
+              <FavoritesEmptyState
+                activeTab={activeTab}
+                onPress={handleEmptyStateAction}
+              />
+            )}
             renderItem={({ item }) => (
                 <FavoriteCard 
                     item={item}
