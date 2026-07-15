@@ -2,14 +2,19 @@
 // It collect all the datail from the database 
 
 import { View, Text, TouchableOpacity, FlatList, ActivityIndicator, Alert } from 'react-native';
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import FavoriteCard from '../../../components/FavoriteCard';
 import { authedFetch } from '../../../services/authedFetch';
-import { getCachedFavorites, setCachedFavorites, shouldRefreshFavorites } from '../../../services/favoritesStore';
+import {
+  getCachedFavorites,
+  removeFavoriteFromCache,
+  setCachedFavorites,
+  shouldRefreshFavorites,
+} from '../../../services/favoritesStore';
 
 const FAVORITES_REFRESH_TTL_MS = 60 * 1000;
 type FavoritesTab = 'foods' | 'recipes';
@@ -48,11 +53,18 @@ const FavoritesEmptyState = ({
 const FavoritesScreen = () => {
   const router = useRouter();
   const { userId, getToken } = useAuth();
+  const getTokenRef = useRef(getToken);
+  const deletingItemKeysRef = useRef<Set<string>>(new Set());
 
   const [activeTab, setActiveTab] = useState<FavoritesTab>('foods');
   const [favoriteFoods, setFavoriteFoods] = useState<any[]>([]);
   const [savedRecipes, setSavedRecipes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [deletingItemKeys, setDeletingItemKeys] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    getTokenRef.current = getToken;
+  }, [getToken]);
 
   const hydrateFromCache = useCallback(() => {
     if (!userId) return;
@@ -70,7 +82,7 @@ const FavoritesScreen = () => {
 
     if (showSpinner) setLoading(true);
     try {
-        const res = await authedFetch(`/api/favorites/list/${userId}`, { getToken, clerkId: userId });
+        const res = await authedFetch(`/api/favorites/list/${userId}`, { getToken: getTokenRef.current, clerkId: userId });
         const data = await res.json();
         
         if (res.ok) {
@@ -100,35 +112,50 @@ const FavoritesScreen = () => {
 
   // --- DELETE HANDLER ---
   const handleDelete = async (id: number) => {
-    const isFood = activeTab === 'foods';
-    const endpoint = isFood ? 'delete-food' : 'delete-recipe';
-    const nextFavoriteFoods = isFood
-      ? favoriteFoods.filter((item) => item.id !== id)
-      : favoriteFoods;
-    const nextSavedRecipes = isFood
-      ? savedRecipes
-      : savedRecipes.filter((item) => item.id !== id);
-
-    // 1. Optimistic Update (Remove from UI immediately)
-    setFavoriteFoods(nextFavoriteFoods);
-    setSavedRecipes(nextSavedRecipes);
-    if (userId) {
-      setCachedFavorites(userId, {
-        favoriteFoods: nextFavoriteFoods,
-        savedRecipes: nextSavedRecipes,
-      });
+    if (!userId) {
+      Alert.alert("Could not delete item", "Please sign in again and retry.");
+      return;
     }
 
-    // 2. Call Backend
+    const isFood = activeTab === 'foods';
+    const itemKey = `${activeTab}:${id}`;
+    if (deletingItemKeysRef.current.has(itemKey)) return;
+
+    deletingItemKeysRef.current.add(itemKey);
+    setDeletingItemKeys(new Set(deletingItemKeysRef.current));
+
+    const endpoint = isFood ? 'delete-food' : 'delete-recipe';
+
+    // Keep the row visible but disable its delete button until the server confirms.
+    // This closes the small double-tap window that previously sent duplicate DELETEs.
     try {
-        const response = await authedFetch(`/api/favorites/${endpoint}/${id}`, { method: 'DELETE', getToken, clerkId: userId });
-        if (!response.ok) {
-          throw new Error(`Failed to delete favorite ${id}`);
+        const response = await authedFetch(`/api/favorites/${endpoint}/${id}`, {
+          method: 'DELETE',
+          getToken: getTokenRef.current,
+          clerkId: userId,
+        });
+        const payload = await response.json().catch(() => null);
+
+        // Backward compatibility with an older deployed backend: a 404 still means
+        // the desired state has been reached, so do not show a false deletion error.
+        if (!response.ok && response.status !== 404) {
+          const serverMessage = payload?.error || payload?.message || 'Could not delete item';
+          throw new Error(`${serverMessage} (HTTP ${response.status})`);
         }
+
+        if (isFood) {
+          setFavoriteFoods((current) => current.filter((item) => item.id !== id));
+        } else {
+          setSavedRecipes((current) => current.filter((item) => item.id !== id));
+        }
+        removeFavoriteFromCache(userId, isFood ? 'foods' : 'recipes', id);
     } catch (error) {
         console.error("Delete failed", error);
-        Alert.alert("Error", "Could not delete item");
-        void loadFavorites({ showSpinner: false, force: true }); // Revert on error
+        const message = error instanceof Error ? error.message : 'Could not delete item';
+        Alert.alert("Could not delete item", message);
+    } finally {
+        deletingItemKeysRef.current.delete(itemKey);
+        setDeletingItemKeys(new Set(deletingItemKeysRef.current));
     }
   };
 
@@ -203,6 +230,7 @@ const FavoritesScreen = () => {
                     item={item}
                     onPress={() => handlePressItem(item)}
                     onDelete={() => handleDelete(item.id)}
+                    isDeleting={deletingItemKeys.has(`${activeTab}:${item.id}`)}
                 />
             )}
           />

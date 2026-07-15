@@ -53,6 +53,13 @@
           "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to scan food for recognition, and to add pictures to your recipes, profile, and feedback.",
           "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to scan food for recognition and to take photos for your recipes."
         }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "GoodHealthMate uses the microphone so you can search foods and recipes by voice.",
+          "speechRecognitionPermission": "GoodHealthMate uses speech recognition to turn what you say into a food or recipe search."
+        }
       ]
     ],
     "experiments": {

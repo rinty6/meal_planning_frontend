@@ -34,6 +34,29 @@ export const setCachedFavorites = (userId: string, collections: FavoriteCollecti
   favoritesByUser.set(userId, buildSnapshot(collections));
 };
 
+// Apply a confirmed server deletion directly to the in-memory snapshot. This keeps
+// a deleted card from briefly reappearing when Favorites regains focus and hydrates.
+export const removeFavoriteFromCache = (
+  userId: string,
+  collection: "foods" | "recipes",
+  itemId: number
+) => {
+  const snapshot = favoritesByUser.get(userId);
+  if (!snapshot) return;
+
+  favoritesByUser.set(userId, {
+    ...snapshot,
+    favoriteFoods:
+      collection === "foods"
+        ? snapshot.favoriteFoods.filter((item) => item.id !== itemId)
+        : snapshot.favoriteFoods,
+    savedRecipes:
+      collection === "recipes"
+        ? snapshot.savedRecipes.filter((item) => item.id !== itemId)
+        : snapshot.savedRecipes,
+  });
+};
+
 export const markFavoritesDirty = (userId?: string | null) => {
   if (!userId) return;
   const snapshot = favoritesByUser.get(userId);

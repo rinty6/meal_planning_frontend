@@ -1,18 +1,18 @@
 // This component will create a format for each dish at the favorite page
 
-import { View, Text, TouchableOpacity, Image } from 'react-native';
+import { View, Text, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import IngredientIcon from './IngredientIcon';
 import Food3DIcon from './Food3DIcon';
 
 interface FavoriteCardProps {
   item: any;
   onPress: () => void;
   onDelete: () => void;
+  isDeleting?: boolean;
 }
 
-const FavoriteCard = ({ item, onPress, onDelete }: FavoriteCardProps) => {
+const FavoriteCard = ({ item, onPress, onDelete, isDeleting = false }: FavoriteCardProps) => {
   return (
     <TouchableOpacity 
       onPress={onPress} 
@@ -40,8 +40,16 @@ const FavoriteCard = ({ item, onPress, onDelete }: FavoriteCardProps) => {
       </View>
 
       {/* Delete Button (Stop Propagation prevents triggering the card click) */}
-      <TouchableOpacity onPress={(e) => { e.stopPropagation(); onDelete(); }} className="p-3 bg-white rounded-full shadow-sm ml-2">
-        <Ionicons name="trash-outline" size={20} color="#EF4444" />
+      <TouchableOpacity
+        onPress={(e) => { e.stopPropagation(); onDelete(); }}
+        disabled={isDeleting}
+        className={`p-3 bg-white rounded-full shadow-sm ml-2 ${isDeleting ? 'opacity-60' : ''}`}
+      >
+        {isDeleting ? (
+          <ActivityIndicator size="small" color="#EF4444" />
+        ) : (
+          <Ionicons name="trash-outline" size={20} color="#EF4444" />
+        )}
       </TouchableOpacity>
     </TouchableOpacity>
   );
