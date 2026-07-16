@@ -439,7 +439,7 @@ const FoodDetailScreen = () => {
 
   if (!item) {
     return (
-      <SafeAreaView className="flex-1 items-center justify-center bg-white">
+      <SafeAreaView className="flex-1 items-center justify-center bg-white" edges={['top', 'left', 'right']}>
         <Text>Unable to load food details.</Text>
       </SafeAreaView>
     );
@@ -488,7 +488,7 @@ const FoodDetailScreen = () => {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       <View className="px-5 py-4 flex-row items-center">
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={28} color="black" />

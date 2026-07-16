@@ -250,6 +250,16 @@ const ProfileScreen = () => {
                         <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
                     </TouchableOpacity>
 
+                    {__DEV__ && (
+                        <TouchableOpacity onPress={() => router.push('/(tabs)/profile/voice-debug')} className="flex-row items-center bg-gray-50 p-4 rounded-xl border border-gray-100 mb-6">
+                            <View className="w-10 h-10 bg-yellow-100 rounded-full items-center justify-center mr-4">
+                                <Ionicons name="mic-outline" size={20} color="#F59E0B" />
+                            </View>
+                            <Text className="flex-1 font-bold text-gray-700 text-base">Voice Debug (dev)</Text>
+                            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+                        </TouchableOpacity>
+                    )}
+
                     <Text className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2 ml-2">Other</Text>
 
                     <TouchableOpacity onPress={handleSignOut} className="flex-row items-center bg-red-50 p-4 rounded-xl border border-red-100">
