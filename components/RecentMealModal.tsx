@@ -91,9 +91,7 @@ const RecentMealsModal = ({ visible, onClose, onAddSelected }: RecentMealsModalP
                 <Text className="text-gray-900 font-bold text-base" numberOfLines={1}>{meal.foodName}</Text>
                 <View className="flex-row items-center mt-1">
                   <Ionicons name="flame-outline" size={14} color="#FF9500" />
-                  <Text className="text-gray-500 text-xs ml-1 mr-3">{Math.round(meal.calories)} kcal</Text>
-                  <Ionicons name="time-outline" size={14} color="#9CA3AF" />
-                  <Text className="text-gray-500 text-xs ml-1">10 min</Text>
+                  <Text className="text-gray-500 text-xs ml-1">{Math.round(meal.calories)} kcal</Text>
                 </View>
               </View>
             </TouchableOpacity>

@@ -1235,26 +1235,42 @@ const buildBackendApiUrl = (
   return url.toString();
 };
 
+type FatSecretProxyResult = { ok: true; data: any; throttled: false } | { ok: false; data: null; throttled: boolean };
+
 const requestFatSecretProxy = async (
   path: string,
   options: {
     requestLabel: string;
     params?: Record<string, string | number | undefined | null>;
   }
-) => {
+): Promise<FatSecretProxyResult> => {
   const { requestLabel, params } = options;
+  const url = buildBackendApiUrl(path, params);
 
   try {
-    const response = await fetch(buildBackendApiUrl(path, params), {
-      method: 'GET',
-    });
+    let response = await fetch(url, { method: 'GET' });
+
+    // One gentle backoff-retry on 429, mirroring authedFetch.ts. A 429 means the
+    // request never reached FatSecret, so re-sending once is safe. Without this,
+    // every FatSecret/TheMealDB call that lands during a burst (e.g. the home
+    // screen's combo generation) surfaces as a hard failure instead of a brief
+    // hiccup the app can quietly recover from.
+    if (response.status === 429) {
+      const retryAfterSeconds = Number(response.headers.get('Retry-After'));
+      const waitMs =
+        Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+          ? retryAfterSeconds * 1000
+          : 1000;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 3000)));
+      response = await fetch(url, { method: 'GET' });
+    }
 
     let data: any = null;
     try {
       data = await response.json();
     } catch (jsonError) {
       console.warn(`[mealAPI] ${requestLabel} proxy returned a non-JSON response`, jsonError);
-      return null;
+      return { ok: false, data: null, throttled: response.status === 429 };
     }
 
     if (!response.ok) {
@@ -1263,34 +1279,39 @@ const requestFatSecretProxy = async (
         error: data?.error || null,
         details: data?.details || null,
       });
-      return null;
+      return { ok: false, data: null, throttled: response.status === 429 };
     }
 
-    return data;
+    return { ok: true, data, throttled: false };
   } catch (error) {
     console.error(`[mealAPI] ${requestLabel} proxy request error`, error);
-    return null;
+    return { ok: false, data: null, throttled: false };
   }
 };
 
 
 // This function will help us get the recipe data using recipes.search method
-export const searchRecipes = async (query: string, maxResults = 15) => {
+export const searchRecipes = async (
+  query: string,
+  maxResults = 15,
+  options: { onStatus?: (status: { throttled: boolean }) => void } = {}
+) => {
   try {
     const recipeQuery = normalizeWhitespace(query) || DEFAULT_RECIPE_SEARCH_QUERY;
     const cacheKey = buildRecipeSearchCacheKey(recipeQuery, maxResults);
     const cached = await getCachedRecipeSearchEntry(cacheKey);
 
     const fetchFromNetwork = async () => {
-      const data = await requestFatSecretProxy('/api/fatsecret/recipes/search', {
+      const { ok, data, throttled } = await requestFatSecretProxy('/api/fatsecret/recipes/search', {
         requestLabel: 'recipes.search',
         params: {
           query: recipeQuery,
           maxResults,
         },
       });
-      if (!data) return [];
-   
+      options.onStatus?.({ throttled });
+      if (!ok) return [];
+
       const rawRecipes = data?.items || [];
       const recipeList = Array.isArray(rawRecipes) ? rawRecipes : [rawRecipes];
 
@@ -1323,22 +1344,28 @@ export const searchRecipes = async (query: string, maxResults = 15) => {
 
   } catch (error) {
     console.error("Recipe Search Error:", error);
+    options.onStatus?.({ throttled: false });
     return [];
   }
 };
 
 
 // This function will help us extract food data using foods.search method
-export const searchFoodItems = async (query: string, maxResults = 10) => {
+export const searchFoodItems = async (
+  query: string,
+  maxResults = 10,
+  options: { onStatus?: (status: { throttled: boolean }) => void } = {}
+) => {
   try {
-    const data = await requestFatSecretProxy('/api/fatsecret/foods/search', {
+    const { ok, data, throttled } = await requestFatSecretProxy('/api/fatsecret/foods/search', {
       requestLabel: 'foods.search',
       params: {
         query,
         maxResults,
       },
     });
-    if (!data) return [];
+    options.onStatus?.({ throttled });
+    if (!ok) return [];
     const foodItems = data?.items || [];
     const itemsArray = Array.isArray(foodItems) ? foodItems : (foodItems ? [foodItems] : []);
 
@@ -1364,6 +1391,7 @@ export const searchFoodItems = async (query: string, maxResults = 10) => {
 
   } catch (error) {
     console.error("Food Search Error:", error);
+    options.onStatus?.({ throttled: false });
     return [];
   }
 };
@@ -1730,13 +1758,13 @@ export const getFoodById = async (
     return null;
   }
   try {
-    const data = await requestFatSecretProxy(`/api/fatsecret/foods/${encodeURIComponent(normalizedFoodId)}`, {
+    const { ok, data } = await requestFatSecretProxy(`/api/fatsecret/foods/${encodeURIComponent(normalizedFoodId)}`, {
       requestLabel: 'food.get.v5',
       params: {
         expectedCalories: options.expectedCalories,
       },
     });
-    if (!data) return null;
+    if (!ok) return null;
     return data?.item || null;
 
 
@@ -1752,10 +1780,10 @@ type FoodDetail = NonNullable<Awaited<ReturnType<typeof getFoodById>>>;
 // Fetch Full Recipe Details (Ingredients & Directions)
 export const getRecipeDetails = async (recipeId: string) => {
   try {
-    const data = await requestFatSecretProxy(`/api/fatsecret/recipes/${encodeURIComponent(recipeId)}`, {
+    const { ok, data } = await requestFatSecretProxy(`/api/fatsecret/recipes/${encodeURIComponent(recipeId)}`, {
       requestLabel: 'recipe.get',
     });
-    if (!data) return null;
+    if (!ok) return null;
     return data?.item || null;
 
 

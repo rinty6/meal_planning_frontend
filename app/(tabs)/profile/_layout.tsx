@@ -14,7 +14,6 @@ export default function ProfileLayout() {
             <Stack.Screen name="notification-messages" />
             <Stack.Screen name="feedback" />
             <Stack.Screen name="privacy" />
-            {__DEV__ && <Stack.Screen name="voice-debug" />}
         </Stack>
     );
 }

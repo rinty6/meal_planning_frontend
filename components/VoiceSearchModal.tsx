@@ -15,9 +15,10 @@
  * worklets:false and New Architecture is off, so worklet code silently fails
  * (see StartupLoadingAnimation.tsx and ERROR_LOG Error 007).
  *
- * OVERLAYS: the meal picker and toast are plain Views layered inside this Modal,
- * never nested <Modal>s — those stack unreliably on top of a Modal on iOS
- * (same reason addfoodmodal.tsx renders its alert as an in-modal overlay).
+ * OVERLAYS: the meal picker and the success/error status card (InlineStatusOverlay)
+ * are plain Views layered inside this Modal, never nested <Modal>s — those stack
+ * unreliably on top of a Modal on iOS (same reason addfoodmodal.tsx renders its
+ * alert as an in-modal overlay).
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -46,6 +47,7 @@ import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
 import { searchFoodItems, searchRecipes } from '../services/mealAPI';
 import { authedFetch } from '../services/authedFetch';
 import { markMealsSummaryDirty } from '../services/mealsSummaryStore';
+import InlineStatusOverlay, { type InlineStatusVariant } from './InlineStatusOverlay';
 
 type VoiceSearchMode = 'food' | 'recipe';
 type VoiceSearchScreen = 'chooser' | 'listening' | 'searching' | 'results' | 'notfound';
@@ -276,28 +278,22 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
   const [transcript, setTranscript] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [searchFailed, setSearchFailed] = useState(false);
+  const [throttled, setThrottled] = useState(false);
   const [pendingItem, setPendingItem] = useState<any>(null);
   const [logServings, setLogServings] = useState(1);
   const [addingId, setAddingId] = useState<string | null>(null);
-  const [toast, setToast] = useState('');
+  const [statusOverlay, setStatusOverlay] = useState<{ variant: InlineStatusVariant; title: string; message: string } | null>(null);
 
   // Same guard as addfoodmodal.tsx: a slow earlier search must never overwrite a
   // newer one's results.
   const latestSearchRequestRef = useRef(0);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { state, interimTranscript, finalTranscript, error, start, stop, reset } = useVoiceRecognition();
 
   const modeWord = mode === 'food' ? 'food' : 'recipe';
 
-  useEffect(() => () => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-  }, []);
-
-  const flashToast = useCallback((message: string) => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setToast(message);
-    toastTimerRef.current = setTimeout(() => setToast(''), 2600);
+  const flashStatus = useCallback((variant: InlineStatusVariant, title: string, message: string) => {
+    setStatusOverlay({ variant, title, message });
   }, []);
 
   const runSearch = useCallback(async (rawText: string, searchMode: VoiceSearchMode) => {
@@ -309,10 +305,29 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
 
     setScreen('searching');
     setSearchFailed(false);
+    setThrottled(false);
+
+    // Captured by the shared FatSecret proxy helper so a 429 can be told apart
+    // from a genuinely empty result — without this, a throttled request looked
+    // identical to "no match" and told the user their food doesn't exist.
+    let wasThrottled = false;
+    const onStatus = ({ throttled: hitLimit }: { throttled: boolean }) => {
+      wasThrottled = hitLimit;
+    };
 
     try {
-      const items = searchMode === 'food' ? await searchFoodItems(text) : await searchRecipes(text);
+      const items =
+        searchMode === 'food'
+          ? await searchFoodItems(text, 10, { onStatus })
+          : await searchRecipes(text, 15, { onStatus });
       if (latestSearchRequestRef.current !== requestId) return;
+
+      if (!items.length && wasThrottled) {
+        setResults([]);
+        setThrottled(true);
+        setScreen('notfound');
+        return;
+      }
 
       const ranked = (items ?? [])
         .map((item: any) => ({ ...item, matchScore: matchPercent(text, item?.title ?? '') }))
@@ -344,6 +359,7 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
       setTranscript('');
       setResults([]);
       setSearchFailed(false);
+      setThrottled(false);
       latestSearchRequestRef.current += 1; // abandon any in-flight search
       setScreen('listening');
       void start();
@@ -358,9 +374,10 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
     setTranscript('');
     setResults([]);
     setSearchFailed(false);
+    setThrottled(false);
     setPendingItem(null);
     setAddingId(null);
-    setToast('');
+    setStatusOverlay(null);
     onClose();
   }, [onClose, reset]);
 
@@ -396,7 +413,7 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
   const addToMealLog = useCallback(
     async (item: any, mealType: MealType, servings: number) => {
       if (!userId) {
-        flashToast('You must be logged in to save meals.');
+        flashStatus('error', 'Sign-in required', 'You must be logged in to save meals.');
         return;
       }
 
@@ -447,19 +464,19 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
 
         const slot = mealType[0].toUpperCase() + mealType.slice(1);
         if (body?.exceededLimit) {
-          flashToast(`Added · ${slot} — you crossed your daily calorie goal`);
+          flashStatus('success', 'Added — heads up', `${slot}: you crossed your daily calorie goal`);
         } else if (body?.reachedTarget) {
-          flashToast(`Added · ${slot} — you reached your daily target`);
+          flashStatus('success', 'Added — nice!', `${slot}: you reached your daily target`);
         } else {
-          flashToast(`Added to your meal plan · ${slot}`);
+          flashStatus('success', 'Added to your meal plan', slot);
         }
       } catch {
-        flashToast(`Could not add this ${modeWord}. Please try again.`);
+        flashStatus('error', 'Could not add', `We couldn't add this ${modeWord}. Please try again.`);
       } finally {
         setAddingId(null);
       }
     },
-    [userId, getToken, mode, modeWord, flashToast]
+    [userId, getToken, mode, modeWord, flashStatus]
   );
 
   const openMealPicker = useCallback((item: any) => {
@@ -767,21 +784,29 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
             </View>
           )}
 
-          {!!toast && (
-            <FadeIn duration={200} style={[styles.toast, { bottom: insets.bottom + 28 }]}>
-              <Text style={styles.toastText}>{toast}</Text>
-            </FadeIn>
-          )}
+          <InlineStatusOverlay
+            visible={!!statusOverlay}
+            variant={statusOverlay?.variant ?? 'success'}
+            title={statusOverlay?.title ?? ''}
+            message={statusOverlay?.message ?? ''}
+            onHide={() => setStatusOverlay(null)}
+          />
         </View>
       )}
 
       {screen === 'notfound' && (
         <FadeIn style={[styles.searchWrap, styles.centered]}>
           <Text style={styles.listenErrorTitle}>
-            {searchFailed ? "Couldn't search right now" : `No match for “${transcript}”`}
+            {throttled
+              ? 'Too many requests'
+              : searchFailed
+              ? "Couldn't search right now"
+              : `No match for “${transcript}”`}
           </Text>
           <Text style={styles.listenErrorMessage}>
-            {searchFailed
+            {throttled
+              ? "You're searching a bit fast — wait a moment and try again."
+              : searchFailed
               ? 'Check your connection and try again.'
               : `We couldn't find that ${modeWord} in the database.`}
           </Text>
@@ -1022,23 +1047,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   pickerOptionText: { fontWeight: '700', color: '#374151', fontSize: 16 },
-
-  /* toast */
-  toast: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
-    backgroundColor: PAL.txt,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.35,
-    shadowRadius: 30,
-    elevation: 12,
-  },
-  toastText: { color: '#fff', fontSize: 14, fontWeight: '700', textAlign: 'center' },
 });
 
 export default VoiceSearchModal;
