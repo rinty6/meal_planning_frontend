@@ -534,7 +534,28 @@ const CalorieSummaryScreen = () => {
 
       <ScrollView className="px-5" showsVerticalScrollIndicator={false}>
         {!data ? (
-          <ActivityIndicator size="large" color="#007BFF" className="mt-10" />
+          // While a load is in flight, spin. Once it settles with no data, every
+          // fetch failed (the endpoints return a zeroed payload for empty days, so
+          // null here always means failure, e.g. offline or rate limited) — show an
+          // honest retry state instead of the old infinite spinner.
+          isRefreshing ? (
+            <ActivityIndicator size="large" color="#007BFF" className="mt-10" />
+          ) : (
+            <View className="items-center mt-12 px-6">
+              <Ionicons name="cloud-offline-outline" size={40} color="#9CA3AF" />
+              <Text className="text-lg font-bold text-gray-900 mt-3 text-center">{"Couldn't load your summary"}</Text>
+              <Text className="text-gray-500 text-center mt-1 leading-5">
+                Check your connection, wait a moment, and try again.
+              </Text>
+              <TouchableOpacity
+                onPress={() => void loadSummary()}
+                className="bg-primary rounded-2xl px-8 py-3 mt-5 flex-row items-center"
+              >
+                <Ionicons name="refresh" size={16} color="#fff" />
+                <Text className="text-white font-bold ml-2">Try again</Text>
+              </TouchableOpacity>
+            </View>
+          )
         ) : (
           <View className={isRefreshing ? 'opacity-50' : 'opacity-100'}>
             {(() => {

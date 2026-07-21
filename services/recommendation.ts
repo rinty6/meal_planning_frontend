@@ -650,7 +650,15 @@ export const normalizeRecommendedItem = (item: any, mealType: MealType, index: n
     fats: Math.round(toNumber(item?.fats, 0) * 10) / 10,
     grams: Math.max(20, Math.round(toNumber(item?.grams, 100))),
     image: initialImage,
-    image_lookup_state: (initialImage ? "resolved" : "pending") as ImageLookupState,
+    // Respect a server-side "unavailable" verdict (Fix B): the backend already
+    // tried to resolve this title against the shared cross-user image cache, so
+    // re-hunting from the device would only replay the request storm the server
+    // enrichment exists to prevent. The local placeholder renders instead.
+    image_lookup_state: (initialImage
+      ? "resolved"
+      : item?.image_lookup_state === "unavailable"
+        ? "unavailable"
+        : "pending") as ImageLookupState,
     image_lookup_source: initialImage ? "payload" : null,
     serving_id: item?.serving_id || null,
     serving_description: item?.serving_description || "100 g",
@@ -810,7 +818,12 @@ const normalizeMostConsumedItem = (item: any) => {
   food_type: item?.food_type || null,
   brand_name: item?.brand_name || null,
   image: item?.image || "",
-  image_lookup_state: (String(item?.image || "").trim() ? "resolved" : "pending") as ImageLookupState,
+  // Same server-verdict passthrough as normalizeMealPayload (Fix B).
+  image_lookup_state: (String(item?.image || "").trim()
+    ? "resolved"
+    : item?.image_lookup_state === "unavailable"
+      ? "unavailable"
+      : "pending") as ImageLookupState,
   image_lookup_source: String(item?.image || "").trim() ? "payload" : null,
   });
 };
@@ -956,6 +969,46 @@ const prefetchRecommendationImages = (recommendationsByMeal: Record<MealType, an
   void Promise.allSettled(urls.map((url) => RNImage.prefetch(url)));
 };
 
+// Image hydration is by far this app's heaviest network fan-out. A single item
+// can fire ~20 FatSecret proxy calls on a cache miss (direct id lookup, then up
+// to FOOD_IMAGE_QUERY_LIMIT searches each with detail checks), and a full meal
+// planning screen hydrates 30+ items. Running those unthrottled had two effects
+// on TestFlight (2026-07-20):
+//   1. It saturated iOS's ~4-6 connections-per-host pool, so unrelated requests
+//      queued behind it — the calorie summary took 5-8s to appear.
+//   2. It burned the backend's per-IP rate limit in a single screen visit,
+//      producing 429s on the next screen the user opened.
+// The gate below caps how many item lookups run at once ACROSS every call site,
+// so nesting (3 meals x N items) can no longer multiply into a burst. Total
+// wall time barely changes — this work was always network-bound and already
+// runs in the background via scheduleImageHydration — but nothing else starves.
+const IMAGE_HYDRATION_CONCURRENCY = 3;
+
+let activeImageHydrations = 0;
+const imageHydrationQueue: (() => void)[] = [];
+
+const acquireImageHydrationSlot = async () => {
+  if (activeImageHydrations < IMAGE_HYDRATION_CONCURRENCY) {
+    activeImageHydrations += 1;
+    return;
+  }
+  // No increment on this path: a waiter inherits the releasing task's slot.
+  await new Promise<void>((resolve) => imageHydrationQueue.push(resolve));
+};
+
+const releaseImageHydrationSlot = () => {
+  const next = imageHydrationQueue.shift();
+  if (next) {
+    // Hand the slot straight to the next waiter instead of decrementing first.
+    // Decrementing would leave the count below the cap for one microtask, which
+    // is long enough for a newly-arriving task to claim it too and push actual
+    // concurrency above IMAGE_HYDRATION_CONCURRENCY.
+    next();
+    return;
+  }
+  activeImageHydrations = Math.max(0, activeImageHydrations - 1);
+};
+
 const enrichItemsWithImages = async (
   items: any[],
   cap = 12,
@@ -969,12 +1022,19 @@ const enrichItemsWithImages = async (
       if (forceFatSecretImage) {
         return true;
       }
+      // Skip items the server already stamped "unavailable" (Fix B): the backend
+      // resolved what it could before sending the payload, so an imageless item
+      // with a terminal state is a settled miss, not work left for the device.
+      if (item?.image_lookup_state === "unavailable") {
+        return false;
+      }
       return !String(item?.image || "").trim();
     })
     .slice(0, cap);
 
   await Promise.all(
     tasks.map(async ({ item, index }) => {
+      await acquireImageHydrationSlot();
       try {
         const resolved = await resolveFoodImageFromFatSecret(item, {
           preferFatSecretImage: forceFatSecretImage,
@@ -995,6 +1055,8 @@ const enrichItemsWithImages = async (
         }
       } catch {
         output[index].image_lookup_state = "unavailable";
+      } finally {
+        releaseImageHydrationSlot();
       }
     })
   );

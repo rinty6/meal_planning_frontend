@@ -1052,7 +1052,11 @@ const cacheImageLookupResult = (keys: string[], result: ResolvedImageLookup) => 
   }
   scheduleImageLookupCachePersist();
 };
+// Fires once per hydrated item (30+ times per meal planning screen), so it stays
+// dev-only — in release builds the string building and bridge traffic were pure
+// overhead on the app's hottest path.
 const logImageResolutionResult = (item: any, result: ResolvedImageLookup) => {
+  if (!__DEV__) return;
   console.log('[mealAPI] resolveFoodImageFromFatSecret result', {
     title: String(item?.title || item?.food_name || ''),
     source: result.source,
@@ -1778,17 +1782,22 @@ type FoodDetail = NonNullable<Awaited<ReturnType<typeof getFoodById>>>;
 
 
 // Fetch Full Recipe Details (Ingredients & Directions)
-export const getRecipeDetails = async (recipeId: string) => {
+export const getRecipeDetails = async (
+  recipeId: string,
+  options: { onStatus?: (status: { throttled: boolean }) => void } = {}
+) => {
   try {
-    const { ok, data } = await requestFatSecretProxy(`/api/fatsecret/recipes/${encodeURIComponent(recipeId)}`, {
+    const { ok, data, throttled } = await requestFatSecretProxy(`/api/fatsecret/recipes/${encodeURIComponent(recipeId)}`, {
       requestLabel: 'recipe.get',
     });
+    options.onStatus?.({ throttled });
     if (!ok) return null;
     return data?.item || null;
 
 
   } catch (error) {
     console.error("Get Recipe Details Error:", error);
+    options.onStatus?.({ throttled: false });
     return null;
   }
 };

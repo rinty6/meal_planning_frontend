@@ -66,6 +66,11 @@ const RecipeDetailScreen = () => {
 
   // 2. STATE VARIABLES
   const [loading, setLoading] = useState(true);       // Page loading state
+  // Remote load failure. Without this, a failed FatSecret/TheMealDB/saved-recipe
+  // load fell through silently and the screen rendered its empty editable fields —
+  // which IS the create-custom-recipe UI, so a rate-limited (429) recipe tap looked
+  // like the app "navigated to the custom recipe page" (ERROR_LOG Error 065).
+  const [loadError, setLoadError] = useState<'throttled' | 'failed' | null>(null);
   const [activeAction, setActiveAction] = useState<'recipe' | 'shopping' | 'meal' | null>(null);
   
   const [recipeTitle, setRecipeTitle] = useState("");
@@ -132,8 +137,14 @@ const RecipeDetailScreen = () => {
   const loadFatSecretDetails = async () => {
     if (!id) return;
     setLoading(true);
+    setLoadError(null);
+    // Distinguish "rate limited" from other failures so the error screen can say
+    // "wait a moment" instead of blaming the connection (same pattern as voice search).
+    let wasThrottled = false;
     try {
-        const data = await getRecipeDetails(id as string);
+        const data = await getRecipeDetails(id as string, {
+          onStatus: ({ throttled }) => { wasThrottled = throttled; },
+        });
         if (data) {
             setRecipeTitle(data.title);
             setRecipeCalories(normalizeCaloriesInput(data.calories));
@@ -145,9 +156,12 @@ const RecipeDetailScreen = () => {
             setIngredients(data.ingredients);
             setInstructions(data.instructions);
             setBaseRecipeInfo({ ...data, image: data.image || (previewImage as string) });
+        } else {
+            setLoadError(wasThrottled ? 'throttled' : 'failed');
         }
     } catch (e) {
         console.error(e);
+        setLoadError('failed');
     } finally {
         setLoading(false);
     }
@@ -160,8 +174,12 @@ const RecipeDetailScreen = () => {
   const loadThemealdbDetails = async () => {
     if (!id) return;
     setLoading(true);
+    setLoadError(null);
     try {
         const data = await getThemealdbRecipe(id as string);
+        if (!data) {
+            setLoadError('failed');
+        }
         if (data) {
             const n = data.nutrition;
             const hasComputed = !!n && n.status === "computed" && typeof n.calories === "number";
@@ -208,6 +226,7 @@ const RecipeDetailScreen = () => {
         }
     } catch (e) {
         console.error("Error loading TheMealDB recipe", e);
+        setLoadError('failed');
     } finally {
         setLoading(false);
     }
@@ -215,11 +234,14 @@ const RecipeDetailScreen = () => {
 
   const loadSavedRecipe = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
         const res = await authedFetch(`/api/favorites/custom/${savedRecipeId}`, { getToken, clerkId: userId });
         const data = await res.json();
 
-        if (data) {
+        if (!res.ok || !data) {
+            setLoadError('failed');
+        } else if (data) {
             // Saved recipes are stored as WHOLE-RECIPE totals + a servings count. Divide
             // down to PER-SERVING on load so a reopened saved recipe renders with the same
             // per-serving scaling as the live FatSecret/MealDB views (totals on top,
@@ -238,6 +260,7 @@ const RecipeDetailScreen = () => {
         }
     } catch (e) {
         console.error("Error loading saved recipe", e);
+        setLoadError('failed');
     } finally {
         setLoading(false);
     }
@@ -528,6 +551,44 @@ const RecipeDetailScreen = () => {
         <ActivityIndicator size="large" color="#007BFF" />
     </SafeAreaView>
   );
+
+  // Honest failure state: never fall through to the empty editable fields (that's
+  // the create-custom-recipe UI and reads as a wrong navigation). Creating mode
+  // never sets loadError, so this only guards the three remote view modes.
+  if (loadError) {
+    const retryLoad = () => {
+      if (savedRecipeId) void loadSavedRecipe();
+      else if (isThemealdb) void loadThemealdbDetails();
+      else void loadFatSecretDetails();
+    };
+    return (
+      <SafeAreaView className="flex-1 bg-white justify-center items-center px-8" edges={['top', 'left', 'right']}>
+        <Ionicons
+          name={loadError === 'throttled' ? 'hourglass-outline' : 'cloud-offline-outline'}
+          size={44}
+          color="#9CA3AF"
+        />
+        <Text className="text-xl font-bold text-gray-900 mt-4 text-center">
+          {loadError === 'throttled' ? 'Too many requests' : "Couldn't load this recipe"}
+        </Text>
+        <Text className="text-gray-500 text-center mt-2 leading-5">
+          {loadError === 'throttled'
+            ? "You're browsing a bit fast — wait a moment and try again."
+            : 'Check your connection and try again.'}
+        </Text>
+        <TouchableOpacity
+          onPress={retryLoad}
+          className="bg-primary rounded-2xl px-8 py-3.5 mt-6 flex-row items-center"
+        >
+          <Ionicons name="refresh" size={18} color="#fff" />
+          <Text className="text-white font-bold ml-2">Try again</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()} className="mt-4 p-2">
+          <Text className="text-gray-500 font-bold">Go back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   // Compact recipe image (130x160 beside the title) — prefer the real photo, else a
   // neutral placeholder. Fixed dimensions avoid the old full-width hero breaking on

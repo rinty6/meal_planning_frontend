@@ -89,7 +89,7 @@ type FetchDashboardArgs = {
 };
 
 type FetchDashboardResult =
-  | { ok: true; dbUserName: string; macros: HomeMacroState }
+  | { ok: true; dbUserName: string; macros: HomeMacroState; targetResolved: boolean }
   | { ok: false };
 
 /**
@@ -125,13 +125,18 @@ export const fetchAndCacheHomeDashboard = async ({
     }
 
     let consumedMacros = extractConsumedMacros(summaryPayload);
-    const dailyCalorieTarget =
-      firstNumber(
-        summaryPayload?.goal?.dailyCalories,
-        summaryPayload?.target?.dailyCalories,
-        summaryPayload?.dailyCalories,
-        summaryPayload?.targetCalories
-      ) || DEFAULT_CALORIE_TARGET;
+    // Track whether this is the user's REAL target or the 2000 placeholder. When the
+    // summary fetch fails (offline, 429), firstNumber() returns 0 and we fall back to
+    // 2000 — which must never be cached as if it were authoritative, or other screens
+    // reading this cache would reintroduce the misleading-2000 display.
+    const resolvedTarget = firstNumber(
+      summaryPayload?.goal?.dailyCalories,
+      summaryPayload?.target?.dailyCalories,
+      summaryPayload?.dailyCalories,
+      summaryPayload?.targetCalories
+    );
+    const targetResolved = resolvedTarget > 0;
+    const dailyCalorieTarget = resolvedTarget || DEFAULT_CALORIE_TARGET;
 
     // Fallback: if the summary payload is empty/zero, compute from today's meal logs directly.
     if (!hasMacros(consumedMacros)) {
@@ -151,8 +156,8 @@ export const fetchAndCacheHomeDashboard = async ({
       target: buildTargetMacros(dailyCalorieTarget),
     };
 
-    setCachedHomeDashboard(userId, { dbUserName: resolvedUserName, macros });
-    return { ok: true, dbUserName: resolvedUserName, macros };
+    setCachedHomeDashboard(userId, { dbUserName: resolvedUserName, macros, targetResolved });
+    return { ok: true, dbUserName: resolvedUserName, macros, targetResolved };
   } catch (error) {
     console.warn('fetchAndCacheHomeDashboard failed:', error);
     return { ok: false };

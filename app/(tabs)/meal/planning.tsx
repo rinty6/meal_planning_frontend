@@ -4,6 +4,7 @@ import {
   Image,
   Modal,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
@@ -42,6 +43,7 @@ import {
 } from "../../../services/planning.types";
 import type { ItemsByMeal, MealType } from "../../../services/planning.types";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
+import { getCachedHomeSnapshot } from "../../../services/homeStore";
 import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { authedFetch } from "../../../services/authedFetch";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
@@ -379,6 +381,11 @@ const PlanningScreen = () => {
   const prewarmRequestKeyRef = useRef("");
   const shuffleSeedRef = useRef(0);
   const dailyProgressRequestIdRef = useRef(0);
+  // Clerk's getToken is read through a ref so it never has to appear in a
+  // useCallback dependency list. Same pattern as favorites.tsx and
+  // notificationmessage.tsx. See the useFocusEffect note below for why callback
+  // identity stability matters so much on this screen.
+  const getTokenRef = useRef(getToken);
 
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedMealType, setSelectedMealType] = useState<MealType>("breakfast");
@@ -454,13 +461,31 @@ const PlanningScreen = () => {
     const requestId = dailyProgressRequestIdRef.current + 1;
     dailyProgressRequestIdRef.current = requestId;
     setLoadingDailyProgress(true);
+
+    // Instant hydration: the startup screen pre-warms the home dashboard during the
+    // loading animation, so for TODAY the real target is usually already in memory.
+    // Seeding from it renders a real number immediately instead of "Loading..." for
+    // seconds on a cold start, while the authoritative refresh below still runs and
+    // overwrites it. This is the same trick that makes Home feel instant.
+    //
+    // Guards: today only (the cache holds today's summary), and only when the cached
+    // target was actually resolved — never seed the 2000 placeholder.
+    const dateKey = formatLocalYYYYMMDD(selectedDate);
+    if (dailyCalorieTarget === null && dateKey === formatLocalYYYYMMDD(new Date())) {
+      const cachedHome = getCachedHomeSnapshot(userId);
+      const cachedTarget = Math.round(cachedHome?.macros?.target.calories ?? 0);
+      if (cachedHome?.targetResolved && cachedTarget > 0) {
+        setDailyCalorieTarget(cachedTarget);
+        setConsumedCalories(Math.max(0, Math.round(cachedHome.macros?.consumed.calories ?? 0)));
+      }
+    }
+
     try {
-      const dateKey = formatLocalYYYYMMDD(selectedDate);
       const progress = await fetchDailyCalorieProgress({
         apiURL: configuredApiURL,
         clerkId: userId,
         date: dateKey,
-        getToken,
+        getToken: getTokenRef.current,
       });
       if (isMountedRef.current && dailyProgressRequestIdRef.current === requestId) {
         setConsumedCalories(progress.consumedCalories);
@@ -473,7 +498,12 @@ const PlanningScreen = () => {
         setLoadingDailyProgress(false);
       }
     }
-  }, [configuredApiURL, getToken, selectedDate, userId]);
+    // dailyCalorieTarget is intentionally excluded: it is read only as a "have we shown
+    // anything yet" check for seeding, and including it would rebuild this callback on
+    // every refresh and re-trigger the focus effect that calls it. getToken is read via
+    // getTokenRef for the same reason (identity stability), matching favorites.tsx.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configuredApiURL, selectedDate, userId]);
 
   const loadMostConsumed = useCallback(async () => {
     if (!userId || !configuredApiURL) return;
@@ -490,7 +520,7 @@ const PlanningScreen = () => {
     if (!userId || !configuredApiURL) return;
     try {
       const response = await authedFetch(`/api/favorites/list/${encodeURIComponent(userId)}`, {
-        getToken,
+        getToken: getTokenRef.current,
         clerkId: userId,
         cache: "no-store",
       });
@@ -597,6 +627,10 @@ const PlanningScreen = () => {
   }, []);
 
   useEffect(() => {
+    getTokenRef.current = getToken;
+  }, [getToken]);
+
+  useEffect(() => {
     void (async () => {
       if (!userId || !configuredApiURL) {
         setLoadingPreferences(false);
@@ -626,11 +660,29 @@ const PlanningScreen = () => {
     })();
   }, [configuredApiURL, loadMostConsumed, loadRecommendations, showCustomAlert, userId]);
 
+  // The two refreshes are reached through refs so this effect's dependency list can be
+  // PRIMITIVE-ONLY. useFocusEffect is internally `useEffect(..., [effect, navigation])`
+  // and its body invokes the effect immediately whenever the screen is focused — it does
+  // NOT wait for a real focus event. So if the callback's identity changes on every
+  // render, the effect re-fires every render, and because each run calls setState the
+  // render is guaranteed: an unbounded fetch loop that only stops when the screen blurs.
+  // That is exactly what happened here (ERROR_LOG Error 067) — ~2 requests per network
+  // round-trip, forever, while the user sat still on the screen.
+  const refreshDailyProgressRef = useRef(refreshDailyProgress);
+  const loadFavoriteStatusesRef = useRef(loadFavoriteStatuses);
+  useEffect(() => {
+    refreshDailyProgressRef.current = refreshDailyProgress;
+    loadFavoriteStatusesRef.current = loadFavoriteStatuses;
+  }, [loadFavoriteStatuses, refreshDailyProgress]);
+
+  // A date STRING, not the Date object: primitives compare by value, so this re-runs
+  // when the user picks a different day and never merely because a Date was rebuilt.
+  const focusedDateKey = formatLocalYYYYMMDD(selectedDate);
   useFocusEffect(
     useCallback(() => {
-      void refreshDailyProgress();
-      void loadFavoriteStatuses();
-    }, [loadFavoriteStatuses, refreshDailyProgress])
+      void refreshDailyProgressRef.current();
+      void loadFavoriteStatusesRef.current();
+    }, [focusedDateKey])
   );
 
   const openRefine = () => {
@@ -1529,7 +1581,12 @@ const PlanningScreen = () => {
       />
 
       {loadingPreferences && (
-        <View className="absolute inset-0 bg-white/60 items-center justify-center">
+        // StyleSheet.absoluteFill, not Tailwind's `inset-0`: NativeWind does not
+        // translate `inset-0` here, so the overlay had `position:absolute` with no
+        // offsets and collapsed to its content size in the parent's top-left corner —
+        // which is why this spinner moved from the middle of the screen to the top-left.
+        // It was the only `inset-0` in the app; every other overlay already uses this.
+        <View style={StyleSheet.absoluteFill} className="bg-white/60 items-center justify-center">
           <ActivityIndicator size="large" color="#007BFF" />
         </View>
       )}
