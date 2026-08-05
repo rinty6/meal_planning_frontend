@@ -43,6 +43,7 @@ import {
 } from "../../../services/planning.types";
 import type { ItemsByMeal, MealType } from "../../../services/planning.types";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
+import { zoneFromPayload } from "../../../services/calorieBand";
 import { getCachedHomeSnapshot } from "../../../services/homeStore";
 import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { authedFetch } from "../../../services/authedFetch";
@@ -929,11 +930,16 @@ const PlanningScreen = () => {
     return !!externalId && favoriteExternalIds.has(externalId);
   }, [favoriteExternalIds, favoriteItemKeys]);
 
+  // Zone comes from the server's tolerance band (services/calorieBand.ts).
+  // Previously this tested `exceededLimit` first, and that flag was true at one
+  // calorie over target, so "Calorie Target Reached" was unreachable in practice
+  // (ERROR_LOG Error 074).
   const showMealLogOutcome = (payload: any) => {
-    if (payload?.exceededLimit) {
-      showCustomAlert("Calorie Target Exceeded", "Food added, but you crossed your daily calorie goal.");
+    const zone = zoneFromPayload(payload);
+    if (zone === "over") {
+      showCustomAlert("Over your target", "Food added. Tomorrow is a clean slate.");
     } else if (payload?.reachedTarget) {
-      showCustomAlert("Calorie Target Reached", "Great job! You reached your daily calorie target.");
+      showCustomAlert("Calorie Target Reached", "Great job! You're on target for today.");
     } else {
       setShowSuccessModal(true);
     }

@@ -25,6 +25,8 @@ import {
 } from '../../services/mealsSummaryStore';
 import PipReminderCard from '../../components/pip/PipReminderCard';
 import { extractLoggedMealTypes, resolvePipCard } from '../../components/pip/pipHomeState';
+import { type PipState } from '../../components/pip/PipBird';
+import { zoneFromPayload } from '../../services/calorieBand';
 import { authedFetch } from '../../services/authedFetch';
 import {
     fetchAndCacheHomeDashboard,
@@ -136,6 +138,10 @@ const HomeScreen = () => {
     const [isAddFoodModalVisible, setIsAddFoodModalVisible] = useState(false);
     const [activeMealType, setActiveMealType] = useState<MealLogType>('breakfast');
     const [showSuccess, setShowSuccess] = useState(false);
+    // The success dialog reflects where the meal left the user against their
+    // target band, not just "saved".
+    const [successPip, setSuccessPip] = useState<PipState>('eating');
+    const [successMessage, setSuccessMessage] = useState('Meal added successfully!');
     const [isGuidanceVisible, setIsGuidanceVisible] = useState(false);
     const [isNotificationMessagesVisible, setIsNotificationMessagesVisible] = useState(false);
     const [isFeedbackVisible, setIsFeedbackVisible] = useState(false);
@@ -323,6 +329,20 @@ const HomeScreen = () => {
             });
 
             if (!response.ok) throw new Error('Could not save food');
+
+            // Home used to ignore the server's target flags entirely, so the same
+            // food gave different feedback depending on which screen logged it.
+            // Now it reads the same tolerance band as everywhere else.
+            const payload = await response.json().catch(() => null);
+            const zone = zoneFromPayload(payload);
+            setSuccessPip(payload?.reachedTarget ? 'happy' : zone === 'over' ? 'confident' : 'eating');
+            setSuccessMessage(
+                payload?.reachedTarget
+                    ? "You're on target for today. Nice work!"
+                    : zone === 'over'
+                        ? 'Meal added. Tomorrow is a clean slate.'
+                        : 'Meal added successfully!'
+            );
 
             markMealsSummaryDirty(userId, getTodayFormatted());
             setIsAddFoodModalVisible(false);
@@ -576,8 +596,8 @@ const HomeScreen = () => {
             {showSuccess && (
                 <SuccessModal
                     visible={showSuccess}
-                    message="Meal added successfully!"
-                    pip="eating"
+                    message={successMessage}
+                    pip={successPip}
                     onClose={() => setShowSuccess(false)}
                 />
             )}

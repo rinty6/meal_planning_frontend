@@ -7,6 +7,7 @@
  */
 
 import type { PipState } from './PipBird';
+import { resolveCalorieZone } from '../../services/calorieBand';
 
 export type MealLogType = 'breakfast' | 'lunch' | 'dinner';
 
@@ -73,9 +74,11 @@ export function resolvePipCard({
   }
 
   const remaining = Math.max(0, calorieTarget - consumedCalories);
+  const zone = resolveCalorieZone(consumedCalories, calorieTarget);
 
-  // 1. Target reached. Highest priority: a win outranks everything else.
-  if (consumedCalories >= calorieTarget) {
+  // 1. Inside the tolerance band. Highest priority: a win outranks everything
+  //    else. This is a band rather than an exact hit — see services/calorieBand.ts.
+  if (zone === 'on_target') {
     return {
       mealType: null,
       state: 'happy',
@@ -84,9 +87,20 @@ export function resolvePipCard({
     };
   }
 
+  // 2. Past the top of the band. Confident, never a scolding — and no meal
+  //    prompt, since suggesting another meal here would be absurd.
+  if (zone === 'over') {
+    return {
+      mealType: null,
+      state: 'confident',
+      subline: 'Tomorrow is a clean slate. One day does not undo a week.',
+      title: `${kcal(consumedCalories - calorieTarget)} kcal over today.`,
+    };
+  }
+
   const openWindow = MEAL_WINDOWS.find((w) => hour >= w.start && hour < w.end) ?? null;
 
-  // 2. Inside a meal window that has not been logged yet.
+  // 3. Inside a meal window that has not been logged yet.
   //
   // This deliberately outranks Sad. If breakfast was missed but it is now
   // lunchtime, the useful thing to say is "time for lunch", not "you missed
@@ -101,7 +115,7 @@ export function resolvePipCard({
     };
   }
 
-  // 3. A meal window has closed with nothing logged against it.
+  // 4. A meal window has closed with nothing logged against it.
   if (loggedMealTypes) {
     const closed = MEAL_WINDOWS.filter((w) => hour >= w.end);
     const lastClosed = closed[closed.length - 1];
@@ -137,7 +151,7 @@ export function resolvePipCard({
     }
   }
 
-  // 4. Behind target with real time left in the day.
+  // 5. Behind target with real time left in the day.
   if (hour < DAY_ENDS_HOUR - CONFIDENT_MIN_HOURS_LEFT) {
     return {
       mealType: null,
@@ -147,7 +161,7 @@ export function resolvePipCard({
     };
   }
 
-  // 5. Default resting state.
+  // 6. Default resting state.
   return {
     mealType: null,
     state: 'idle',

@@ -7,6 +7,8 @@ import { useAuth } from '@clerk/clerk-expo';
 import { authedFetch } from '../../../services/authedFetch';
 import AddFoodModal from '../../../components/addfoodmodal';
 import SuccessModal from '../../../components/sucessmodal';
+import { type PipState } from '../../../components/pip/PipBird';
+import { zoneFromPayload } from '../../../services/calorieBand';
 import {
   fetchMealsSummaryWithCache,
   getCachedMealsSummary,
@@ -115,6 +117,8 @@ export default function SummaryScreen() {
   const [loading, setLoading] = useState(false);
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [successPip, setSuccessPip] = useState<PipState>('eating');
+  const [successMessage, setSuccessMessage] = useState('Meal added successfully!');
   const [activeMealType, setActiveMealType] = useState('breakfast');
 
   // --- GENERATE DATES FOR THE MONTH ---
@@ -273,7 +277,7 @@ export default function SummaryScreen() {
         image: foodItem.image || ""
       };
       
-      await authedFetch(`/api/meals/add`, {
+      const response = await authedFetch(`/api/meals/add`, {
           method: 'POST',
           getToken,
           clerkId: userId,
@@ -281,10 +285,22 @@ export default function SummaryScreen() {
       });
       markMealsSummaryDirty(userId, formattedDate);
 
+      // This screen previously gave no confirmation at all — the modal just closed.
+      // Show the same Pip success the other log flows use, reading the same
+      // tolerance band (services/calorieBand.ts).
+      const body = await response.json().catch(() => null);
+      const zone = zoneFromPayload(body);
+      setSuccessPip(body?.reachedTarget ? 'happy' : zone === 'over' ? 'confident' : 'eating');
+      setSuccessMessage(
+        body?.reachedTarget
+          ? "You're on target for today. Nice work!"
+          : zone === 'over'
+            ? 'Meal added. Tomorrow is a clean slate.'
+            : 'Meal added successfully!'
+      );
+
       setIsAddModalVisible(false);
       fetchMeals(); // Keep fetchMeals here as Modal closing transition hides the reload well enough
-      // This screen previously gave no confirmation at all — the modal just closed.
-      // Show the same eating-Pip success the other log flows use.
       setShowSuccess(true);
     } catch (e) { console.error(e); }
   };
@@ -393,8 +409,8 @@ export default function SummaryScreen() {
       {showSuccess && (
         <SuccessModal
           visible={showSuccess}
-          message="Meal added successfully!"
-          pip="eating"
+          message={successMessage}
+          pip={successPip}
           onClose={() => setShowSuccess(false)}
         />
       )}

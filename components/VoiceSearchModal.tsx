@@ -47,6 +47,7 @@ import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
 import { searchFoodItems, searchRecipes } from '../services/mealAPI';
 import { authedFetch } from '../services/authedFetch';
 import { markMealsSummaryDirty } from '../services/mealsSummaryStore';
+import { zoneFromPayload } from '../services/calorieBand';
 import InlineStatusOverlay, { type InlineStatusVariant } from './InlineStatusOverlay';
 import { type PipState } from './pip/PipBird';
 
@@ -465,11 +466,13 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
 
         markMealsSummaryDirty(userId, date);
 
+        // Same tolerance band as everywhere else — see services/calorieBand.ts.
         const slot = mealType[0].toUpperCase() + mealType.slice(1);
-        if (body?.exceededLimit) {
-          flashStatus('success', 'Added — heads up', `${slot}: you crossed your daily calorie goal`, 'eating');
+        const zone = zoneFromPayload(body);
+        if (zone === 'over') {
+          flashStatus('success', 'Added — over target', `${slot}: tomorrow is a clean slate`, 'confident');
         } else if (body?.reachedTarget) {
-          flashStatus('success', 'Added — nice!', `${slot}: you reached your daily target`, 'happy');
+          flashStatus('success', 'Added — nice!', `${slot}: you're on target for today`, 'happy');
         } else {
           flashStatus('success', 'Added to your meal plan', slot, 'eating');
         }
