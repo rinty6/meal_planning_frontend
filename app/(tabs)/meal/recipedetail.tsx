@@ -1074,9 +1074,13 @@ const RecipeDetailScreen = () => {
         </TouchableWithoutFeedback>
       </Modal>
 
-      <SuccessModal 
+      {/* This screen reuses one SuccessModal for several outcomes. Only logging a
+          meal gets the eating bird; saving a recipe or shopping list keeps the
+          original checkmark. */}
+      <SuccessModal
         visible={showSuccessModal}
         message={successMessage}
+        pip={successAction === 'meal' ? 'eating' : undefined}
         onClose={handleCloseModal}
       />
       

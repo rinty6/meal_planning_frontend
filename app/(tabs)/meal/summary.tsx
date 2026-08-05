@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import { authedFetch } from '../../../services/authedFetch';
 import AddFoodModal from '../../../components/addfoodmodal';
+import SuccessModal from '../../../components/sucessmodal';
 import {
   fetchMealsSummaryWithCache,
   getCachedMealsSummary,
@@ -113,6 +114,7 @@ export default function SummaryScreen() {
   const [meals, setMeals] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [activeMealType, setActiveMealType] = useState('breakfast');
 
   // --- GENERATE DATES FOR THE MONTH ---
@@ -281,6 +283,9 @@ export default function SummaryScreen() {
 
       setIsAddModalVisible(false);
       fetchMeals(); // Keep fetchMeals here as Modal closing transition hides the reload well enough
+      // This screen previously gave no confirmation at all — the modal just closed.
+      // Show the same eating-Pip success the other log flows use.
+      setShowSuccess(true);
     } catch (e) { console.error(e); }
   };
 
@@ -381,7 +386,19 @@ export default function SummaryScreen() {
           onAddFood={handleAddNewFood}
         />
       )}
-      
+
+      {/* Conditionally rendered, matching the AddFoodModal above: the two never
+          need to be mounted at once, which keeps us clear of the iOS stacked-Modal
+          problem (Errors 019 / 055). */}
+      {showSuccess && (
+        <SuccessModal
+          visible={showSuccess}
+          message="Meal added successfully!"
+          pip="eating"
+          onClose={() => setShowSuccess(false)}
+        />
+      )}
+
     </SafeAreaView>
   );
 }

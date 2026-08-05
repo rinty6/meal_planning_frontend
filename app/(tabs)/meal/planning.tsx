@@ -1577,6 +1577,7 @@ const PlanningScreen = () => {
       <SuccessModal
         visible={showSuccessModal}
         message="Meal added successfully!"
+        pip="eating"
         onClose={() => setShowSuccessModal(false)}
       />
 

@@ -48,6 +48,7 @@ import { searchFoodItems, searchRecipes } from '../services/mealAPI';
 import { authedFetch } from '../services/authedFetch';
 import { markMealsSummaryDirty } from '../services/mealsSummaryStore';
 import InlineStatusOverlay, { type InlineStatusVariant } from './InlineStatusOverlay';
+import { type PipState } from './pip/PipBird';
 
 type VoiceSearchMode = 'food' | 'recipe';
 type VoiceSearchScreen = 'chooser' | 'listening' | 'searching' | 'results' | 'notfound';
@@ -282,7 +283,7 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
   const [pendingItem, setPendingItem] = useState<any>(null);
   const [logServings, setLogServings] = useState(1);
   const [addingId, setAddingId] = useState<string | null>(null);
-  const [statusOverlay, setStatusOverlay] = useState<{ variant: InlineStatusVariant; title: string; message: string } | null>(null);
+  const [statusOverlay, setStatusOverlay] = useState<{ variant: InlineStatusVariant; title: string; message: string; pip?: PipState } | null>(null);
 
   // Same guard as addfoodmodal.tsx: a slow earlier search must never overwrite a
   // newer one's results.
@@ -292,8 +293,10 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
 
   const modeWord = mode === 'food' ? 'food' : 'recipe';
 
-  const flashStatus = useCallback((variant: InlineStatusVariant, title: string, message: string) => {
-    setStatusOverlay({ variant, title, message });
+  // `pip` is optional: only the meal-logged confirmations carry the bird, so
+  // search and sign-in messages keep the plain icon card.
+  const flashStatus = useCallback((variant: InlineStatusVariant, title: string, message: string, pip?: PipState) => {
+    setStatusOverlay({ variant, title, message, pip });
   }, []);
 
   const runSearch = useCallback(async (rawText: string, searchMode: VoiceSearchMode) => {
@@ -464,11 +467,11 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
 
         const slot = mealType[0].toUpperCase() + mealType.slice(1);
         if (body?.exceededLimit) {
-          flashStatus('success', 'Added — heads up', `${slot}: you crossed your daily calorie goal`);
+          flashStatus('success', 'Added — heads up', `${slot}: you crossed your daily calorie goal`, 'eating');
         } else if (body?.reachedTarget) {
-          flashStatus('success', 'Added — nice!', `${slot}: you reached your daily target`);
+          flashStatus('success', 'Added — nice!', `${slot}: you reached your daily target`, 'happy');
         } else {
-          flashStatus('success', 'Added to your meal plan', slot);
+          flashStatus('success', 'Added to your meal plan', slot, 'eating');
         }
       } catch {
         flashStatus('error', 'Could not add', `We couldn't add this ${modeWord}. Please try again.`);
@@ -789,6 +792,7 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
             variant={statusOverlay?.variant ?? 'success'}
             title={statusOverlay?.title ?? ''}
             message={statusOverlay?.message ?? ''}
+            pip={statusOverlay?.pip}
             onHide={() => setStatusOverlay(null)}
           />
         </View>

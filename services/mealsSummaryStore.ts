@@ -7,6 +7,7 @@
 //   focus refetches the source of truth instead of trusting stale data.
 
 import { authedFetch, type GetToken } from "./authedFetch";
+import { markHomeDashboardDirty } from "./homeStore";
 
 type MealsSnapshot = {
   meals: any[];
@@ -53,6 +54,11 @@ export const markMealsSummaryDirty = (
   date?: string | null
 ) => {
   if (!userId) return;
+
+  // Home's calorie totals are derived from the same meal rows, so the two caches
+  // must always go stale together. Doing it here rather than at each call site
+  // means a future mutation screen cannot invalidate one and forget the other.
+  markHomeDashboardDirty(userId);
 
   if (date) {
     const key = buildKey(userId, date);

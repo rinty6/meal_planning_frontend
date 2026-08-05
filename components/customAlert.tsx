@@ -3,6 +3,7 @@
 import { Modal, View, Text, TouchableOpacity } from 'react-native';
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { confirmationType } from './confirmationTypography';
 
 interface CustomAlertProps {
   visible: boolean;
@@ -37,9 +38,9 @@ const CustomAlert = ({
             </View>
           )}
 
-          {/* Title & Message */}
-          <Text className="text-xl font-bold text-center text-gray-900 mb-2">{title}</Text>
-          <Text className="text-gray-500 text-center mb-6 leading-5">{message}</Text>
+          {/* Title & Message — shared confirmation type scale. */}
+          <Text style={confirmationType.title} className="mb-2">{title}</Text>
+          <Text style={confirmationType.message} className="mb-6">{message}</Text>
 
           {/* Buttons Row */}
           <View className={`flex-row justify-between w-full ${!onCancel ? 'justify-center' : ''}`}>

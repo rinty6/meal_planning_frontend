@@ -21,9 +21,44 @@ type HomeSnapshot = {
    */
   targetResolved: boolean;
   dashboardFetchedAt: number;
+  /**
+   * Set when a meal was added, edited or deleted anywhere in the app. Until this
+   * store had a dirty flag, the only staleness control was the 15s TTL below, so
+   * a meal logged from another screen left Home showing old calorie numbers.
+   */
+  dirty: boolean;
 };
 
 const homeByUser = new Map<string, HomeSnapshot>();
+
+/**
+ * Listeners notified whenever meal data changes.
+ *
+ * The TTL and dirty flag are enough for screens that re-run their focus effect,
+ * but the voice-search modal is mounted inside the tabs layout and renders over
+ * the active tab. A React Native Modal is not a navigation event, so Home never
+ * blurs and never re-focuses while it is used — nothing would ever prompt a
+ * refresh. Subscribers get told directly instead.
+ */
+type HomeDataListener = () => void;
+const listeners = new Set<HomeDataListener>();
+
+export const subscribeToHomeData = (listener: HomeDataListener) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+
+const notifyHomeDataChanged = () => {
+  listeners.forEach((listener) => {
+    try {
+      listener();
+    } catch (error) {
+      console.warn('home data listener failed:', error);
+    }
+  });
+};
 
 const cloneMacros = (macros: HomeMacroState | null) =>
   macros
@@ -42,6 +77,7 @@ export const getCachedHomeSnapshot = (userId?: string | null): HomeSnapshot | nu
     macros: cloneMacros(snapshot.macros),
     targetResolved: snapshot.targetResolved,
     dashboardFetchedAt: snapshot.dashboardFetchedAt,
+    dirty: snapshot.dirty,
   };
 };
 
@@ -54,6 +90,9 @@ export const setCachedHomeDashboard = (
     macros: cloneMacros(payload.macros),
     targetResolved: payload.targetResolved !== false,
     dashboardFetchedAt: Date.now(),
+    // A successful write is the only thing that clears the flag, so a refresh
+    // that gets skipped or fails stays queued for the next opportunity.
+    dirty: false,
   });
 };
 
@@ -64,12 +103,28 @@ export const setCachedHomeUserName = (userId: string, dbUserName: string) => {
     macros: cloneMacros(current?.macros || null),
     targetResolved: current?.targetResolved ?? false,
     dashboardFetchedAt: current?.dashboardFetchedAt || 0,
+    dirty: current?.dirty ?? false,
   });
+};
+
+/**
+ * Marks the cached dashboard stale and tells subscribers. Called for every meal
+ * mutation via markMealsSummaryDirty, so new mutation sites cannot forget it.
+ */
+export const markHomeDashboardDirty = (userId?: string | null) => {
+  if (userId) {
+    const current = homeByUser.get(userId);
+    if (current) {
+      homeByUser.set(userId, { ...current, dirty: true });
+    }
+  }
+  notifyHomeDataChanged();
 };
 
 export const shouldRefreshHomeDashboard = (userId?: string | null, maxAgeMs = 15_000) => {
   if (!userId) return false;
   const snapshot = homeByUser.get(userId);
   if (!snapshot?.macros) return true;
+  if (snapshot.dirty) return true;
   return Date.now() - snapshot.dashboardFetchedAt > maxAgeMs;
 };

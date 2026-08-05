@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth, useUser } from '@clerk/clerk-expo';
@@ -17,8 +16,15 @@ import FeedbackSendingMessage from '../../components/feedbacksendingmessage';
 import {
     getCachedHomeSnapshot,
     shouldRefreshHomeDashboard,
+    subscribeToHomeData,
 } from '../../services/homeStore';
-import { markMealsSummaryDirty } from '../../services/mealsSummaryStore';
+import {
+    fetchMealsSummaryWithCache,
+    getCachedMealsSummary,
+    markMealsSummaryDirty,
+} from '../../services/mealsSummaryStore';
+import PipReminderCard from '../../components/pip/PipReminderCard';
+import { extractLoggedMealTypes, resolvePipCard } from '../../components/pip/pipHomeState';
 import { authedFetch } from '../../services/authedFetch';
 import {
     fetchAndCacheHomeDashboard,
@@ -33,13 +39,6 @@ import {
 type MealLogType = 'breakfast' | 'lunch' | 'dinner';
 
 const HOME_DASHBOARD_REFRESH_TTL_MS = 15 * 1000;
-const HERO_IMAGE = require('../../assets/images/homepage_hero_image.png');
-// Read straight from the bundled asset's own metadata so the hero container always
-// matches its real proportions, even if the image file is swapped out later.
-const HERO_IMAGE_ASPECT_RATIO = (() => {
-    const { width, height } = Image.resolveAssetSource(HERO_IMAGE);
-    return width / height;
-})();
 const THEME_COLORS = {
     primary: '#007BFF',
     secondary: '#FF9500',
@@ -96,6 +95,16 @@ const HomeScreen = () => {
     useEffect(() => {
         getTokenRef.current = getToken;
     }, [getToken]);
+
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            setCurrentHour((previous) => {
+                const next = new Date().getHours();
+                return next === previous ? previous : next;
+            });
+        }, 60 * 1000);
+        return () => clearInterval(intervalId);
+    }, []);
     
     // Start already-loaded when the startup screen pre-warmed the cache — avoids a
     // one-frame white spinner flash on arrival (IMPLEMENTATION_CHECKLIST §4A.5 / E22).
@@ -107,6 +116,22 @@ const HomeScreen = () => {
         consumed: { calories: 0, protein: 0, carbs: 0, fats: 0 },
         target: buildTargetMacros(DEFAULT_CALORIE_TARGET)
     });
+    // Whether `macros.target` is the user's real goal or the 2000 kcal placeholder.
+    // Pip must not show an emotional state off a fabricated target (Error 066).
+    const [targetResolved, setTargetResolved] = useState(
+        () => getCachedHomeSnapshot(userId)?.targetResolved ?? false
+    );
+    // Which meals are already logged today, or null until that data arrives.
+    const [loggedMealTypes, setLoggedMealTypes] = useState<Set<MealLogType> | null>(null);
+    // Pip's state depends on the hour, so a screen left open must not keep saying
+    // "Time for lunch?" at 3pm. Only re-renders when the hour actually rolls over.
+    const [currentHour, setCurrentHour] = useState(() => new Date().getHours());
+    // Guards the async meals read against setting state after the screen blurs.
+    const isScreenActiveRef = useRef(true);
+    // Stops overlapping dashboard fetches when several mutations land at once.
+    // A skipped refresh is safe: the store's dirty flag is only cleared by a
+    // successful write, so the next focus or notification picks it up.
+    const dashboardInFlightRef = useRef(false);
 
     const [isAddFoodModalVisible, setIsAddFoodModalVisible] = useState(false);
     const [activeMealType, setActiveMealType] = useState<MealLogType>('breakfast');
@@ -146,8 +171,30 @@ const HomeScreen = () => {
         }
         if (cached.macros) {
             setMacros(cached.macros);
+            setTargetResolved(cached.targetResolved);
             setLoading(false);
         }
+    }, [userId]);
+
+    /**
+     * Reads today's meals for the Pip card. Goes through the shared meals cache,
+     * which is TTL'd and dedupes in-flight requests, so this costs nothing when
+     * the Meal tabs have already fetched it (Errors 014 / 059 / 067).
+     */
+    const loadTodayMeals = useCallback(async () => {
+        if (!userId) return;
+        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
+        if (!apiURL) return;
+
+        const meals = await fetchMealsSummaryWithCache({
+            apiURL,
+            userId,
+            date: getTodayFormatted(),
+            getToken: getTokenRef.current,
+        });
+
+        if (!isScreenActiveRef.current || !meals) return;
+        setLoggedMealTypes(extractLoggedMealTypes(meals));
     }, [userId]);
 
     const loadDashboardData = useCallback(async ({ showSpinner = true } = {}) => {
@@ -155,6 +202,8 @@ const HomeScreen = () => {
             setLoading(false);
             return;
         }
+        if (dashboardInFlightRef.current) return;
+        dashboardInFlightRef.current = true;
 
         if (showSpinner) setLoading(true);
         try {
@@ -175,35 +224,65 @@ const HomeScreen = () => {
             if (result.ok) {
                 setDbUserName(result.dbUserName);
                 setMacros(result.macros);
+                setTargetResolved(result.targetResolved);
             }
         } catch (error) {
             console.error("Dashboard Load Error:", error);
         } finally {
+            dashboardInFlightRef.current = false;
             if (showSpinner) setLoading(false);
         }
     }, [userId, clerkUser?.firstName]);
 
+    /**
+     * Refresh when a meal changes anywhere in the app.
+     *
+     * The focus effect below cannot cover the voice-search modal: it renders over
+     * the active tab from the tabs layout, so Home never blurs and never
+     * re-focuses while it is used. Subscribing is what makes a voice-logged meal
+     * update the dashboard and the Pip card without leaving the screen.
+     */
+    useEffect(() => {
+        const unsubscribe = subscribeToHomeData(() => {
+            if (!isScreenActiveRef.current) return;
+            void loadDashboardData({ showSpinner: false });
+            void loadTodayMeals();
+        });
+        return unsubscribe;
+    }, [loadDashboardData, loadTodayMeals]);
+
     useFocusEffect(useCallback(() => {
         let isActive = true;
+        isScreenActiveRef.current = true;
 
         const initializeHomeScreen = () => {
             const cached = getCachedHomeSnapshot(userId);
             hydrateFromCache();
             if (!isActive) return;
 
+            // Synchronous read first so the Pip card renders its real state on the
+            // very first frame whenever another tab has already loaded today's meals.
+            const cachedMeals = getCachedMealsSummary(userId, getTodayFormatted());
+            if (cachedMeals) {
+                setLoggedMealTypes(extractLoggedMealTypes(cachedMeals.meals));
+            }
+
             const shouldRefreshDashboard = shouldRefreshHomeDashboard(userId, HOME_DASHBOARD_REFRESH_TTL_MS) || !cached?.macros;
 
             if (shouldRefreshDashboard) {
                 void loadDashboardData({ showSpinner: !cached?.macros });
             }
+
+            void loadTodayMeals();
         };
 
         initializeHomeScreen();
 
         return () => {
             isActive = false;
+            isScreenActiveRef.current = false;
         };
-    }, [hydrateFromCache, loadDashboardData, userId]));
+    }, [hydrateFromCache, loadDashboardData, loadTodayMeals, userId]));
 
     const handleOpenHomeAddFood = () => {
         setActiveMealType(getDefaultMealLogType());
@@ -249,6 +328,8 @@ const HomeScreen = () => {
             setIsAddFoodModalVisible(false);
             setShowSuccess(true);
             void loadDashboardData({ showSpinner: false });
+            // Refresh the Pip card so a just-logged meal clears its reminder.
+            void loadTodayMeals();
         } catch (error) {
             console.error('Home add food error:', error);
             showCustomAlert('Error', 'Failed to add food item.');
@@ -273,6 +354,24 @@ const HomeScreen = () => {
     const exhaustedCalories = Math.max(0, consumedCalories - calorieTarget);
     const calorieProgressPercent = Math.min(100, Math.max(0, (consumedCalories / calorieTarget) * 100));
 
+    // Pip's home state. Recomputed only when its real inputs move, so a re-render
+    // never restarts the animation on its own.
+    const pipCard = React.useMemo(
+        () => resolvePipCard({
+            calorieTarget,
+            consumedCalories,
+            hour: currentHour,
+            loggedMealTypes,
+            targetResolved,
+        }),
+        [calorieTarget, consumedCalories, currentHour, loggedMealTypes, targetResolved]
+    );
+
+    const handleOpenPipCard = () => {
+        setActiveMealType(pipCard.mealType ?? getDefaultMealLogType());
+        setIsAddFoodModalVisible(true);
+    };
+
     if (loading) {
         return (
             <SafeAreaView className="flex-1 justify-center items-center bg-background" edges={['top', 'left', 'right']}>
@@ -285,58 +384,7 @@ const HomeScreen = () => {
         <SafeAreaView className="flex-1 bg-background" edges={['top', 'left', 'right']}>
             <ScrollView className="px-4 pt-4" showsVerticalScrollIndicator={false}>
 
-                {/* 1. Hero Section */}
-                <View
-                    className="mb-6 rounded-3xl overflow-hidden"
-                    style={{
-                        width: '100%',
-                        aspectRatio: HERO_IMAGE_ASPECT_RATIO,
-                        shadowColor: '#0F172A',
-                        shadowOpacity: 0.1,
-                        shadowRadius: 8,
-                        shadowOffset: { width: 0, height: 2 },
-                        elevation: 3,
-                    }}
-                >
-                    <Image
-                        source={HERO_IMAGE}
-                        style={{width:'100%', height: 200}}
-                        resizeMode="cover"
-                    />
-                    <LinearGradient
-                        colors={['rgba(11,33,73,0)', 'rgba(11,33,73,0.8)']}
-                        locations={[0.38, 1]}
-                        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
-                    />
-                    <View
-                        style={{
-                            position: 'absolute',
-                            top: 14,
-                            left: 14,
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            backgroundColor: 'rgba(255,255,255,0.92)',
-                            borderRadius: 999,
-                            paddingHorizontal: 11,
-                            paddingVertical: 6,
-                        }}
-                    >
-                        <Ionicons name="restaurant" size={14} color={THEME_COLORS.secondary} style={{ marginRight: 6 }} />
-                        <Text style={{ fontSize: 11, fontWeight: '800', color: THEME_COLORS.textDeep }}>
-                            Balanced plate
-                        </Text>
-                    </View>
-                    <View style={{ position: 'absolute', left: 18, right: 18, bottom: 17 }}>
-                        <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.4, color: 'rgba(255,255,255,0.88)', marginBottom: 6 }}>
-                            {"TODAY'S FOCUS"}
-                        </Text>
-                        <Text style={{ fontSize: 22, fontWeight: '800', color: '#FFFFFF', lineHeight: 25 }}>
-                            Small choices add up to big results
-                        </Text>
-                    </View>
-                </View>
-
-                {/* 2. Header Section */}
+                {/* 1. Header Section */}
                 <View className="flex-row justify-between items-center mb-6">
                     <View className="flex-row items-center flex-1 pr-3">
                         {clerkUser?.imageUrl ? (
@@ -375,6 +423,9 @@ const HomeScreen = () => {
                         <View className="absolute top-1 right-2 w-2.5 h-2.5 rounded-full border border-white" style={{ backgroundColor: '#EF4444' }} />
                     </TouchableOpacity>
                 </View>
+
+                {/* 2. Pip reminder card (replaced the hero image) */}
+                <PipReminderCard model={pipCard} onPress={handleOpenPipCard} />
 
                 {/* 3. Calorie Summary Section */}
                 <View className='flex-row items-center justify-between'>
@@ -526,6 +577,7 @@ const HomeScreen = () => {
                 <SuccessModal
                     visible={showSuccess}
                     message="Meal added successfully!"
+                    pip="eating"
                     onClose={() => setShowSuccess(false)}
                 />
             )}
@@ -578,6 +630,29 @@ const HomeScreen = () => {
                     onSubmitted={() => setIsFeedbackVisible(false)}
                 />
             </SafeFullScreenModal>
+
+            {/* DEV ONLY — entry point for the Pip rig preview. Remove before the release build. */}
+            {__DEV__ && (
+                <TouchableOpacity
+                    onPress={() => router.push('/pip-preview')}
+                    style={{
+                        position: 'absolute',
+                        right: 16,
+                        bottom: 24,
+                        backgroundColor: '#2B7BE0',
+                        borderRadius: 999,
+                        paddingHorizontal: 16,
+                        paddingVertical: 10,
+                        shadowColor: '#0F172A',
+                        shadowOpacity: 0.25,
+                        shadowRadius: 8,
+                        shadowOffset: { width: 0, height: 2 },
+                        elevation: 4,
+                    }}
+                >
+                    <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>Pip preview</Text>
+                </TouchableOpacity>
+            )}
         </SafeAreaView>
     );
 };

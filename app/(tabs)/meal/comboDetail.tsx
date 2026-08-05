@@ -653,6 +653,7 @@ const FoodDetailScreen = () => {
       <SuccessModal
         visible={showSuccess}
         message="Meal added successfully!"
+        pip="eating"
         onClose={handleCloseSuccess}
       />
     </SafeAreaView>

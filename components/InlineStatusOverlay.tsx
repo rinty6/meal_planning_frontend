@@ -18,6 +18,8 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import PipBird, { type PipState } from './pip/PipBird';
+import { confirmationType } from './confirmationTypography';
 
 export type InlineStatusVariant = 'success' | 'error';
 
@@ -26,9 +28,25 @@ interface InlineStatusOverlayProps {
   variant: InlineStatusVariant;
   title: string;
   message: string;
+  /**
+   * Optional Pip state shown in place of the icon circle. Left undefined, the
+   * card keeps its original checkmark/cross, so existing callers are unaffected.
+   */
+  pip?: PipState;
   onHide: () => void;
   autoDismissMs?: number;
 }
+
+/**
+ * Pip's one-shot states need longer on screen than the default dismiss:
+ * eating runs 3 x 700ms and happy 2 x 950ms. Auto-dismissing at the old 2000ms
+ * would cut the animation off mid-beat (the Error 018 "too fast to read" trap),
+ * so a Pip card holds for the animation plus a beat to read the copy.
+ */
+const PIP_MIN_DISMISS_MS: Partial<Record<PipState, number>> = {
+  eating: 3000,
+  happy: 3000,
+};
 
 const PAL = {
   // Matches customAlert.tsx / sucessmodal.tsx's `bg-black/50` backdrop, so this
@@ -38,8 +56,8 @@ const PAL = {
   backdrop: 'rgba(0,0,0,0.5)',
   successBg: '#007BFF',
   errorBg: '#EF4444',
-  title: '#0B2149',
-  message: '#6B7280',
+  // Title/message colours now come from confirmationTypography so every
+  // confirmation in the app shares them.
 };
 
 const InlineStatusOverlay = ({
@@ -47,11 +65,14 @@ const InlineStatusOverlay = ({
   variant,
   title,
   message,
+  pip,
   onHide,
   autoDismissMs = 2000,
 }: InlineStatusOverlayProps) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Never dismiss before Pip has finished his beat.
+  const dismissAfterMs = Math.max(autoDismissMs, (pip && PIP_MIN_DISMISS_MS[pip]) ?? 0);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -73,13 +94,13 @@ const InlineStatusOverlay = ({
       }).start(({ finished }) => {
         if (finished) onHide();
       });
-    }, autoDismissMs);
+    }, dismissAfterMs);
 
     return () => {
       if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, autoDismissMs]);
+  }, [visible, dismissAfterMs]);
 
   if (!visible) return null;
 
@@ -92,9 +113,15 @@ const InlineStatusOverlay = ({
     // confirmation is up, and this overlay still clears itself automatically.
     <Animated.View style={[styles.overlay, { opacity }]}>
       <View style={styles.card}>
-        <View style={[styles.iconCircle, { backgroundColor: isSuccess ? PAL.successBg : PAL.errorBg }]}>
-          <Ionicons name={isSuccess ? 'checkmark' : 'close'} size={26} color="#fff" />
-        </View>
+        {pip ? (
+          <View style={styles.pipSlot}>
+            <PipBird size={92} state={pip} />
+          </View>
+        ) : (
+          <View style={[styles.iconCircle, { backgroundColor: isSuccess ? PAL.successBg : PAL.errorBg }]}>
+            <Ionicons name={isSuccess ? 'checkmark' : 'close'} size={26} color="#fff" />
+          </View>
+        )}
         <Text style={styles.title}>{title}</Text>
         {!!message && <Text style={styles.message}>{message}</Text>}
       </View>
@@ -133,19 +160,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
+  // Bottom-aligned so Pip stands on the card's baseline rather than floating.
+  pipSlot: {
+    height: 92,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginBottom: 6,
+  },
+  // Weight/colour/alignment come from the shared confirmation scale so this card
+  // reads as the same family as CustomAlert and SuccessModal.
   title: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: PAL.title,
-    textAlign: 'center',
+    ...confirmationType.titleCompact,
     marginBottom: 4,
   },
-  message: {
-    fontSize: 13,
-    color: PAL.message,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
+  message: confirmationType.messageCompact,
 });
 
 export default InlineStatusOverlay;

@@ -24,6 +24,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { confirmationType } from './confirmationTypography';
 import { useAuth } from '@clerk/clerk-expo';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -74,6 +75,10 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   // Locks the manual save flow: shows a spinner and blocks close/back/re-tap until
   // the parent's save + result message have completed (prevents double-add / races).
   const [savingManual, setSavingManual] = useState(false);
+
+  // True while EITHER add path is saving. Both paths await the parent's full save,
+  // so this is the one flag that blocks close/back/re-tap for the whole operation.
+  const isSavingFood = savingManual || addingId !== null;
 
   // --- BARCODE ---
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -300,10 +305,18 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   const handleAddClick = async (id: string) => {
+    // Re-entrancy guard, mirroring handleSaveManual. Adding a search result is two
+    // sequential round trips (FatSecret detail lookup, then the parent's POST), so
+    // without this a second tap during that window logs the meal twice.
+    if (isSavingFood) return;
     setAddingId(id);
     try {
       const detailedFood = await getFoodById(id);
-      if (detailedFood) onAddFood(detailedFood);
+      // Await the parent's whole save (network + result message) so the busy state
+      // covers the entire operation. Previously this returned after the detail
+      // lookup, leaving the modal fully interactive while the POST was still in
+      // flight — closing it then popped the success dialog onto another screen.
+      if (detailedFood) await onAddFood(detailedFood);
     } catch (error) {
       console.error('Error adding food:', error);
     } finally {
@@ -403,7 +416,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   const handleClose = () => {
-    if (savingManual) return; // don't let the user dismiss mid-save
+    if (isSavingFood) return; // don't let the user dismiss mid-save (either path)
     resetManualForm();
     resetSearchState();
     clearRecognitionState();
@@ -411,7 +424,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   const handleBackPress = () => {
-    if (savingManual) return; // don't leave the form while a save is in flight
+    if (isSavingFood) return; // don't leave the form while a save is in flight
     if (viewMode === 'recognition') {
       clearRecognitionState();
       setViewMode('search');
@@ -438,15 +451,15 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
             {/* HEADER */}
             <View className="px-5 pt-5 pb-2 flex-row justify-between items-center border-b border-gray-100">
               {(viewMode === 'manual' || viewMode === 'recognition') ? (
-                <TouchableOpacity onPress={handleBackPress} disabled={savingManual} className="p-2">
-                  <Ionicons name="arrow-back" size={24} color={savingManual ? '#D1D5DB' : 'black'} />
+                <TouchableOpacity onPress={handleBackPress} disabled={isSavingFood} className="p-2">
+                  <Ionicons name="arrow-back" size={24} color={isSavingFood ? '#D1D5DB' : 'black'} />
                 </TouchableOpacity>
               ) : (
                 <View className="w-8" />
               )}
               <Text className="text-xl font-bold text-black capitalize">{headerTitle}</Text>
-              <TouchableOpacity onPress={handleClose} disabled={savingManual} className="bg-gray-100 p-2 rounded-full">
-                <Ionicons name="close" size={20} color={savingManual ? '#D1D5DB' : 'black'} />
+              <TouchableOpacity onPress={handleClose} disabled={isSavingFood} className="bg-gray-100 p-2 rounded-full">
+                <Ionicons name="close" size={20} color={isSavingFood ? '#D1D5DB' : 'black'} />
               </TouchableOpacity>
             </View>
 
@@ -494,10 +507,12 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                             {buildSearchResultMacroText(item)}
                           </Text>
                         </View>
+                        {/* Every row is disabled while any add is in flight, not just
+                            the tapped one — otherwise a second tap logs a second meal. */}
                         <TouchableOpacity
                           onPress={() => handleAddClick(item.id)}
-                          disabled={addingId === item.id}
-                          className="bg-primary px-5 py-2 rounded-full"
+                          disabled={isSavingFood}
+                          className={`px-5 py-2 rounded-full ${isSavingFood ? 'bg-blue-300' : 'bg-primary'}`}
                         >
                           {addingId === item.id
                             ? <ActivityIndicator size="small" color="white" />
@@ -721,10 +736,11 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
         {alertVisible && (
           <View style={styles.alertOverlay}>
             <View className="bg-white w-full max-w-sm p-6 rounded-3xl shadow-xl">
-              <Text className="text-xl font-bold text-center text-gray-900 mb-2">
+              {/* Shared confirmation type scale — see confirmationTypography.ts */}
+              <Text style={confirmationType.title} className="mb-2">
                 {alertConfig.title}
               </Text>
-              <Text className="text-gray-500 text-center mb-6 leading-5">
+              <Text style={confirmationType.message} className="mb-6">
                 {alertConfig.message}
               </Text>
               <TouchableOpacity
@@ -733,6 +749,26 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
               >
                 <Text className="text-white font-bold">Close</Text>
               </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Blocking "Adding food" state. Logging a search result is two sequential
+            round trips (FatSecret detail lookup, then the save) and can take a few
+            seconds; without this the modal looks idle and invites a second tap.
+            An absolute-fill View also swallows touches, so it guards the whole
+            surface rather than just the buttons we remembered to disable.
+            Plain View, never a nested Modal — see the header note. */}
+        {isSavingFood && (
+          <View style={styles.savingOverlay}>
+            <View className="bg-white px-8 py-6 rounded-3xl items-center shadow-xl">
+              <ActivityIndicator size="large" color="#007BFF" />
+              {/* Same confirmation type scale as the success/alert dialogs, at the
+                  compact size — consistent weight, colour and alignment. */}
+              <Text style={confirmationType.titleCompact} className="mt-3">Adding food…</Text>
+              <Text style={confirmationType.messageCompact} className="mt-1">
+                This can take a few seconds
+              </Text>
             </View>
           </View>
         )}
@@ -751,6 +787,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
+  },
+  // Sits above alertOverlay so a save in flight always wins the layer order.
+  savingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10000,
+    elevation: 10000,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 
