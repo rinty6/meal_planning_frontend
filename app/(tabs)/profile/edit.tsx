@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import CustomAlert from '../../../components/customAlert';
+import { type PipState } from '../../../components/pip/PipBird';
 import { markProfileDirty, setCachedProfileDemographics } from '../../../services/profileStore';
 import { authedFetch } from '../../../services/authedFetch';
 
@@ -41,7 +42,14 @@ const EditProfileScreen = () => {
     });
 
     const [alertVisible, setAlertVisible] = useState(false);
-    const [alertConfig, setAlertConfig] = useState({ title: "", message: "", onConfirm: () => {} });
+    // `pip` is left undefined for the error/validation alerts so CustomAlert derives
+    // the sad bird; only the success case overrides it.
+    const [alertConfig, setAlertConfig] = useState<{
+        title: string;
+        message: string;
+        pip?: PipState | "none";
+        onConfirm: () => void;
+    }>({ title: "", message: "", onConfirm: () => {} });
 
     useEffect(() => {
         const fetchCurrentData = async () => {
@@ -101,10 +109,11 @@ const EditProfileScreen = () => {
                         markProfileDirty(userId);
                     }
                 }
-                setAlertConfig({ 
-                    title: "Success! 🎉", 
-                    message: "Your physical profile has been updated.", 
-                    onConfirm: () => { setAlertVisible(false); router.back(); } 
+                setAlertConfig({
+                    title: "Success! 🎉",
+                    message: "Your physical profile has been updated.",
+                    pip: "happy",
+                    onConfirm: () => { setAlertVisible(false); router.back(); }
                 });
                 setAlertVisible(true);
             } else {
@@ -176,7 +185,7 @@ const EditProfileScreen = () => {
                 </View>
             </ScrollView>
 
-            <CustomAlert visible={alertVisible} title={alertConfig.title} message={alertConfig.message} onConfirm={alertConfig.onConfirm} />
+            <CustomAlert visible={alertVisible} title={alertConfig.title} message={alertConfig.message} pip={alertConfig.pip} onConfirm={alertConfig.onConfirm} />
         </SafeAreaView>
     );
 };

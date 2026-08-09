@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { confirmationType } from './confirmationTypography';
+import PipBird from './pip/PipBird';
 import { useAuth } from '@clerk/clerk-expo';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -735,7 +736,13 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
             a second top-level native Modal on iOS. */}
         {alertVisible && (
           <View style={styles.alertOverlay}>
-            <View className="bg-white w-full max-w-sm p-6 rounded-3xl shadow-xl">
+            <View className="bg-white w-full max-w-sm p-6 rounded-3xl shadow-xl items-center">
+              {/* Every alert raised from this modal is a permission or validation
+                  failure, so the sad bird is unconditional here. Matches what
+                  CustomAlert derives for the same kind of message elsewhere. */}
+              <View className="items-center justify-end mb-2" style={{ height: 96 }}>
+                {alertVisible && <PipBird size={96} state="sad" />}
+              </View>
               {/* Shared confirmation type scale — see confirmationTypography.ts */}
               <Text style={confirmationType.title} className="mb-2">
                 {alertConfig.title}

@@ -126,10 +126,13 @@ const VerifyEmailScreen = () => {
           />
         </View>
 
+        {/* No Pip: an error here is still part of getting into the app, same
+            reasoning as sign-in. */}
         <CustomAlert
           visible={alertVisible}
           title={alertData.title}
           message={alertData.message}
+          pip="none"
           onConfirm={() => setAlertVisible(false)}
         />
       </ScrollView>

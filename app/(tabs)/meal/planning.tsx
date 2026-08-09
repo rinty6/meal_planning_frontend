@@ -44,6 +44,7 @@ import {
 import type { ItemsByMeal, MealType } from "../../../services/planning.types";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
 import { zoneFromPayload } from "../../../services/calorieBand";
+import { type PipState } from "../../../components/pip/PipBird";
 import { getCachedHomeSnapshot } from "../../../services/homeStore";
 import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { authedFetch } from "../../../services/authedFetch";
@@ -419,6 +420,7 @@ const PlanningScreen = () => {
     message: "",
     confirmText: "OK",
     variant: "default" as "default" | "success",
+    pip: undefined as PipState | "none" | undefined,
     onConfirm: () => setAlertVisible(false),
   });
 
@@ -440,13 +442,16 @@ const PlanningScreen = () => {
     title: string,
     message: string,
     onConfirm?: () => void,
-    options: { confirmText?: string; variant?: "default" | "success" } = {}
+    options: { confirmText?: string; variant?: "default" | "success"; pip?: PipState | "none" } = {}
   ) => {
     setAlertConfig({
       title,
       message,
       confirmText: options.confirmText || "OK",
       variant: options.variant || "default",
+      // Undefined lets CustomAlert derive it (errors get the sad bird). Only the
+      // handful of non-error alerts on this screen pass one explicitly.
+      pip: options.pip,
       onConfirm: onConfirm || (() => setAlertVisible(false)),
     });
     setAlertVisible(true);
@@ -902,7 +907,8 @@ const PlanningScreen = () => {
           variant: "success",
         });
       } else {
-        showCustomAlert("Favorites", "Dish removed from your favorite foods.");
+        // Removing a favourite is neither a win nor a failure — no bird.
+        showCustomAlert("Favorites", "Dish removed from your favorite foods.", undefined, { pip: "none" });
       }
     } catch {
       showCustomAlert("Error", "Could not update this favorite food.");
@@ -937,9 +943,9 @@ const PlanningScreen = () => {
   const showMealLogOutcome = (payload: any) => {
     const zone = zoneFromPayload(payload);
     if (zone === "over") {
-      showCustomAlert("Over your target", "Food added. Tomorrow is a clean slate.");
+      showCustomAlert("Over your target", "Food added. Tomorrow is a clean slate.", undefined, { pip: "confident" });
     } else if (payload?.reachedTarget) {
-      showCustomAlert("Calorie Target Reached", "Great job! You're on target for today.");
+      showCustomAlert("Calorie Target Reached", "Great job! You're on target for today.", undefined, { pip: "happy" });
     } else {
       setShowSuccessModal(true);
     }
@@ -1575,6 +1581,7 @@ const PlanningScreen = () => {
           message={alertConfig.message}
           confirmText={alertConfig.confirmText}
           variant={alertConfig.variant}
+          pip={alertConfig.pip}
           onConfirm={alertConfig.onConfirm}
           onCancel={undefined}
         />

@@ -51,8 +51,29 @@ const MEAL_SHARE: Record<MealLogType, number> = {
 const DAY_ENDS_HOUR = 22;
 const CONFIDENT_MIN_HOURS_LEFT = 2;
 
+/**
+ * Skip copy, per meal. Deliberately free of kcal figures: a number here reads as
+ * a scorecard, and the point of this branch is to make logging feel easy rather
+ * than to quantify what was lost. The push sent by the backend's 10:00 / 14:00 /
+ * 20:00 skip-checks is the same message in the same voice, so opening the app
+ * from a notification does not feel like a different app talking.
+ */
+const SKIP_COPY: Record<MealLogType, { subline: string; title: string }> = {
+  breakfast: {
+    subline: 'You haven’t had a bite yet, there’s still time for something easy.',
+    title: 'Brekkie check-in, mate!',
+  },
+  dinner: {
+    subline: 'Something easy tonight is still a solid win.',
+    title: 'Dinner check-in!',
+  },
+  lunch: {
+    subline: 'Lunch slipped by, a simple bite can keep you going this arvo.',
+    title: 'Lunch check-in!',
+  },
+};
+
 const kcal = (value: number) => Math.round(value).toLocaleString('en-US');
-const titleCase = (meal: MealLogType) => meal.charAt(0).toUpperCase() + meal.slice(1);
 const roundTo10 = (value: number) => Math.max(0, Math.round(value / 10) * 10);
 
 export function resolvePipCard({
@@ -125,7 +146,12 @@ export function resolvePipCard({
     // Once the next meal window has opened, an earlier miss is old news. Without
     // this, logging lunch at midday would make Pip sulk about breakfast — the
     // user would be punished for the very thing the card asked them to do.
-    const missIsStale = Boolean(nextWindow) && hour >= nextWindow.start;
+    //
+    // The DAY_ENDS_HOUR clause does the same job for dinner, which has no window
+    // after it: past 22:00 "add it now" is asking for a midnight meal, so the
+    // card hands over to the closing note at the bottom of this function.
+    const missIsStale =
+      (Boolean(nextWindow) && hour >= nextWindow.start) || hour >= DAY_ENDS_HOUR;
 
     if (lastClosed && !missIsStale && !loggedMealTypes.has(lastClosed.type)) {
       const previousClosed = closed[closed.length - 2];
@@ -137,16 +163,15 @@ export function resolvePipCard({
         return {
           mealType: lastClosed.type,
           state: 'confident',
-          subline: 'Two meals missed. One good meal still turns today around.',
-          title: `${kcal(remaining)} kcal to go — easy.`,
+          subline: 'A couple slipped by. One good feed still turns today around.',
+          title: 'No stress, mate.',
         };
       }
 
       return {
         mealType: lastClosed.type,
         state: 'sad',
-        subline: `Nothing logged for ${lastClosed.type}. Want to add it now?`,
-        title: `${titleCase(lastClosed.type)} got skipped.`,
+        ...SKIP_COPY[lastClosed.type],
       };
     }
   }
@@ -161,12 +186,18 @@ export function resolvePipCard({
     };
   }
 
-  // 6. Default resting state.
+  // 6. Under target with the day effectively over.
+  //
+  // Everything above has returned, so reaching here means zone === 'under' and
+  // it is late. There is no useful nudge left — suggesting a meal at this hour
+  // is worse advice than eating nothing — so this closes the day out instead.
+  // The old copy here was an idle "You’re on track", which was simply untrue for
+  // the only user who can reach this branch. Mirrors the backend's 21:00 push.
   return {
     mealType: null,
-    state: 'idle',
-    subline: `${kcal(consumedCalories)} of ${kcal(calorieTarget)} kcal so far today.`,
-    title: 'You’re on track.',
+    state: 'care',
+    subline: 'Every meal you logged counts. Reset and give it another crack tomorrow.',
+    title: 'Still a good day!',
   };
 }
 

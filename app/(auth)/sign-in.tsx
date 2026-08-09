@@ -256,11 +256,14 @@ const SignInScreen = () => {
               </TouchableOpacity>
             </View>
 
+            {/* No Pip: a wrong-password or account error before the user is even
+                signed in would read as the mascot judging them at the door. */}
             <CustomAlert
               visible={alertVisible}
               title={alertData.title}
               message={alertData.message}
               confirmText="Close"
+              pip="none"
               onConfirm={() => setAlertVisible(false)}
             />
 

@@ -301,11 +301,14 @@ const SignUpScreen = () => {
           </TouchableOpacity>
         </View>
 
+        {/* No Pip: same reasoning as sign-in/verify-email — this is still the
+            getting-in flow. */}
         <CustomAlert
           visible={alertVisible}
           title={alertConfig.title}
           message={alertConfig.message}
           confirmText={alertConfig.confirmText}
+          pip="none"
           onConfirm={alertConfig.onConfirm}
         />
 
