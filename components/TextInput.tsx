@@ -18,6 +18,12 @@ interface TextInputAreaProps {
   textContentType?: TextInputProps['textContentType'];
   returnKeyType?: TextInputProps['returnKeyType'];
   onSubmitEditing?: TextInputProps['onSubmitEditing'];
+  /**
+   * Caps the entered length. Added for the recovery one-time code, which is a
+   * fixed six digits — without it the field accepts an unbounded string and the
+   * "code looks wrong" check has to happen after a round trip to Clerk.
+   */
+  maxLength?: TextInputProps['maxLength'];
 }
 
 
@@ -38,6 +44,7 @@ const TextInputArea = ({
   textContentType,
   returnKeyType,
   onSubmitEditing,
+  maxLength,
 }: TextInputAreaProps) => {
   return (
     <View className="flex-row items-center border border-border rounded-lg px-3 bg-background mb-4">
@@ -54,6 +61,7 @@ const TextInputArea = ({
         textContentType={textContentType}
         returnKeyType={returnKeyType}
         onSubmitEditing={onSubmitEditing}
+        maxLength={maxLength}
         placeholderTextColor="#9CA3AF"
       />
       

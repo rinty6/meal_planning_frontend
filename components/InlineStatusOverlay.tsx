@@ -13,10 +13,15 @@
  * the message reads as focused, not a toast. Auto-dismisses after
  * `autoDismissMs` and calls onHide — the caller owns the visible/message
  * state, this component only owns its own fade animation.
+ *
+ * PERSISTENT MODE: pass `autoDismissMs={null}` and the card stays until the
+ * user acts. There is no timer in that mode, so `onHide` never fires — supply
+ * `primaryActionLabel` + `onPrimaryAction` and dismiss from the caller. Used by
+ * the password flows for lockout and for a reset success that has to navigate.
  */
 
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PipBird, { type PipState } from './pip/PipBird';
 import { confirmationType } from './confirmationTypography';
@@ -34,7 +39,19 @@ interface InlineStatusOverlayProps {
    */
   pip?: PipState;
   onHide: () => void;
-  autoDismissMs?: number;
+  /**
+   * Milliseconds before the card fades itself out, or `null` to stay put until
+   * the user acts. Omitted keeps the original 2000ms.
+   */
+  autoDismissMs?: number | null;
+  /** Pip's rendered size. The password overlays sit in a tighter card at 76. */
+  pipSize?: number;
+  /**
+   * Both must be supplied for the button to render. In persistent mode this is
+   * the only way out of the card.
+   */
+  primaryActionLabel?: string;
+  onPrimaryAction?: () => void;
 }
 
 /**
@@ -68,11 +85,20 @@ const InlineStatusOverlay = ({
   pip,
   onHide,
   autoDismissMs = 2000,
+  pipSize = 92,
+  primaryActionLabel,
+  onPrimaryAction,
 }: InlineStatusOverlayProps) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Never dismiss before Pip has finished his beat.
-  const dismissAfterMs = Math.max(autoDismissMs, (pip && PIP_MIN_DISMISS_MS[pip]) ?? 0);
+  // null is "stay until the user acts", so it must short-circuit before the
+  // Math.max below — Math.max(null, 3000) is 3000, which would silently turn a
+  // persistent card back into a 3-second one.
+  const dismissAfterMs =
+    autoDismissMs === null
+      ? null
+      : // Never dismiss before Pip has finished his beat.
+        Math.max(autoDismissMs, (pip && PIP_MIN_DISMISS_MS[pip]) ?? 0);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -84,6 +110,9 @@ const InlineStatusOverlay = ({
       easing: Easing.out(Easing.ease),
       useNativeDriver: true,
     }).start();
+
+    // Persistent: entrance only, no timer, so onHide never fires here.
+    if (dismissAfterMs === null) return undefined;
 
     dismissTimerRef.current = setTimeout(() => {
       Animated.timing(opacity, {
@@ -105,6 +134,7 @@ const InlineStatusOverlay = ({
   if (!visible) return null;
 
   const isSuccess = variant === 'success';
+  const showPrimaryAction = !!primaryActionLabel && !!onPrimaryAction;
 
   return (
     // pointerEvents "auto" (the default) briefly blocks taps on the content
@@ -114,8 +144,8 @@ const InlineStatusOverlay = ({
     <Animated.View style={[styles.overlay, { opacity }]}>
       <View style={styles.card}>
         {pip ? (
-          <View style={styles.pipSlot}>
-            <PipBird size={92} state={pip} />
+          <View style={[styles.pipSlot, { height: pipSize }]}>
+            <PipBird size={pipSize} state={pip} />
           </View>
         ) : (
           <View style={[styles.iconCircle, { backgroundColor: isSuccess ? PAL.successBg : PAL.errorBg }]}>
@@ -124,6 +154,17 @@ const InlineStatusOverlay = ({
         )}
         <Text style={styles.title}>{title}</Text>
         {!!message && <Text style={styles.message}>{message}</Text>}
+
+        {showPrimaryAction && (
+          <TouchableOpacity
+            onPress={onPrimaryAction}
+            accessibilityRole="button"
+            accessibilityLabel={primaryActionLabel}
+            style={styles.primaryButton}
+          >
+            <Text style={styles.primaryButtonText}>{primaryActionLabel}</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </Animated.View>
   );
@@ -161,11 +202,27 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   // Bottom-aligned so Pip stands on the card's baseline rather than floating.
+  // height is overridden per-instance to match pipSize.
   pipSlot: {
     height: 92,
     alignItems: 'center',
     justifyContent: 'flex-end',
     marginBottom: 6,
+  },
+  // Matches CustomAlert's confirm button (bg-primary, rounded-xl, py-3) so a
+  // persistent card reads as the same family as the app's other dialogs.
+  primaryButton: {
+    marginTop: 14,
+    width: '100%',
+    backgroundColor: PAL.successBg,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  primaryButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
   },
   // Weight/colour/alignment come from the shared confirmation scale so this card
   // reads as the same family as CustomAlert and SuccessModal.

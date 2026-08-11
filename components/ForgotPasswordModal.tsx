@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Modal, TouchableOpacity } from 'react-native';
-import TextInputArea from './TextInput'; // Adjust path if necessary
+import TextInputArea from './TextInput'; 
 
 interface ForgotPasswordModalProps {
   visible: boolean;
