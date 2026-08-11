@@ -1,31 +1,88 @@
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useSignIn } from '@clerk/clerk-expo';
+import { useClerk, useSignIn } from '@clerk/clerk-expo';
 
 import AuthSocialButtons from '../../components/AuthSocialButtons';
 import Button from '../../components/Button';
 import CustomAlert from '../../components/customAlert';
-import ForgotPasswordModal from '../../components/ForgotPasswordModal';
+import ForgotPasswordModal, { type RecoveryActionResult } from '../../components/ForgotPasswordModal';
 import TextInputArea from '../../components/TextInput';
+
+/**
+ * Clerk error codes that mean "throttled or blocked", not "no such account".
+ * These must never be folded into the neutral reset acknowledgment — doing so
+ * tells the user a code is coming when Clerk refused to send one.
+ */
+const THROTTLE_CODES = new Set([
+  'user_locked',
+  'action_blocked',
+  'user_banned',
+  'rate_limit_exceeded',
+  'too_many_requests',
+  'signup_rate_limit_exceeded',
+]);
+
+type ClerkErrorInfo = {
+  status?: number;
+  code?: string;
+  message?: string;
+};
+
+const readClerkError = (error: unknown): ClerkErrorInfo => {
+  const err = error as { status?: unknown; errors?: { code?: string; message?: string; longMessage?: string }[] };
+  const first = Array.isArray(err?.errors) ? err.errors[0] : undefined;
+  return {
+    status: typeof err?.status === 'number' ? err.status : undefined,
+    code: first?.code,
+    message: first?.longMessage || first?.message,
+  };
+};
+
+/** No HTTP status and no Clerk error body means the request never landed. */
+const isTransportFailure = (info: ClerkErrorInfo) => info.status === undefined && info.code === undefined;
+
+const isThrottled = (info: ClerkErrorInfo) =>
+  info.status === 429 || (!!info.code && THROTTLE_CODES.has(info.code)) || (!!info.code && info.code.includes('rate_limit'));
+
+const TRANSPORT_MESSAGE = 'Could not reach the server. Check your connection and try again.';
+const SERVICE_MESSAGE = 'Something went wrong on our end. Please try again in a moment.';
+const NOT_READY_MESSAGE = 'Still connecting. Try again in a moment.';
+/**
+ * MFA during recovery is not handled in P0. "Start over" would loop the user
+ * through the same wall forever, so this points somewhere that can actually
+ * help instead.
+ */
+const MFA_MESSAGE =
+  'This account uses two-factor authentication, which we cannot reset in the app yet. Please contact support.';
 
 const SignInScreen = () => {
   const router = useRouter();
   const { signIn, setActive, isLoaded } = useSignIn();
+  const { signOut } = useClerk();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  /** Sign-in and social buttons only. Recovery owns its own busy state. */
   const [loading, setLoading] = useState(false);
 
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertData, setAlertData] = useState({ title: '', message: '' });
   const [resetModalVisible, setResetModalVisible] = useState(false);
+  const [recoveryEmail, setRecoveryEmail] = useState('');
+
+  const signInInFlightRef = useRef(false);
 
   const showSimpleAlert = (title: string, message: string) => {
     setAlertData({ title, message });
     setAlertVisible(true);
   };
+
+  const openRecovery = useCallback((prefill: string) => {
+    setRecoveryEmail(prefill);
+    setResetModalVisible(true);
+  }, []);
 
   const openSignedInApp = async (signInResult: any) => {
     if (signInResult?.status === 'complete' && signInResult.createdSessionId) {
@@ -39,32 +96,9 @@ const SignInScreen = () => {
     return false;
   };
 
-  const showIncompleteSignInMessage = (status?: string | null) => {
-    if (status === 'needs_second_factor') {
-      showSimpleAlert(
-        'Verification Required',
-        'This account requires an extra verification step. Please use a demo account without multi-factor authentication for App Review.'
-      );
-      return;
-    }
-
-    if (status === 'needs_new_password') {
-      showSimpleAlert(
-        'Password Update Required',
-        'This account needs a password update before it can sign in.'
-      );
-      return;
-    }
-
-    showSimpleAlert(
-      'Error',
-      status
-        ? `Sign in could not finish. Clerk returned: ${status}.`
-        : 'Sign in failed. Please try again.'
-    );
-  };
-
   const handleSignIn = async () => {
+    if (signInInFlightRef.current) return;
+
     const normalizedEmail = email.trim().toLowerCase();
 
     if (!normalizedEmail || !password) {
@@ -72,109 +106,204 @@ const SignInScreen = () => {
       return;
     }
 
-    if (!isLoaded) return;
+    if (!isLoaded || !signIn) return;
+
+    signInInFlightRef.current = true;
     setLoading(true);
 
     try {
-      const signInAttempt = await signIn.create({
-        identifier: normalizedEmail,
-        password,
-      });
+      let attempt = await signIn.create({ identifier: normalizedEmail, password });
 
-      if (await openSignedInApp(signInAttempt)) {
+      if (attempt.status === 'needs_first_factor') {
+        attempt = await signIn.attemptFirstFactor({ strategy: 'password', password });
+      }
+
+      if (await openSignedInApp(attempt)) {
         return;
       }
 
-      if (signInAttempt.status === 'needs_first_factor') {
-        const firstFactorAttempt = await signIn.attemptFirstFactor({
-          strategy: 'password',
-          password,
-        });
+      // Clerk requires a reset before this account can sign in. Recovery is
+      // exactly the flow for that, so hand straight over instead of dead-ending.
+      if (attempt.status === 'needs_new_password') {
+        openRecovery(normalizedEmail);
+        return;
+      }
 
-        if (await openSignedInApp(firstFactorAttempt)) {
-          return;
+      if (attempt.status === 'needs_second_factor') {
+        showSimpleAlert('Verification Required', MFA_MESSAGE);
+        return;
+      }
+
+      showSimpleAlert('Error', 'Sign in could not be completed. Please try again.');
+    } catch (error: unknown) {
+      const info = readClerkError(error);
+      showSimpleAlert(
+        'Error',
+        isTransportFailure(info)
+          ? TRANSPORT_MESSAGE
+          : info.message || 'Sign in failed. Please check your email and password again.'
+      );
+    } finally {
+      signInInFlightRef.current = false;
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Registered, unregistered, and social-only addresses all get the same
+   * acknowledgment — anything else lets an attacker enumerate accounts, and
+   * Clerk confirms social users can exist with no password at all. Throttling
+   * and outages are the deliberate exceptions: they are not account facts.
+   */
+  const handleRequestCode = useCallback(
+    async (targetEmail: string): Promise<RecoveryActionResult> => {
+      if (!isLoaded || !signIn) {
+        return { kind: 'field', field: 'form', message: NOT_READY_MESSAGE };
+      }
+
+      try {
+        await signIn.create({ strategy: 'reset_password_email_code', identifier: targetEmail });
+        return { kind: 'ok' };
+      } catch (error: unknown) {
+        const info = readClerkError(error);
+
+        if (isTransportFailure(info)) {
+          return { kind: 'field', field: 'form', message: TRANSPORT_MESSAGE };
+        }
+        if (isThrottled(info)) {
+          return { kind: 'lockout', message: info.message || 'Too many attempts. Please try again later.' };
+        }
+        if (info.status !== undefined && info.status >= 500) {
+          return { kind: 'field', field: 'form', message: SERVICE_MESSAGE };
+        }
+        // Remaining 4xx are account-existence / capability facts. Stay neutral.
+        return { kind: 'ok' };
+      }
+    },
+    [isLoaded, signIn]
+  );
+
+  /**
+   * Signs out the session `resetPassword` created. It is never activated, so it
+   * is invisible in-flow — but Clerk's initial-session selector picks it up on
+   * the next app launch and would silently sign the user in.
+   */
+  const cleanupRecoverySession = useCallback(async (createdSessionId?: string | null): Promise<RecoveryActionResult> => {
+    // Prefer the id from the call that just completed; fall back to the hook's
+    // resource for the retry path, where the attempt is already `complete`.
+    const sessionId = createdSessionId ?? signIn?.createdSessionId;
+    if (!sessionId) return { kind: 'ok' };
+
+    try {
+      await signOut({ sessionId });
+      return { kind: 'ok' };
+    } catch {
+      return {
+        kind: 'session_cleanup',
+        message: 'Your password was reset. We could not finish signing this device out.',
+      };
+    }
+  }, [signIn, signOut]);
+
+  /**
+   * Branches on Clerk's own status so a rejected password never costs the user
+   * their code. Once the code is spent the attempt sits at `needs_new_password`,
+   * and a retry resubmits only the password. A retry after cleanup failure sits
+   * at `complete` and re-runs only the sign-out.
+   */
+  const handleResetPassword = useCallback(
+    async (code: string, newPassword: string): Promise<RecoveryActionResult> => {
+      if (!isLoaded || !signIn) {
+        return { kind: 'field', field: 'form', message: NOT_READY_MESSAGE };
+      }
+
+      try {
+        let status = signIn.status;
+        let createdSessionId: string | null | undefined;
+
+        if (status === 'needs_first_factor') {
+          const verified = await signIn.attemptFirstFactor({
+            strategy: 'reset_password_email_code',
+            code,
+          });
+          status = verified.status;
+
+          if (status === 'needs_second_factor') {
+            return { kind: 'field', field: 'form', message: MFA_MESSAGE };
+          }
+          if (status !== 'needs_new_password') {
+            return {
+              kind: 'field',
+              field: 'code',
+              message: 'That code could not be verified. Request a new one.',
+            };
+          }
         }
 
-        console.warn('[auth] password first factor did not complete', {
-          status: firstFactorAttempt?.status,
-        });
-        showIncompleteSignInMessage(firstFactorAttempt?.status);
-        return;
+        if (status === 'needs_new_password') {
+          const reset = await signIn.resetPassword({
+            password: newPassword,
+            signOutOfOtherSessions: true,
+          });
+          status = reset.status;
+          createdSessionId = reset.createdSessionId;
+
+          if (status === 'needs_second_factor') {
+            return { kind: 'field', field: 'form', message: MFA_MESSAGE };
+          }
+        }
+
+        if (status === 'complete') {
+          return await cleanupRecoverySession(createdSessionId);
+        }
+
+        return {
+          kind: 'field',
+          field: 'form',
+          message: 'Recovery could not be completed. Please start again.',
+        };
+      } catch (error: unknown) {
+        const info = readClerkError(error);
+
+        if (isTransportFailure(info)) {
+          return { kind: 'field', field: 'form', message: TRANSPORT_MESSAGE };
+        }
+        if (isThrottled(info)) {
+          return { kind: 'lockout', message: info.message || 'Too many attempts. Please try again later.' };
+        }
+        if (info.code === 'form_password_pwned') {
+          return {
+            kind: 'field',
+            field: 'newPassword',
+            message: 'This password has appeared in a data breach. Pick something else.',
+          };
+        }
+        if (info.code?.startsWith('form_password')) {
+          return {
+            kind: 'field',
+            field: 'newPassword',
+            message: info.message || 'Choose a stronger password.',
+          };
+        }
+        if (info.code?.includes('code')) {
+          return {
+            kind: 'field',
+            field: 'code',
+            message: info.message || 'That code is not valid. Request a new one.',
+          };
+        }
+        if (info.status !== undefined && info.status >= 500) {
+          return { kind: 'field', field: 'form', message: SERVICE_MESSAGE };
+        }
+        return {
+          kind: 'field',
+          field: 'form',
+          message: info.message || 'Recovery could not be completed. Please start again.',
+        };
       }
-
-      console.warn('[auth] sign-in did not complete', {
-        status: signInAttempt.status,
-      });
-      showIncompleteSignInMessage(signInAttempt.status);
-    } catch (error: any) {
-      showSimpleAlert(
-        'Error',
-        error?.errors?.[0]?.message ||
-          'Sign in failed. Please check your email and password again.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRequestCode = async (targetEmail: string) => {
-    if (!targetEmail) {
-      showSimpleAlert('Warning', 'Please enter a valid email address.');
-      return false;
-    }
-
-    setLoading(true);
-    try {
-      await signIn?.create({
-        strategy: 'reset_password_email_code',
-        identifier: targetEmail,
-      });
-      return true;
-    } catch (error: any) {
-      showSimpleAlert(
-        'Error',
-        error?.errors?.[0]?.message ||
-          'Could not find an account with that email.'
-      );
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResetPassword = async (code: string, newPassword: string) => {
-    if (!code || !newPassword) {
-      showSimpleAlert(
-        'Warning',
-        'Please fill in all fields to reset your password.'
-      );
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await signIn?.attemptFirstFactor({
-        strategy: 'reset_password_email_code',
-        code,
-        password: newPassword,
-      });
-
-      if (result?.status === 'complete') {
-        await setActive?.({ session: result.createdSessionId });
-        setResetModalVisible(false);
-        router.replace('/');
-      } else {
-        showSimpleAlert('Error', 'Failed to reset password.');
-      }
-    } catch (error: any) {
-      showSimpleAlert(
-        'Error',
-        error?.errors?.[0]?.message || 'Please check your password or username.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [isLoaded, signIn, cleanupRecoverySession]
+  );
 
   return (
     <KeyboardAvoidingView
@@ -231,7 +360,7 @@ const SignInScreen = () => {
             />
 
             <TouchableOpacity
-              onPress={() => setResetModalVisible(true)}
+              onPress={() => openRecovery(email.trim().toLowerCase())}
               className="items-end mb-6"
             >
               <Text className="text-primary font-semibold">Forgot password?</Text>
@@ -255,27 +384,31 @@ const SignInScreen = () => {
                 <Text className="text-primary font-bold">Register now</Text>
               </TouchableOpacity>
             </View>
-
-            {/* No Pip: a wrong-password or account error before the user is even
-                signed in would read as the mascot judging them at the door. */}
-            <CustomAlert
-              visible={alertVisible}
-              title={alertData.title}
-              message={alertData.message}
-              confirmText="Close"
-              pip="none"
-              onConfirm={() => setAlertVisible(false)}
-            />
-
-            <ForgotPasswordModal
-              visible={resetModalVisible}
-              loading={loading}
-              onClose={() => setResetModalVisible(false)}
-              onRequestCode={handleRequestCode}
-              onVerify={handleResetPassword}
-            />
           </ScrollView>
         </View>
+
+        {/* Both Modals live outside the ScrollView. A Modal nested in a scroll
+            container is the same class of iOS bug as stacking two Modals
+            (ERROR_LOG Errors 019 and 055). */}
+
+        {/* No Pip: a wrong-password or account error before the user is even
+            signed in would read as the mascot judging them at the door. */}
+        <CustomAlert
+          visible={alertVisible}
+          title={alertData.title}
+          message={alertData.message}
+          confirmText="Close"
+          pip="none"
+          onConfirm={() => setAlertVisible(false)}
+        />
+
+        <ForgotPasswordModal
+          visible={resetModalVisible}
+          initialEmail={recoveryEmail}
+          onClose={() => setResetModalVisible(false)}
+          onRequestCode={handleRequestCode}
+          onVerify={handleResetPassword}
+        />
       </View>
     </KeyboardAvoidingView>
   );
