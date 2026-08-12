@@ -59,6 +59,20 @@ interface InlineStatusOverlayProps {
    * voice search to look unchanged.
    */
   wide?: boolean;
+  /**
+   * Draws the 50% dim behind the card. Turn it OFF when the overlay already sits
+   * inside a dimmed root — both password modals use `bg-black/50`, and two 50%
+   * layers compose to 75%, which is the "cards sit on near-black" issue logged
+   * in checklist §2. A card on its own full screen still wants its own dim.
+   */
+  backdrop?: boolean;
+  /**
+   * Optional secondary/cancel action, rendered under the primary as a quiet
+   * button. Required by the recovery handoff card (CP18/CP19), which is the one
+   * genuinely destructive confirm in the feature and must offer a way out.
+   */
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
 }
 
 /**
@@ -96,6 +110,9 @@ const InlineStatusOverlay = ({
   primaryActionLabel,
   onPrimaryAction,
   wide = false,
+  backdrop = true,
+  secondaryActionLabel,
+  onSecondaryAction,
 }: InlineStatusOverlayProps) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,16 +160,31 @@ const InlineStatusOverlay = ({
 
   const isSuccess = variant === 'success';
   const showPrimaryAction = !!primaryActionLabel && !!onPrimaryAction;
+  const showSecondaryAction = !!secondaryActionLabel && !!onSecondaryAction;
 
   return (
     // pointerEvents "auto" (the default) briefly blocks taps on the content
     // behind the dim, same as CustomAlert/SuccessModal do while they're shown —
     // it prevents an accidental second tap on a result card while the
     // confirmation is up, and this overlay still clears itself automatically.
-    <Animated.View style={[styles.overlay, wide && styles.overlayWide, { opacity }]}>
+    <Animated.View
+      style={[
+        styles.overlay,
+        wide && styles.overlayWide,
+        !backdrop && styles.overlayNoBackdrop,
+        { opacity },
+      ]}
+    >
       <View style={[styles.card, wide && styles.cardWide]}>
         {pip ? (
-          <View style={[styles.pipSlot, { height: pipSize }]}>
+          // Hidden from screen readers: PipBird defaults its label to
+          // "Pip is happy", which VoiceOver would read out BEFORE the card's
+          // actual outcome. The title and message have to lead (§3).
+          <View
+            style={[styles.pipSlot, { height: pipSize }]}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             <PipBird size={pipSize} state={pip} />
           </View>
         ) : (
@@ -173,6 +205,17 @@ const InlineStatusOverlay = ({
             <Text style={styles.primaryButtonText}>{primaryActionLabel}</Text>
           </TouchableOpacity>
         )}
+
+        {showSecondaryAction && (
+          <TouchableOpacity
+            onPress={onSecondaryAction}
+            accessibilityRole="button"
+            accessibilityLabel={secondaryActionLabel}
+            style={styles.secondaryButton}
+          >
+            <Text style={styles.secondaryButtonText}>{secondaryActionLabel}</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </Animated.View>
   );
@@ -190,6 +233,10 @@ const styles = StyleSheet.create({
   // Mockup gutter. Only applied in `wide` mode.
   overlayWide: {
     paddingHorizontal: 22,
+  },
+  // For callers whose own root is already dimmed; see the `backdrop` prop.
+  overlayNoBackdrop: {
+    backgroundColor: 'transparent',
   },
   card: {
     backgroundColor: '#fff',
@@ -242,6 +289,21 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  // Quiet by design: on the handoff card the destructive option is the primary,
+  // so Cancel must not compete with it visually while staying easy to hit.
+  secondaryButton: {
+    marginTop: 8,
+    alignSelf: 'stretch',
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    color: '#6b7280',
     fontSize: 14,
     fontWeight: '700',
   },

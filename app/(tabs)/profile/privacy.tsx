@@ -19,6 +19,13 @@ import TermsOfService from '../../../components/TermsOfService';
 import { PRIVACY_POLICY_URL } from '../../../utils/config';
 import { deleteCurrentAccount } from '../../../services/accountDeletion';
 import { clearBackendBootstrapCache } from '../../../services/userSync';
+import {
+    readClerkError,
+    isTransportFailure,
+    describeLockout,
+    CURRENT_PASSWORD_ERROR_CODES,
+    BREACHED_PASSWORD_CODES,
+} from '../../../utils/clerkErrors';
 
 type AlertConfig = {
     title: string;
@@ -37,56 +44,10 @@ type PasswordErrors = {
     form?: string;
 };
 
-/**
- * Clerk codes that mean "the CURRENT password you supplied is wrong", as opposed
- * to "the NEW password you chose is unacceptable". Everything else in the
- * `form_password_*` family is a policy rejection and belongs beside New password.
- *
- * This set is why the wrong-password error used to land under New password:
- * `form_password_incorrect` was handled, but Clerk answers `updatePassword` with
- * `form_password_validation_failed`, which fell through to the family catch-all.
- */
-const CURRENT_PASSWORD_ERROR_CODES = new Set([
-    'form_password_incorrect',
-    'form_password_validation_failed',
-    'form_password_or_identifier_incorrect',
-]);
-
 /** Success auto-dismisses; lockout waits for the user. */
 type PasswordOverlay =
     | { kind: 'success'; message: string }
     | { kind: 'lockout'; message: string };
-
-type ClerkErrorInfo = {
-    status?: number;
-    code?: string;
-    message?: string;
-    lockoutSeconds?: number;
-};
-
-const readClerkError = (error: unknown): ClerkErrorInfo => {
-    const err = error as {
-        status?: unknown;
-        errors?: { code?: string; message?: string; longMessage?: string; meta?: Record<string, unknown> }[];
-    };
-    const first = Array.isArray(err?.errors) ? err.errors[0] : undefined;
-    const lockout = first?.meta?.lockoutExpiresInSeconds;
-    return {
-        status: typeof err?.status === 'number' ? err.status : undefined,
-        code: first?.code,
-        message: first?.longMessage || first?.message,
-        lockoutSeconds: typeof lockout === 'number' ? lockout : undefined,
-    };
-};
-
-/** No HTTP status and no Clerk error body means the request never landed. */
-const isTransportFailure = (info: ClerkErrorInfo) => info.status === undefined && info.code === undefined;
-
-const describeLockout = (seconds?: number) => {
-    if (!seconds || seconds <= 0) return 'For your security, try again shortly. Nothing has changed on your account.';
-    const minutes = Math.max(1, Math.ceil(seconds / 60));
-    return `For your security, try again in ${minutes} minute${minutes === 1 ? '' : 's'}. Nothing has changed on your account.`;
-};
 
 const PrivacyScreen = () => {
     const router = useRouter();
@@ -234,7 +195,7 @@ const PrivacyScreen = () => {
                 setPwdErrors({ form: info.message || 'Too many attempts. Your account will be locked shortly.' });
             } else if (info.code && CURRENT_PASSWORD_ERROR_CODES.has(info.code)) {
                 setPwdErrors({ currentPassword: 'Current password is incorrect.' });
-            } else if (info.code === 'form_password_pwned' || info.code === 'form_password_compromised') {
+            } else if (info.code && BREACHED_PASSWORD_CODES.has(info.code)) {
                 setPwdErrors({ newPassword: 'This password has appeared in a data breach. Pick something else.' });
             } else if (info.code?.startsWith('form_password')) {
                 setPwdErrors({ newPassword: info.message || 'Choose a stronger password.' });
@@ -482,6 +443,9 @@ const PrivacyScreen = () => {
                         pip={pwdOverlay?.kind === 'lockout' ? 'care' : 'happy'}
                         pipSize={76}
                         wide
+                        // This Modal's root is already bg-black/50; a second 50%
+                        // layer composes to 75% and reads as near-black (§2).
+                        backdrop={false}
                         autoDismissMs={pwdOverlay?.kind === 'lockout' ? null : 2000}
                         primaryActionLabel={pwdOverlay?.kind === 'lockout' ? 'Got it' : undefined}
                         onPrimaryAction={pwdOverlay?.kind === 'lockout' ? () => setPwdOverlay(null) : undefined}
