@@ -21,7 +21,7 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PipBird, { type PipState } from './pip/PipBird';
 import { confirmationType } from './confirmationTypography';
@@ -127,6 +127,15 @@ const InlineStatusOverlay = ({
 
   useEffect(() => {
     if (!visible) return undefined;
+
+    // The card is centred and absolutely positioned, so an open keyboard sits
+    // ON TOP of it and hides the lower half — including the primary button,
+    // which on a persistent card is the ONLY way out. This bites whenever the
+    // card is raised straight from a text field, e.g. via a return-key submit,
+    // and it is a property of this component rather than of any one caller, so
+    // it belongs here: every caller has at least one TextInput. See ERROR_LOG
+    // Error 075.
+    Keyboard.dismiss();
 
     opacity.setValue(0);
     Animated.timing(opacity, {

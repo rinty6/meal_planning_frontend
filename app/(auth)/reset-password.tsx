@@ -18,15 +18,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  Keyboard,
-} from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -156,16 +148,6 @@ const ResetPasswordScreen = () => {
     const id = setInterval(() => setCooldown((s) => (s <= 1 ? 0 : s - 1)), 1000);
     return () => clearInterval(id);
   }, [cooldownRunning]);
-
-  /**
-   * Submitting from the keyboard's return key leaves the keyboard up, and these
-   * cards are centred — on a small screen it covers the card's own button, so
-   * the only way forward is hidden behind the thing that triggered it. Every
-   * overlay here is persistent and action-bearing, so none of them can afford it.
-   */
-  useEffect(() => {
-    if (overlay) Keyboard.dismiss();
-  }, [overlay]);
 
   /** Clearing only the edited field keeps other errors visible while fixing one. */
   const clearError = useCallback((field: FieldKey) => {
