@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSignIn } from '@clerk/clerk-expo';
@@ -7,7 +7,7 @@ import AuthSocialButtons from '../../components/AuthSocialButtons';
 import Button from '../../components/Button';
 import CustomAlert from '../../components/customAlert';
 import TextInputArea from '../../components/TextInput';
-import { setRecoveryEmail } from '../../utils/recoveryHandoff';
+import { setRecoveryEmail, isRecoveryHandoffPending } from '../../utils/recoveryHandoff';
 import {
   readClerkError,
   isTransportFailure,
@@ -47,6 +47,19 @@ const SignInScreen = () => {
     },
     [router]
   );
+
+  /**
+   * Completes the signed-in change-password handoff. That flow has to sign the
+   * user out before recovery can start, and the sign-out makes (tabs)/_layout
+   * redirect here — possibly beating the handoff's own navigation. Forwarding on
+   * the flag means the user reaches recovery whichever navigation won.
+   *
+   * `takeRecoveryEmail` on the recovery route clears the flag, so this fires
+   * exactly once and a later visit to sign-in stays put.
+   */
+  useEffect(() => {
+    if (isRecoveryHandoffPending()) router.replace('/(auth)/reset-password');
+  }, [router]);
 
   const openSignedInApp = async (signInResult: any) => {
     if (signInResult?.status === 'complete' && signInResult.createdSessionId) {

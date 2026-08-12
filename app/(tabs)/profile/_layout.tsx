@@ -14,6 +14,7 @@ export default function ProfileLayout() {
             <Stack.Screen name="notification-messages" />
             <Stack.Screen name="feedback" />
             <Stack.Screen name="privacy" />
+            <Stack.Screen name="change-password" />
         </Stack>
     );
 }

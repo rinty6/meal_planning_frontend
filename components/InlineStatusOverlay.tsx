@@ -204,26 +204,39 @@ const InlineStatusOverlay = ({
         <Text style={styles.title}>{title}</Text>
         {!!message && <Text style={styles.message}>{message}</Text>}
 
-        {showPrimaryAction && (
-          <TouchableOpacity
-            onPress={onPrimaryAction}
-            accessibilityRole="button"
-            accessibilityLabel={primaryActionLabel}
-            style={styles.primaryButton}
-          >
-            <Text style={styles.primaryButtonText}>{primaryActionLabel}</Text>
-          </TouchableOpacity>
-        )}
-
-        {showSecondaryAction && (
-          <TouchableOpacity
-            onPress={onSecondaryAction}
-            accessibilityRole="button"
-            accessibilityLabel={secondaryActionLabel}
-            style={styles.secondaryButton}
-          >
-            <Text style={styles.secondaryButtonText}>{secondaryActionLabel}</Text>
-          </TouchableOpacity>
+        {/* Mockup convention: a lone action is a full-width pill; a pair sits
+            side by side as two flat buttons (`.card .row` + `.btn.flat`), with
+            the way out on the left. */}
+        {showSecondaryAction && showPrimaryAction ? (
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              onPress={onSecondaryAction}
+              accessibilityRole="button"
+              accessibilityLabel={secondaryActionLabel}
+              style={[styles.rowButton, styles.rowButtonQuiet]}
+            >
+              <Text style={styles.secondaryButtonText}>{secondaryActionLabel}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={onPrimaryAction}
+              accessibilityRole="button"
+              accessibilityLabel={primaryActionLabel}
+              style={[styles.rowButton, styles.rowButtonPrimary]}
+            >
+              <Text style={styles.primaryButtonText}>{primaryActionLabel}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          showPrimaryAction && (
+            <TouchableOpacity
+              onPress={onPrimaryAction}
+              accessibilityRole="button"
+              accessibilityLabel={primaryActionLabel}
+              style={styles.primaryButton}
+            >
+              <Text style={styles.primaryButtonText}>{primaryActionLabel}</Text>
+            </TouchableOpacity>
+          )
         )}
       </View>
     </Animated.View>
@@ -301,15 +314,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  // Paired actions. Flat (12) rather than pill, per the mockup's `.btn.flat`:
+  // two pills sitting side by side read as a segmented control, not a choice.
+  actionRow: {
+    marginTop: 12,
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  rowButton: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  rowButtonPrimary: {
+    backgroundColor: PAL.successBg,
+  },
   // Quiet by design: on the handoff card the destructive option is the primary,
   // so Cancel must not compete with it visually while staying easy to hit.
-  secondaryButton: {
-    marginTop: 8,
-    alignSelf: 'stretch',
-    borderRadius: 999,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    alignItems: 'center',
+  rowButtonQuiet: {
+    backgroundColor: '#F3F4F6',
   },
   secondaryButtonText: {
     color: '#6b7280',

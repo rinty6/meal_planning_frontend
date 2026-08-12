@@ -1,31 +1,22 @@
-// This function helps users to change their password
+// Privacy & Security menu: change password, legal links, account deletion.
 //
-// PASSWORD ERRORS AND OVERLAYS: everything the change-password flow reports
-// renders INSIDE its <Modal> — inline text beside the field, or an
-// InlineStatusOverlay layered over the sheet. It must never open CustomAlert,
-// which is itself a full-screen <Modal>: iOS silently drops the second
-// presentation (ERROR_LOG Error 019) or freezes the screen (Error 055), so the
-// old code showed no error at all on a wrong password. CustomAlert is still the
-// right tool for account deletion and legal links, which run with no Modal open.
-import React, { useCallback, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, TextInput, ActivityIndicator, Linking } from 'react-native';
+// Change password used to live here as a <Modal>, and that Modal is what made
+// ERROR_LOG Error 019 possible — a CustomAlert opened over it was silently
+// dropped by iOS, so a wrong password produced no message at all. It is now its
+// own route (`change-password.tsx`), which removes the stacking problem
+// entirely rather than working around it. CustomAlert stays here for account
+// deletion and legal links, which run with no Modal presented.
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth, useUser } from '@clerk/clerk-expo';
+import { useAuth } from '@clerk/clerk-expo';
 import CustomAlert from '../../../components/customAlert';
-import InlineStatusOverlay from '../../../components/InlineStatusOverlay';
 import TermsOfService from '../../../components/TermsOfService';
 import { PRIVACY_POLICY_URL } from '../../../utils/config';
 import { deleteCurrentAccount } from '../../../services/accountDeletion';
 import { clearBackendBootstrapCache } from '../../../services/userSync';
-import {
-    readClerkError,
-    isTransportFailure,
-    describeLockout,
-    CURRENT_PASSWORD_ERROR_CODES,
-    BREACHED_PASSWORD_CODES,
-} from '../../../utils/clerkErrors';
 
 type AlertConfig = {
     title: string;
@@ -37,45 +28,12 @@ type AlertConfig = {
     onCancel?: () => void;
 };
 
-type PasswordErrors = {
-    currentPassword?: string;
-    newPassword?: string;
-    confirmPassword?: string;
-    form?: string;
-};
-
-/** Success auto-dismisses; lockout waits for the user. */
-type PasswordOverlay =
-    | { kind: 'success'; message: string }
-    | { kind: 'lockout'; message: string };
-
 const PrivacyScreen = () => {
     const router = useRouter();
-    const { user, isLoaded: userLoaded, isSignedIn } = useUser();
     const { getToken, signOut, userId } = useAuth();
     const [alertVisible, setAlertVisible] = useState(false);
     const [termsModalVisible, setTermsModalVisible] = useState(false);
 
-    // Password Change State
-    const [modalVisible, setModalVisible] = useState(false);
-    const [currentPassword, setCurrentPassword] = useState('');
-    const [newPassword, setNewPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [pwdErrors, setPwdErrors] = useState<PasswordErrors>({});
-    const [pwdOverlay, setPwdOverlay] = useState<PasswordOverlay | null>(null);
-
-    /**
-     * Synchronous double-tap guard. `loading` drives the disabled state, but
-     * React batches it — two taps in one frame both pass that check. This ref
-     * flips before any await, so it is what actually blocks the second request.
-     */
-    const changingPasswordRef = useRef(false);
-
-    // Visibility Toggle State
-    const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-    const [showNewPassword, setShowNewPassword] = useState(false);
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [deletingAccount, setDeletingAccount] = useState(false);
 
     const [alertConfig, setAlertConfig] = useState<AlertConfig>({
@@ -105,111 +63,6 @@ const PrivacyScreen = () => {
             setAlertVisible(true);
         });
     };
-
-    const resetPasswordForm = useCallback(() => {
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-        setShowCurrentPassword(false);
-        setShowNewPassword(false);
-        setShowConfirmPassword(false);
-        setPwdErrors({});
-    }, []);
-
-    const closePasswordModal = useCallback(() => {
-        setModalVisible(false);
-        setPwdOverlay(null);
-        resetPasswordForm();
-    }, [resetPasswordForm]);
-
-    /** Clearing only the edited field keeps the other error visible while fixing one. */
-    const clearPwdError = useCallback((field: keyof PasswordErrors) => {
-        setPwdErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
-    }, []);
-
-    const handleChangePassword = useCallback(async () => {
-        if (changingPasswordRef.current) return;
-
-        if (!currentPassword) {
-            setPwdErrors({ currentPassword: 'Enter your current password.' });
-            return;
-        }
-        if (!newPassword) {
-            setPwdErrors({ newPassword: 'Enter a new password.' });
-            return;
-        }
-        if (!confirmPassword) {
-            setPwdErrors({ confirmPassword: 'Re-enter your new password.' });
-            return;
-        }
-        // Checklist §4: equality and new-equals-current are both caught locally,
-        // so neither wastes a Clerk attempt against the lockout counter.
-        if (newPassword !== confirmPassword) {
-            setPwdErrors({ confirmPassword: "Those passwords don't match." });
-            return;
-        }
-        if (newPassword === currentPassword) {
-            setPwdErrors({ newPassword: 'Your new password must be different from your current one.' });
-            return;
-        }
-
-        // Never report success against a missing Clerk user. The old code used
-        // `user?.updatePassword(...)`, which resolved to undefined and then
-        // showed "Success!" for a change that never happened.
-        if (!userLoaded) {
-            setPwdErrors({ form: 'Still connecting. Try again in a moment.' });
-            return;
-        }
-        if (!isSignedIn || !user) {
-            setPwdErrors({ form: 'Your session has expired. Please sign in again.' });
-            return;
-        }
-
-        changingPasswordRef.current = true;
-        setLoading(true);
-        setPwdErrors({});
-
-        try {
-            await user.updatePassword({
-                currentPassword,
-                newPassword,
-                signOutOfOtherSessions: true,
-            });
-
-            // Clear the values before the card shows, so the animation never
-            // gates the security-relevant part.
-            resetPasswordForm();
-            setPwdOverlay({
-                kind: 'success',
-                message: "Password updated. You're signed out everywhere else.",
-            });
-        } catch (error: unknown) {
-            const info = readClerkError(error);
-
-            // Values are deliberately preserved so a rejection costs nothing.
-            if (isTransportFailure(info)) {
-                setPwdErrors({ form: 'Could not reach the server. Check your connection and try again.' });
-            } else if (info.code === 'user_locked') {
-                setPwdOverlay({ kind: 'lockout', message: describeLockout(info.lockoutSeconds) });
-            } else if (info.code === 'account_lockout_warning') {
-                setPwdErrors({ form: info.message || 'Too many attempts. Your account will be locked shortly.' });
-            } else if (info.code && CURRENT_PASSWORD_ERROR_CODES.has(info.code)) {
-                setPwdErrors({ currentPassword: 'Current password is incorrect.' });
-            } else if (info.code && BREACHED_PASSWORD_CODES.has(info.code)) {
-                setPwdErrors({ newPassword: 'This password has appeared in a data breach. Pick something else.' });
-            } else if (info.code?.startsWith('form_password')) {
-                setPwdErrors({ newPassword: info.message || 'Choose a stronger password.' });
-            } else if (info.status !== undefined && info.status >= 500) {
-                setPwdErrors({ form: 'Something went wrong on our end. Please try again in a moment.' });
-            } else {
-                // Clerk's own message only. Never surface raw status or response objects.
-                setPwdErrors({ form: info.message || 'Could not update password. Please try again.' });
-            }
-        } finally {
-            changingPasswordRef.current = false;
-            setLoading(false);
-        }
-    }, [currentPassword, newPassword, confirmPassword, userLoaded, isSignedIn, user, resetPasswordForm]);
 
     const showDeleteAccountError = (message: string) => {
         setAlertConfig({
@@ -298,7 +151,7 @@ const PrivacyScreen = () => {
             </View>
 
             <View className="px-5 pt-6 space-y-4">
-                <TouchableOpacity onPress={() => setModalVisible(true)} className="flex-row items-center justify-between bg-gray-50 p-4 rounded-xl">
+                <TouchableOpacity onPress={() => router.push('/(tabs)/profile/change-password')} className="flex-row items-center justify-between bg-gray-50 p-4 rounded-xl">
                     <Text className="text-base font-bold text-gray-800">Change Password</Text>
                     <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
                 </TouchableOpacity>
@@ -334,125 +187,6 @@ const PrivacyScreen = () => {
                     )}
                 </TouchableOpacity>
             </View>
-
-            {/* Change Password Modal */}
-            <Modal visible={modalVisible} animationType="slide" transparent={true} onRequestClose={closePasswordModal}>
-                {/* Full-screen root. Overlays mount as its final child so they cover
-                    the whole sheet rather than sitting inside the white card. */}
-                <View className="flex-1 justify-center bg-black/50 px-5">
-                    <View className="bg-white p-6 rounded-3xl shadow-lg">
-                        <Text className="text-xl font-bold mb-4">Change Password</Text>
-
-                        {/* Current Password Input with Eye Icon */}
-                        <Text className="text-sm font-bold text-gray-600 mb-2">Current Password</Text>
-                        <View className={`flex-row items-center bg-gray-50 border rounded-xl px-4 py-1 ${pwdErrors.currentPassword ? 'border-error' : 'border-gray-200'}`}>
-                            <TextInput
-                                secureTextEntry={!showCurrentPassword}
-                                className="flex-1 py-3 text-base"
-                                value={currentPassword}
-                                onChangeText={(text) => {
-                                    setCurrentPassword(text);
-                                    clearPwdError('currentPassword');
-                                }}
-                                autoCapitalize="none"
-                                autoCorrect={false}
-                                textContentType="password"
-                            />
-                            <TouchableOpacity onPress={() => setShowCurrentPassword(!showCurrentPassword)} className="p-2">
-                                <Ionicons name={showCurrentPassword ? "eye-off" : "eye"} size={20} color="#9CA3AF" />
-                            </TouchableOpacity>
-                        </View>
-                        {!!pwdErrors.currentPassword && (
-                            <Text className="text-error text-xs mt-1">{pwdErrors.currentPassword}</Text>
-                        )}
-
-                        {/* New Password Input with Eye Icon */}
-                        <Text className="text-sm font-bold text-gray-600 mb-2 mt-4">New Password</Text>
-                        <View className={`flex-row items-center bg-gray-50 border rounded-xl px-4 py-1 ${pwdErrors.newPassword ? 'border-error' : 'border-gray-200'}`}>
-                            <TextInput
-                                secureTextEntry={!showNewPassword}
-                                className="flex-1 py-3 text-base"
-                                value={newPassword}
-                                onChangeText={(text) => {
-                                    setNewPassword(text);
-                                    clearPwdError('newPassword');
-                                }}
-                                autoCapitalize="none"
-                                autoCorrect={false}
-                                textContentType="newPassword"
-                            />
-                            <TouchableOpacity onPress={() => setShowNewPassword(!showNewPassword)} className="p-2">
-                                <Ionicons name={showNewPassword ? "eye-off" : "eye"} size={20} color="#9CA3AF" />
-                            </TouchableOpacity>
-                        </View>
-                        {!!pwdErrors.newPassword && (
-                            <Text className="text-error text-xs mt-1">{pwdErrors.newPassword}</Text>
-                        )}
-
-                        {/* Confirm New Password Input with Eye Icon */}
-                        <Text className="text-sm font-bold text-gray-600 mb-2 mt-4">Confirm New Password</Text>
-                        <View className={`flex-row items-center bg-gray-50 border rounded-xl px-4 py-1 ${pwdErrors.confirmPassword ? 'border-error' : 'border-gray-200'}`}>
-                            <TextInput
-                                secureTextEntry={!showConfirmPassword}
-                                className="flex-1 py-3 text-base"
-                                value={confirmPassword}
-                                onChangeText={(text) => {
-                                    setConfirmPassword(text);
-                                    clearPwdError('confirmPassword');
-                                }}
-                                autoCapitalize="none"
-                                autoCorrect={false}
-                                textContentType="newPassword"
-                                returnKeyType="done"
-                                onSubmitEditing={handleChangePassword}
-                            />
-                            <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} className="p-2">
-                                <Ionicons name={showConfirmPassword ? "eye-off" : "eye"} size={20} color="#9CA3AF" />
-                            </TouchableOpacity>
-                        </View>
-                        {!!pwdErrors.confirmPassword && (
-                            <Text className="text-error text-xs mt-1">{pwdErrors.confirmPassword}</Text>
-                        )}
-
-                        {!!pwdErrors.form && (
-                            <Text className="text-error text-xs mt-3 text-center">{pwdErrors.form}</Text>
-                        )}
-
-                        <View className="flex-row justify-end space-x-4 gap-4 mt-6">
-                            <TouchableOpacity
-                                onPress={closePasswordModal}
-                                disabled={loading}
-                                className="px-4 py-3"
-                            >
-                                <Text className="text-gray-500 font-bold">Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={handleChangePassword} disabled={loading} className="bg-primary px-6 py-3 rounded-full">
-                                {loading ? <ActivityIndicator color="white" /> : <Text className="text-white font-bold">Update</Text>}
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-
-                    {/* Success auto-dismisses after Pip's full one-shot (>=3s via
-                        PIP_MIN_DISMISS_MS), then closes the modal. Lockout is
-                        persistent — the user has to acknowledge it. */}
-                    <InlineStatusOverlay
-                        visible={!!pwdOverlay}
-                        variant={pwdOverlay?.kind === 'lockout' ? 'error' : 'success'}
-                        title={pwdOverlay?.kind === 'lockout' ? 'Too many attempts' : 'Password updated'}
-                        message={pwdOverlay?.message ?? ''}
-                        pip={pwdOverlay?.kind === 'lockout' ? 'care' : 'happy'}
-                        pipSize={76}
-                        wide
-                        // This Modal's root is already bg-black/50; a second 50%
-                        // layer composes to 75% and reads as near-black (§2).
-                        backdrop={false}
-                        autoDismissMs={pwdOverlay?.kind === 'lockout' ? null : 2000}
-                        primaryActionLabel={pwdOverlay?.kind === 'lockout' ? 'Got it' : undefined}
-                        onPrimaryAction={pwdOverlay?.kind === 'lockout' ? () => setPwdOverlay(null) : undefined}
-                        onHide={closePasswordModal}
-                    />
-                </View>
-            </Modal>
 
             <CustomAlert
                 visible={alertVisible}
