@@ -98,15 +98,15 @@ const OVERLAY_COPY: Record<OverlayKind, { title: string; action: string }> = {
  * address itself is dropped because the email field sits directly above this
  * card and still shows it — that was the redundant part, not the hedge.
  *
- * The social-login line is shown to EVERY address, registered or not. That is
- * what makes it safe: it rescues a social-only user from waiting for a code that
- * can never arrive, without revealing anything about the address in hand. A
- * passwordless account has no password credential for Clerk to reset, so it
- * lands on the neutral branch and would otherwise dead-end here.
+ * KNOWN GAP (checklist §9.2, F2): a social-only account has no password
+ * credential, so its request also lands here and the user waits for a code
+ * that can never arrive. A generic social-login line was added and then
+ * removed by product decision (2026-08-12) — deliberately dropped, not an
+ * oversight. If this resurfaces, that line is the fix; it must stay identical
+ * across every address to avoid re-opening the enumeration leak it was built
+ * to close.
  */
-const CODE_SENT_MESSAGE =
-  `If an account exists, a ${CODE_LENGTH}-digit code is on its way.\n\n` +
-  'Signed up with Google, Apple or Facebook? Use that button instead.';
+const CODE_SENT_MESSAGE = `If an account exists, a ${CODE_LENGTH}-digit code is on its way.`;
 
 const formatCountdown = (seconds: number) => {
   const m = Math.floor(seconds / 60);
