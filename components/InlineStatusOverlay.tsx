@@ -52,6 +52,13 @@ interface InlineStatusOverlayProps {
    */
   primaryActionLabel?: string;
   onPrimaryAction?: () => void;
+  /**
+   * Opt-in full-width card, matching PASSWORD_SCREENS.html (`.card { width:100% }`
+   * inside a 22px-padded overlay). Off by default so VoiceSearchModal's cards
+   * keep the shrink-to-fit size they ship with today — checklist §9 T6 requires
+   * voice search to look unchanged.
+   */
+  wide?: boolean;
 }
 
 /**
@@ -88,6 +95,7 @@ const InlineStatusOverlay = ({
   pipSize = 92,
   primaryActionLabel,
   onPrimaryAction,
+  wide = false,
 }: InlineStatusOverlayProps) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -141,8 +149,8 @@ const InlineStatusOverlay = ({
     // behind the dim, same as CustomAlert/SuccessModal do while they're shown —
     // it prevents an accidental second tap on a result card while the
     // confirmation is up, and this overlay still clears itself automatically.
-    <Animated.View style={[styles.overlay, { opacity }]}>
-      <View style={styles.card}>
+    <Animated.View style={[styles.overlay, wide && styles.overlayWide, { opacity }]}>
+      <View style={[styles.card, wide && styles.cardWide]}>
         {pip ? (
           <View style={[styles.pipSlot, { height: pipSize }]}>
             <PipBird size={pipSize} state={pip} />
@@ -179,6 +187,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     zIndex: 50,
   },
+  // Mockup gutter. Only applied in `wide` mode.
+  overlayWide: {
+    paddingHorizontal: 22,
+  },
   card: {
     backgroundColor: '#fff',
     borderRadius: 24,
@@ -192,6 +204,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 24,
     elevation: 10,
+  },
+  // `alignSelf` rather than `width: '100%'`: the card's parent sizes to content,
+  // and a percentage width against an indefinite parent does not fill it — that
+  // is what left the reset-success button looking undersized on device.
+  cardWide: {
+    alignSelf: 'stretch',
+    maxWidth: undefined,
   },
   iconCircle: {
     width: 56,
@@ -209,14 +228,16 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     marginBottom: 6,
   },
-  // Matches CustomAlert's confirm button (bg-primary, rounded-xl, py-3) so a
-  // persistent card reads as the same family as the app's other dialogs.
+  // Pill, per PASSWORD_SCREENS.html `.btn { border-radius: 999px }`. The 12px
+  // radius this shipped with is the mockup's `.btn.flat` variant, used on the
+  // form buttons rather than on card actions.
   primaryButton: {
-    marginTop: 14,
-    width: '100%',
+    marginTop: 12,
+    alignSelf: 'stretch',
     backgroundColor: PAL.successBg,
-    borderRadius: 12,
+    borderRadius: 999,
     paddingVertical: 12,
+    paddingHorizontal: 14,
     alignItems: 'center',
   },
   primaryButtonText: {

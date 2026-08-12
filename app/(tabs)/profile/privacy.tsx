@@ -33,8 +33,24 @@ type AlertConfig = {
 type PasswordErrors = {
     currentPassword?: string;
     newPassword?: string;
+    confirmPassword?: string;
     form?: string;
 };
+
+/**
+ * Clerk codes that mean "the CURRENT password you supplied is wrong", as opposed
+ * to "the NEW password you chose is unacceptable". Everything else in the
+ * `form_password_*` family is a policy rejection and belongs beside New password.
+ *
+ * This set is why the wrong-password error used to land under New password:
+ * `form_password_incorrect` was handled, but Clerk answers `updatePassword` with
+ * `form_password_validation_failed`, which fell through to the family catch-all.
+ */
+const CURRENT_PASSWORD_ERROR_CODES = new Set([
+    'form_password_incorrect',
+    'form_password_validation_failed',
+    'form_password_or_identifier_incorrect',
+]);
 
 /** Success auto-dismisses; lockout waits for the user. */
 type PasswordOverlay =
@@ -83,6 +99,7 @@ const PrivacyScreen = () => {
     const [modalVisible, setModalVisible] = useState(false);
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [pwdErrors, setPwdErrors] = useState<PasswordErrors>({});
     const [pwdOverlay, setPwdOverlay] = useState<PasswordOverlay | null>(null);
@@ -97,6 +114,7 @@ const PrivacyScreen = () => {
     // Visibility Toggle State
     const [showCurrentPassword, setShowCurrentPassword] = useState(false);
     const [showNewPassword, setShowNewPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [deletingAccount, setDeletingAccount] = useState(false);
 
     const [alertConfig, setAlertConfig] = useState<AlertConfig>({
@@ -130,8 +148,10 @@ const PrivacyScreen = () => {
     const resetPasswordForm = useCallback(() => {
         setCurrentPassword('');
         setNewPassword('');
+        setConfirmPassword('');
         setShowCurrentPassword(false);
         setShowNewPassword(false);
+        setShowConfirmPassword(false);
         setPwdErrors({});
     }, []);
 
@@ -155,6 +175,20 @@ const PrivacyScreen = () => {
         }
         if (!newPassword) {
             setPwdErrors({ newPassword: 'Enter a new password.' });
+            return;
+        }
+        if (!confirmPassword) {
+            setPwdErrors({ confirmPassword: 'Re-enter your new password.' });
+            return;
+        }
+        // Checklist §4: equality and new-equals-current are both caught locally,
+        // so neither wastes a Clerk attempt against the lockout counter.
+        if (newPassword !== confirmPassword) {
+            setPwdErrors({ confirmPassword: "Those passwords don't match." });
+            return;
+        }
+        if (newPassword === currentPassword) {
+            setPwdErrors({ newPassword: 'Your new password must be different from your current one.' });
             return;
         }
 
@@ -198,10 +232,10 @@ const PrivacyScreen = () => {
                 setPwdOverlay({ kind: 'lockout', message: describeLockout(info.lockoutSeconds) });
             } else if (info.code === 'account_lockout_warning') {
                 setPwdErrors({ form: info.message || 'Too many attempts. Your account will be locked shortly.' });
-            } else if (info.code === 'form_password_pwned') {
-                setPwdErrors({ newPassword: 'This password has appeared in a data breach. Pick something else.' });
-            } else if (info.code === 'form_password_incorrect') {
+            } else if (info.code && CURRENT_PASSWORD_ERROR_CODES.has(info.code)) {
                 setPwdErrors({ currentPassword: 'Current password is incorrect.' });
+            } else if (info.code === 'form_password_pwned' || info.code === 'form_password_compromised') {
+                setPwdErrors({ newPassword: 'This password has appeared in a data breach. Pick something else.' });
             } else if (info.code?.startsWith('form_password')) {
                 setPwdErrors({ newPassword: info.message || 'Choose a stronger password.' });
             } else if (info.status !== undefined && info.status >= 500) {
@@ -214,7 +248,7 @@ const PrivacyScreen = () => {
             changingPasswordRef.current = false;
             setLoading(false);
         }
-    }, [currentPassword, newPassword, userLoaded, isSignedIn, user, resetPasswordForm]);
+    }, [currentPassword, newPassword, confirmPassword, userLoaded, isSignedIn, user, resetPasswordForm]);
 
     const showDeleteAccountError = (message: string) => {
         setAlertConfig({
@@ -394,6 +428,31 @@ const PrivacyScreen = () => {
                             <Text className="text-error text-xs mt-1">{pwdErrors.newPassword}</Text>
                         )}
 
+                        {/* Confirm New Password Input with Eye Icon */}
+                        <Text className="text-sm font-bold text-gray-600 mb-2 mt-4">Confirm New Password</Text>
+                        <View className={`flex-row items-center bg-gray-50 border rounded-xl px-4 py-1 ${pwdErrors.confirmPassword ? 'border-error' : 'border-gray-200'}`}>
+                            <TextInput
+                                secureTextEntry={!showConfirmPassword}
+                                className="flex-1 py-3 text-base"
+                                value={confirmPassword}
+                                onChangeText={(text) => {
+                                    setConfirmPassword(text);
+                                    clearPwdError('confirmPassword');
+                                }}
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                textContentType="newPassword"
+                                returnKeyType="done"
+                                onSubmitEditing={handleChangePassword}
+                            />
+                            <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} className="p-2">
+                                <Ionicons name={showConfirmPassword ? "eye-off" : "eye"} size={20} color="#9CA3AF" />
+                            </TouchableOpacity>
+                        </View>
+                        {!!pwdErrors.confirmPassword && (
+                            <Text className="text-error text-xs mt-1">{pwdErrors.confirmPassword}</Text>
+                        )}
+
                         {!!pwdErrors.form && (
                             <Text className="text-error text-xs mt-3 text-center">{pwdErrors.form}</Text>
                         )}
@@ -422,6 +481,7 @@ const PrivacyScreen = () => {
                         message={pwdOverlay?.message ?? ''}
                         pip={pwdOverlay?.kind === 'lockout' ? 'care' : 'happy'}
                         pipSize={76}
+                        wide
                         autoDismissMs={pwdOverlay?.kind === 'lockout' ? null : 2000}
                         primaryActionLabel={pwdOverlay?.kind === 'lockout' ? 'Got it' : undefined}
                         onPrimaryAction={pwdOverlay?.kind === 'lockout' ? () => setPwdOverlay(null) : undefined}

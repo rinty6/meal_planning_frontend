@@ -206,13 +206,76 @@ const SignInScreen = () => {
   }, [signIn, signOut]);
 
   /**
-   * Branches on Clerk's own status so a rejected password never costs the user
-   * their code. Once the code is spent the attempt sits at `needs_new_password`,
-   * and a retry resubmits only the password. A retry after cleanup failure sits
-   * at `complete` and re-runs only the sign-out.
+   * STEP 1 of the two-step reset: prove the code, nothing else.
+   *
+   * `password` is deliberately omitted from the attempt — it is optional on
+   * `ResetPasswordEmailCodeAttempt`, and leaving it off is what lets the code
+   * be verified on its own screen. Clerk answers `needs_new_password`, which the
+   * password step then picks up.
+   *
+   * Idempotent: if the attempt is already past first factor (the user backed up
+   * to this screen, or a retry re-entered here), the code is not resubmitted.
    */
-  const handleResetPassword = useCallback(
-    async (code: string, newPassword: string): Promise<RecoveryActionResult> => {
+  const handleVerifyCode = useCallback(
+    async (code: string): Promise<RecoveryActionResult> => {
+      if (!isLoaded || !signIn) {
+        return { kind: 'field', field: 'form', message: NOT_READY_MESSAGE };
+      }
+
+      // Already verified. Resubmitting a spent code would fail for the wrong
+      // reason and strand the user on a screen they have already cleared.
+      if (signIn.status === 'needs_new_password') return { kind: 'ok' };
+
+      try {
+        const verified = await signIn.attemptFirstFactor({
+          strategy: 'reset_password_email_code',
+          code,
+        });
+
+        if (verified.status === 'needs_second_factor') {
+          return { kind: 'field', field: 'form', message: MFA_MESSAGE };
+        }
+        if (verified.status !== 'needs_new_password') {
+          return {
+            kind: 'field',
+            field: 'code',
+            message: 'That code could not be verified. Request a new one.',
+          };
+        }
+        return { kind: 'ok' };
+      } catch (error: unknown) {
+        const info = readClerkError(error);
+
+        if (isTransportFailure(info)) {
+          return { kind: 'field', field: 'form', message: TRANSPORT_MESSAGE };
+        }
+        if (isThrottled(info)) {
+          return { kind: 'lockout', message: info.message || 'Too many attempts. Please try again later.' };
+        }
+        if (info.status !== undefined && info.status >= 500) {
+          return { kind: 'field', field: 'form', message: SERVICE_MESSAGE };
+        }
+        // Everything else at this step is a verdict on the code itself.
+        return {
+          kind: 'field',
+          field: 'code',
+          message: info.message || 'That code is not valid. Request a new one.',
+        };
+      }
+    },
+    [isLoaded, signIn]
+  );
+
+  /**
+   * STEP 2: spend the verified attempt on a new password.
+   *
+   * Branches on Clerk's own status so a rejected password never costs the user
+   * their code — a weak/breached rejection leaves the attempt at
+   * `needs_new_password`, so the retry resubmits only the password. A retry
+   * after a cleanup failure sits at `complete` and re-runs only the sign-out.
+   */
+  const handleSetPassword = useCallback(
+    async (newPassword: string): Promise<RecoveryActionResult> => {
       if (!isLoaded || !signIn) {
         return { kind: 'field', field: 'form', message: NOT_READY_MESSAGE };
       }
@@ -220,25 +283,6 @@ const SignInScreen = () => {
       try {
         let status = signIn.status;
         let createdSessionId: string | null | undefined;
-
-        if (status === 'needs_first_factor') {
-          const verified = await signIn.attemptFirstFactor({
-            strategy: 'reset_password_email_code',
-            code,
-          });
-          status = verified.status;
-
-          if (status === 'needs_second_factor') {
-            return { kind: 'field', field: 'form', message: MFA_MESSAGE };
-          }
-          if (status !== 'needs_new_password') {
-            return {
-              kind: 'field',
-              field: 'code',
-              message: 'That code could not be verified. Request a new one.',
-            };
-          }
-        }
 
         if (status === 'needs_new_password') {
           const reset = await signIn.resetPassword({
@@ -257,11 +301,9 @@ const SignInScreen = () => {
           return await cleanupRecoverySession(createdSessionId);
         }
 
-        return {
-          kind: 'field',
-          field: 'form',
-          message: 'Recovery could not be completed. Please start again.',
-        };
+        // The attempt is no longer verified — checklist §5: the code is spent,
+        // so send them back for a fresh one rather than to a dead code screen.
+        return { kind: 'restart', message: 'That code has expired. Request a new one to continue.' };
       } catch (error: unknown) {
         const info = readClerkError(error);
 
@@ -271,7 +313,7 @@ const SignInScreen = () => {
         if (isThrottled(info)) {
           return { kind: 'lockout', message: info.message || 'Too many attempts. Please try again later.' };
         }
-        if (info.code === 'form_password_pwned') {
+        if (info.code === 'form_password_pwned' || info.code === 'form_password_compromised') {
           return {
             kind: 'field',
             field: 'newPassword',
@@ -285,11 +327,12 @@ const SignInScreen = () => {
             message: info.message || 'Choose a stronger password.',
           };
         }
-        if (info.code?.includes('code')) {
+        // A code/verification complaint at THIS step means the attempt expired
+        // between the two screens. The code is gone; only a new one helps.
+        if (info.code?.includes('code') || info.code?.includes('verification')) {
           return {
-            kind: 'field',
-            field: 'code',
-            message: info.message || 'That code is not valid. Request a new one.',
+            kind: 'restart',
+            message: info.message || 'That code has expired. Request a new one to continue.',
           };
         }
         if (info.status !== undefined && info.status >= 500) {
@@ -407,7 +450,8 @@ const SignInScreen = () => {
           initialEmail={recoveryEmail}
           onClose={() => setResetModalVisible(false)}
           onRequestCode={handleRequestCode}
-          onVerify={handleResetPassword}
+          onVerifyCode={handleVerifyCode}
+          onSetPassword={handleSetPassword}
         />
       </View>
     </KeyboardAvoidingView>
