@@ -90,6 +90,13 @@ const OVERLAY_COPY: Record<OverlayKind, { title: string; action: string }> = {
  * One source for the code-sent copy. It is rendered on both the success and the
  * neutral-4xx path, and enumeration protection depends on those two being
  * character-for-character identical — two string literals would eventually drift.
+ * Taking no argument makes that identity structural rather than a convention.
+ *
+ * "If an account exists" stays. Without it the card asserts a code was sent,
+ * which is false for an unregistered or passwordless address, and someone who
+ * mistyped their email would sit waiting for mail that is never coming. The
+ * address itself is dropped because the email field sits directly above this
+ * card and still shows it — that was the redundant part, not the hedge.
  *
  * The social-login line is shown to EVERY address, registered or not. That is
  * what makes it safe: it rescues a social-only user from waiting for a code that
@@ -97,9 +104,9 @@ const OVERLAY_COPY: Record<OverlayKind, { title: string; action: string }> = {
  * passwordless account has no password credential for Clerk to reset, so it
  * lands on the neutral branch and would otherwise dead-end here.
  */
-const codeSentMessage = (email: string) =>
-  `If an account exists for ${email}, a ${CODE_LENGTH}-digit code is on its way.\n\n` +
-  'Signed up with Google, Apple or Facebook? Use that button on the sign-in screen instead.';
+const CODE_SENT_MESSAGE =
+  `If an account exists, a ${CODE_LENGTH}-digit code is on its way.\n\n` +
+  'Signed up with Google, Apple or Facebook? Use that button instead.';
 
 const formatCountdown = (seconds: number) => {
   const m = Math.floor(seconds / 60);
@@ -241,7 +248,7 @@ const ResetPasswordScreen = () => {
         } else {
           setOverlay({
             kind: 'code-sent',
-            message: codeSentMessage(targetEmail),
+            message: CODE_SENT_MESSAGE,
           });
         }
       } catch (error: unknown) {
@@ -265,7 +272,7 @@ const ResetPasswordScreen = () => {
           } else {
             setOverlay({
               kind: 'code-sent',
-              message: codeSentMessage(targetEmail),
+              message: CODE_SENT_MESSAGE,
             });
           }
         }
