@@ -18,7 +18,15 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -86,6 +94,21 @@ const OVERLAY_COPY: Record<OverlayKind, { title: string; action: string }> = {
   cleanup: { title: 'Password reset', action: 'Retry' },
 };
 
+/**
+ * One source for the code-sent copy. It is rendered on both the success and the
+ * neutral-4xx path, and enumeration protection depends on those two being
+ * character-for-character identical — two string literals would eventually drift.
+ *
+ * The social-login line is shown to EVERY address, registered or not. That is
+ * what makes it safe: it rescues a social-only user from waiting for a code that
+ * can never arrive, without revealing anything about the address in hand. A
+ * passwordless account has no password credential for Clerk to reset, so it
+ * lands on the neutral branch and would otherwise dead-end here.
+ */
+const codeSentMessage = (email: string) =>
+  `If an account exists for ${email}, a ${CODE_LENGTH}-digit code is on its way.\n\n` +
+  'Signed up with Google, Apple or Facebook? Use that button on the sign-in screen instead.';
+
 const formatCountdown = (seconds: number) => {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -133,6 +156,16 @@ const ResetPasswordScreen = () => {
     const id = setInterval(() => setCooldown((s) => (s <= 1 ? 0 : s - 1)), 1000);
     return () => clearInterval(id);
   }, [cooldownRunning]);
+
+  /**
+   * Submitting from the keyboard's return key leaves the keyboard up, and these
+   * cards are centred — on a small screen it covers the card's own button, so
+   * the only way forward is hidden behind the thing that triggered it. Every
+   * overlay here is persistent and action-bearing, so none of them can afford it.
+   */
+  useEffect(() => {
+    if (overlay) Keyboard.dismiss();
+  }, [overlay]);
 
   /** Clearing only the edited field keeps other errors visible while fixing one. */
   const clearError = useCallback((field: FieldKey) => {
@@ -226,7 +259,7 @@ const ResetPasswordScreen = () => {
         } else {
           setOverlay({
             kind: 'code-sent',
-            message: `If an account exists for ${targetEmail}, a ${CODE_LENGTH}-digit code is on its way.`,
+            message: codeSentMessage(targetEmail),
           });
         }
       } catch (error: unknown) {
@@ -250,7 +283,7 @@ const ResetPasswordScreen = () => {
           } else {
             setOverlay({
               kind: 'code-sent',
-              message: `If an account exists for ${targetEmail}, a ${CODE_LENGTH}-digit code is on its way.`,
+              message: codeSentMessage(targetEmail),
             });
           }
         }
