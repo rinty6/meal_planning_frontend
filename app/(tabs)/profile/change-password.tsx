@@ -163,6 +163,11 @@ const ChangePasswordScreen = () => {
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState('');
   const [verify, setVerify] = useState<VerifyState | null>(null);
+  /**
+   * TEMPORARY, `__DEV__` only. Investigating why the reverification code never
+   * arrives on a Google-only account (checklist §9.4). Remove once resolved.
+   */
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
   /**
    * `passwordEnabled` is the gate (CP5). It is only meaningful once the user
@@ -395,6 +400,7 @@ const ChangePasswordScreen = () => {
     setErrors({});
     try {
       const started = await startEmailVerification(session, 'first_factor');
+      if (__DEV__) setDebugInfo(JSON.stringify(started.debug ?? {}, null, 2));
       if (started.kind === 'already_verified') {
         setStep('form');
         return;
@@ -595,6 +601,16 @@ const ChangePasswordScreen = () => {
 
               {!!errors.form && <Text className="text-error text-xs mb-3 text-center">{errors.form}</Text>}
 
+              {/* TEMPORARY §9.4 diagnostic, dev builds only. */}
+              {__DEV__ && !!debugInfo && (
+                <View className="mb-4 p-3 rounded-lg bg-gray-100 border border-gray-300">
+                  <Text className="text-[10px] font-bold text-gray-500 mb-1">CLERK DEBUG (dev only)</Text>
+                  <Text selectable className="text-[10px] text-gray-700" style={{ fontFamily: 'monospace' }}>
+                    {debugInfo}
+                  </Text>
+                </View>
+              )}
+
               <TouchableOpacity
                 onPress={handleStartVerification}
                 disabled={busy}
@@ -646,6 +662,17 @@ const ChangePasswordScreen = () => {
               </View>
               {!!errors.code && <Text className="text-error text-xs mt-1">{errors.code}</Text>}
               {!!errors.form && <Text className="text-error text-xs mt-3">{errors.form}</Text>}
+
+              {/* TEMPORARY §9.4 diagnostic, dev builds only. Statuses and opaque
+                  ids only — never the code, password or address. */}
+              {__DEV__ && !!debugInfo && (
+                <View className="mt-4 p-3 rounded-lg bg-gray-100 border border-gray-300">
+                  <Text className="text-[10px] font-bold text-gray-500 mb-1">CLERK DEBUG (dev only)</Text>
+                  <Text selectable className="text-[10px] text-gray-700" style={{ fontFamily: 'monospace' }}>
+                    {debugInfo}
+                  </Text>
+                </View>
+              )}
 
               <TouchableOpacity
                 onPress={handleSubmitCode}
