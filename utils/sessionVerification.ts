@@ -20,27 +20,7 @@
 // `@clerk/shared` to 3.39.0, so this path is stable for this project.
 import type { SessionResource, SessionVerificationLevel } from '@clerk/shared/types';
 
-/**
- * DEV-ONLY diagnostic snapshot of what Clerk returned.
- *
- * Deliberately carries statuses, strategies and opaque ids only — no code, no
- * password, no email address (checklist §6). `emailAddressId` is an opaque
- * Clerk id, not an address. Rendered only under `__DEV__`; it must never reach
- * a release build or a log sink.
- */
-export type VerificationDebug = {
-  startStatus?: string | null;
-  factors?: string[];
-  emailAddressId?: string;
-  preparedStatus?: string | null;
-  dispatchStatus?: string | null;
-  dispatchStrategy?: string | null;
-  dispatchErrorCode?: string;
-  dispatchErrorMessage?: string;
-  expireAt?: string | null;
-};
-
-export type VerificationStart = { debug?: VerificationDebug } & (
+export type VerificationStart =
   /** Session already satisfies the level; no code needed. */
   | { kind: 'already_verified' }
   /** A code is on its way. `sentTo` is Clerk's redacted identifier. */
@@ -53,9 +33,12 @@ export type VerificationStart = { debug?: VerificationDebug } & (
    * rather than throwing, so without an explicit check it is indistinguishable
    * from a successful send and strands the user on a code screen waiting for
    * mail that is never coming.
+   *
+   * NOTE: this does NOT catch the §9.4 case. There Clerk returned a perfectly
+   * healthy `unverified` verification with a null error and still sent nothing,
+   * so no client-side check could have detected it.
    */
-  | { kind: 'send_failed'; message?: string }
-);
+  | { kind: 'send_failed'; message?: string };
 
 export type VerificationAttempt =
   | { kind: 'complete' }
@@ -77,34 +60,18 @@ export const startEmailVerification = async (
 ): Promise<VerificationStart> => {
   const verification = await session.startVerification({ level });
 
-  const debug: VerificationDebug = {
-    startStatus: verification.status,
-    factors: verification.supportedFirstFactors?.map((f) => f.strategy) ?? [],
-  };
-
-  if (verification.status === 'complete') return { kind: 'already_verified', debug };
+  if (verification.status === 'complete') return { kind: 'already_verified' };
 
   const emailFactor = verification.supportedFirstFactors?.find(
     (factor): factor is Extract<typeof factor, { strategy: 'email_code' }> =>
       factor.strategy === 'email_code'
   );
-  if (!emailFactor) return { kind: 'unsupported', debug };
-
-  debug.emailAddressId = emailFactor.emailAddressId;
+  if (!emailFactor) return { kind: 'unsupported' };
 
   const prepared = await session.prepareFirstFactorVerification({
     strategy: 'email_code',
     emailAddressId: emailFactor.emailAddressId,
   });
-
-  debug.preparedStatus = prepared.status;
-  debug.dispatchStatus = prepared.firstFactorVerification?.status;
-  debug.dispatchStrategy = prepared.firstFactorVerification?.strategy;
-  debug.dispatchErrorCode = prepared.firstFactorVerification?.error?.code;
-  debug.dispatchErrorMessage =
-    prepared.firstFactorVerification?.error?.longMessage ||
-    prepared.firstFactorVerification?.error?.message;
-  debug.expireAt = prepared.firstFactorVerification?.expireAt?.toISOString() ?? null;
 
   // A resolved promise is NOT proof that a code went out. Clerk reports a
   // dispatch failure on the returned resource rather than by throwing, so
@@ -115,11 +82,10 @@ export const startEmailVerification = async (
     return {
       kind: 'send_failed',
       message: dispatch.error?.longMessage || dispatch.error?.message || undefined,
-      debug,
     };
   }
 
-  return { kind: 'code_sent', sentTo: emailFactor.safeIdentifier, debug };
+  return { kind: 'code_sent', sentTo: emailFactor.safeIdentifier };
 };
 
 export const attemptEmailVerification = async (
