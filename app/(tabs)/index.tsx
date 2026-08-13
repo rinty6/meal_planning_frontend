@@ -651,28 +651,6 @@ const HomeScreen = () => {
                 />
             </SafeFullScreenModal>
 
-            {/* DEV ONLY — entry point for the Pip rig preview. Remove before the release build. */}
-            {__DEV__ && (
-                <TouchableOpacity
-                    onPress={() => router.push('/pip-preview')}
-                    style={{
-                        position: 'absolute',
-                        right: 16,
-                        bottom: 24,
-                        backgroundColor: '#2B7BE0',
-                        borderRadius: 999,
-                        paddingHorizontal: 16,
-                        paddingVertical: 10,
-                        shadowColor: '#0F172A',
-                        shadowOpacity: 0.25,
-                        shadowRadius: 8,
-                        shadowOffset: { width: 0, height: 2 },
-                        elevation: 4,
-                    }}
-                >
-                    <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>Pip preview</Text>
-                </TouchableOpacity>
-            )}
         </SafeAreaView>
     );
 };
