@@ -57,30 +57,35 @@ type FieldErrors = Partial<Record<FieldKey, string>>;
 /**
  * `set` is the social-only case (CP5): `user.passwordEnabled` is false, so there
  * is no current password to ask for and asking for one — which is what this
- * screen used to do — is unanswerable. It opens on an intro instead, verifies
- * identity, and only then collects a password.
+ * screen used to do — is unanswerable. It opens on an explanatory intro instead,
+ * then collects a password.
  */
 type Mode = 'change' | 'set';
 
 type Step = 'intro' | 'verify' | 'form';
 
 /**
- * Reverification can arrive two ways, and they differ in how they finish.
+ * Reverification is now entered ONE way only: Clerk interrupting a submit that
+ * is already in flight (checklist §4 — "run the strongest available factor and
+ * then retry the original submit once").
  *
- * `proactive` is CP5's "Verify it's you" — we started it, so when the code is
- * accepted we simply advance to the password form.
+ * CP5's proactive "Verify it's you" step was removed 2026-08-13. On this Clerk
+ * instance `prepareFirstFactorVerification` returns a healthy verification
+ * (`unverified`, real expiry, null error) but no email is ever delivered and no
+ * `email.created` event is logged — see checklist §9.4. Making every social-only
+ * user pass through that step first would have made setting a password
+ * impossible. Asking Clerk only when Clerk insists means the flow works whenever
+ * reverification is not actually enforced. The proactive variant is recoverable
+ * from commit `ada2d9b` if Clerk's delivery is fixed.
  *
- * `reactive` is Clerk interrupting a submit that was already in flight
- * (checklist §4: "run the strongest available factor and then retry the
- * original submit once"). `complete()` is Clerk's own callback and performs
- * that retry, so it must be called rather than resubmitting by hand — calling
- * `user.updatePassword` again would be a second request, not a retry.
+ * `complete()` is Clerk's own callback and performs the retry, so it must be
+ * called rather than resubmitting by hand — calling `user.updatePassword` again
+ * would be a second request, not a retry.
  */
 type VerifyState = {
-  intent: 'proactive' | 'reactive';
   sentTo: string;
-  complete?: () => void;
-  cancel?: () => void;
+  complete: () => void;
+  cancel: () => void;
 };
 
 /** `handoff` and `lockout` wait for the user; `success` auto-dismisses. */
@@ -243,6 +248,7 @@ const ChangePasswordScreen = () => {
         }
         try {
           const started = await startEmailVerification(session, level ?? 'first_factor');
+          if (__DEV__) setDebugInfo(JSON.stringify(started.debug ?? {}, null, 2));
           if (started.kind === 'already_verified') {
             complete();
             return;
@@ -262,7 +268,7 @@ const ChangePasswordScreen = () => {
             return;
           }
           setCode('');
-          setVerify({ intent: 'reactive', sentTo: started.sentTo, complete, cancel });
+          setVerify({ sentTo: started.sentTo, complete, cancel });
           setStep('verify');
         } catch (error: unknown) {
           cancel();
@@ -383,49 +389,6 @@ const ChangePasswordScreen = () => {
     updatePasswordWithReverification,
   ]);
 
-  /**
-   * CP5's "Verify it's you". Runs the check BEFORE asking for a password, which
-   * is the point of that screen: a social-only user should not type a new
-   * password only to be interrupted for a code straight afterwards.
-   */
-  const handleStartVerification = useCallback(async () => {
-    if (inFlightRef.current) return;
-    if (!session) {
-      setErrors({ form: 'Your session has expired. Please sign in again.' });
-      return;
-    }
-
-    inFlightRef.current = true;
-    setBusy(true);
-    setErrors({});
-    try {
-      const started = await startEmailVerification(session, 'first_factor');
-      if (__DEV__) setDebugInfo(JSON.stringify(started.debug ?? {}, null, 2));
-      if (started.kind === 'already_verified') {
-        setStep('form');
-        return;
-      }
-      if (started.kind === 'unsupported') {
-        setErrors({ form: 'We could not confirm your identity in the app. Please contact support.' });
-        return;
-      }
-      if (started.kind === 'send_failed') {
-        setErrors({
-          form: started.message || 'We could not send a verification code right now. Please try again shortly.',
-        });
-        return;
-      }
-      setCode('');
-      setVerify({ intent: 'proactive', sentTo: started.sentTo });
-      setStep('verify');
-    } catch (error: unknown) {
-      const info = readClerkError(error);
-      setErrors({ form: isTransportFailure(info) ? TRANSPORT_MESSAGE : SERVICE_MESSAGE });
-    } finally {
-      inFlightRef.current = false;
-      setBusy(false);
-    }
-  }, [session]);
 
   const handleSubmitCode = useCallback(async () => {
     if (inFlightRef.current) return;
@@ -456,17 +419,12 @@ const ChangePasswordScreen = () => {
       }
 
       setCode('');
-      if (verify.intent === 'reactive') {
-        // Clerk's own retry of the interrupted submit. The success overlay is
-        // raised by the awaiting handleSubmit when that retry resolves.
-        const resume = verify.complete;
-        setVerify(null);
-        setStep('form');
-        resume?.();
-        return;
-      }
+      // Clerk's own retry of the interrupted submit. The success overlay is
+      // raised by the awaiting handleSubmit when that retry resolves.
+      const resume = verify.complete;
       setVerify(null);
       setStep('form');
+      resume();
     } catch (error: unknown) {
       const info = readClerkError(error);
       if (isTransportFailure(info)) {
@@ -483,15 +441,15 @@ const ChangePasswordScreen = () => {
   }, [code, session, verify]);
 
   const handleCancelVerification = useCallback(() => {
-    if (verify?.intent === 'reactive' && verify.cancel) {
+    if (verify) {
       cancelledReverificationRef.current = true;
       verify.cancel();
     }
     setCode('');
     setVerify(null);
     setErrors({});
-    setStep(mode === 'set' ? 'intro' : 'form');
-  }, [verify, mode]);
+    setStep('form');
+  }, [verify]);
 
   /**
    * CP18/CP19. Recovery runs from the signed-out sign-in screen, so it cannot be
@@ -601,31 +559,19 @@ const ChangePasswordScreen = () => {
 
               {!!errors.form && <Text className="text-error text-xs mb-3 text-center">{errors.form}</Text>}
 
-              {/* TEMPORARY §9.4 diagnostic, dev builds only. */}
-              {__DEV__ && !!debugInfo && (
-                <View className="mb-4 p-3 rounded-lg bg-gray-100 border border-gray-300">
-                  <Text className="text-[10px] font-bold text-gray-500 mb-1">CLERK DEBUG (dev only)</Text>
-                  <Text selectable className="text-[10px] text-gray-700" style={{ fontFamily: 'monospace' }}>
-                    {debugInfo}
-                  </Text>
-                </View>
-              )}
-
+              {/* Straight to the form. Identity is only re-checked if Clerk
+                  itself insists on the submit — see the VerifyState comment. */}
               <TouchableOpacity
-                onPress={handleStartVerification}
+                onPress={() => {
+                  setErrors({});
+                  setStep('form');
+                }}
                 disabled={busy}
                 className={`py-3 rounded-xl items-center ${busy ? 'bg-primary/60' : 'bg-primary'}`}
                 accessibilityRole="button"
               >
-                {busy ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <Text className="font-bold text-white">Verify it&apos;s you</Text>
-                )}
+                <Text className="font-bold text-white">Continue</Text>
               </TouchableOpacity>
-              <Text className="text-xs text-textSecondary text-center mt-2">
-                We&apos;ll confirm your identity first.
-              </Text>
             </View>
           )}
 
