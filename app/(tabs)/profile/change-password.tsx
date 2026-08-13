@@ -249,6 +249,13 @@ const ChangePasswordScreen = () => {
             });
             return;
           }
+          if (started.kind === 'send_failed') {
+            cancel();
+            setErrors({
+              form: started.message || 'We could not send a verification code right now. Please try again shortly.',
+            });
+            return;
+          }
           setCode('');
           setVerify({ intent: 'reactive', sentTo: started.sentTo, complete, cancel });
           setStep('verify');
@@ -394,6 +401,12 @@ const ChangePasswordScreen = () => {
       }
       if (started.kind === 'unsupported') {
         setErrors({ form: 'We could not confirm your identity in the app. Please contact support.' });
+        return;
+      }
+      if (started.kind === 'send_failed') {
+        setErrors({
+          form: started.message || 'We could not send a verification code right now. Please try again shortly.',
+        });
         return;
       }
       setCode('');

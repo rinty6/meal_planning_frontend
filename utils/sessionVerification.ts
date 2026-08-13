@@ -26,7 +26,15 @@ export type VerificationStart =
   /** A code is on its way. `sentTo` is Clerk's redacted identifier. */
   | { kind: 'code_sent'; sentTo: string }
   /** No email factor offered — cannot proceed in-app. */
-  | { kind: 'unsupported' };
+  | { kind: 'unsupported' }
+  /**
+   * Clerk accepted the request but the resulting verification came back
+   * `failed`/`expired` — i.e. no code was actually dispatched. This resolves
+   * rather than throwing, so without an explicit check it is indistinguishable
+   * from a successful send and strands the user on a code screen waiting for
+   * mail that is never coming.
+   */
+  | { kind: 'send_failed'; message?: string };
 
 export type VerificationAttempt =
   | { kind: 'complete' }
@@ -56,10 +64,22 @@ export const startEmailVerification = async (
   );
   if (!emailFactor) return { kind: 'unsupported' };
 
-  await session.prepareFirstFactorVerification({
+  const prepared = await session.prepareFirstFactorVerification({
     strategy: 'email_code',
     emailAddressId: emailFactor.emailAddressId,
   });
+
+  // A resolved promise is NOT proof that a code went out. Clerk reports a
+  // dispatch failure on the returned resource rather than by throwing, so
+  // ignoring it turns "we never sent anything" into a code screen that waits
+  // forever. `error.longMessage` is Clerk's own user-facing sentence.
+  const dispatch = prepared.firstFactorVerification;
+  if (dispatch?.status === 'failed' || dispatch?.status === 'expired') {
+    return {
+      kind: 'send_failed',
+      message: dispatch.error?.longMessage || dispatch.error?.message || undefined,
+    };
+  }
 
   return { kind: 'code_sent', sentTo: emailFactor.safeIdentifier };
 };
