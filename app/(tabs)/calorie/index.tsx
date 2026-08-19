@@ -1,13 +1,16 @@
 // This file will create the calorie menu page
 
-import { View, Text, Image, ScrollView } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
 import React from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import MenuOptions from '../../../components/menuoptions'; 
+import PipMenuScene from '../../../components/pip/pip-menu-scene';
 
 const CalorieMenuScreen = () => {
   const router = useRouter();
+  const isFocused = useIsFocused();
 
   return (
     <SafeAreaView className='flex-1 bg-white px-5' edges={['top', 'left', 'right']}>
@@ -16,14 +19,12 @@ const CalorieMenuScreen = () => {
         {/* 1. Header Title */}
         <Text className="text-center text-2xl font-bold my-4">Calorie</Text>
 
-        {/* 2. Hero Image */}
-        {/* Replace the source with your specific gym/fitness image */}
+        {/* Audit: Workout replaces the remote gym photo and only animates while the Calorie menu is focused. */}
         <View className="items-center mb-10 rounded-2xl overflow-hidden shadow-sm">
-            <Image 
-                source={{ uri: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?q=80&w=1000&auto=format&fit=crop' }} 
-                // Or use local: source={require('../../../assets/images/gym_hero.jpg')}
-                style={{ width: '100%', height: 220 }}
-                resizeMode="cover"
+            <PipMenuScene
+                accessibilityLabel="Pip performing a barbell back squat"
+                animated={isFocused}
+                scene="workout"
             />
         </View>
 

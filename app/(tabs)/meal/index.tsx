@@ -1,11 +1,14 @@
-import { View, Text, Image, ScrollView } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
 import React from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import MenuOptions from '../../../components/menuoptions';
+import PipMenuScene from '../../../components/pip/pip-menu-scene';
 
 const MealScreen = () => {
     const router = useRouter();
+    const isFocused = useIsFocused();
 
     return (
         <SafeAreaView className='flex-1 bg-white px-5' edges={['top', 'left', 'right']}>
@@ -13,12 +16,12 @@ const MealScreen = () => {
                 {/* 1. Header Title */}
                 <Text className="text-center text-2xl font-bold my-4">Meal</Text>
 
-                {/* 2. The Hero Image */}
+                {/* Audit: Cooking replaces the former food photo and only animates while the Meal menu is focused. */}
                 <View className="items-center mb-8 rounded-2xl overflow-hidden">
-                    <Image 
-                        source={require('../../../assets/images/food_image.jpg')}
-                        style={{width:'100%', height: 200}}
-                        resizeMode='cover'
+                    <PipMenuScene
+                        accessibilityLabel="Pip cooking a healthy meal at a kitchen bench"
+                        animated={isFocused}
+                        scene="cooking"
                     />
                 </View>
                 {/* 3. The Menu Options */}
