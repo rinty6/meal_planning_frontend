@@ -5,10 +5,11 @@
  * It is mounted ONCE per action and morphs in place: Pip thinks while the
  * request is out, then eases into the outcome pose; the copy swaps; and the
  * button, present from the first frame as a disabled "Saving…" pill, wakes into
- * Confirm only once Pip has finished reacting. There is never a second card, a
- * second fade-in, or a swap between two surfaces.
+ * Confirm one short beat after the save lands. Pip's reaction plays beside the
+ * live button; it is a reward to watch, never a gate to wait through. There is
+ * never a second card, a second fade-in, or a swap between two surfaces.
  *
- * Design: claude_memory/loading redesign/pip-loading-status.html (D5, D6).
+ * Design: claude_memory/loading redesign/pip-loading-status.html (D5–D8).
  * Plan:   claude_memory/loading redesign/LOADING_REDESIGN_PLAN.md
  *
  * STRUCTURAL RULES (each one has bitten before):
@@ -19,6 +20,9 @@
  *  - One PipBird, never remounted. Its `state` prop changes and the rig's own
  *    ease-through-idle IS the thinking-to-outcome morph. Keying it on phase
  *    would cut instead of easing.
+ *  - The button follows the system, not the animation (D7). Nothing here
+ *    reads PipBird's onAnimationComplete, so Reduce Motion needs no special
+ *    case: the button wakes at the same moment whether Pip moves or not.
  *  - The keyboard is dismissed on show: it is an OS layer above everything and
  *    covers the button (ERROR_LOG Error 075; same fix as InlineStatusOverlay).
  *  - Pip is decorative and hidden from the screen reader so the title speaks
@@ -26,9 +30,9 @@
  *  - Classic Animated + useNativeDriver for the card's own fades, never
  *    reanimated worklets (babel sets worklets:false; ERROR_LOG Error 007).
  *
- * Geometry, backdrop and type are copied from InlineStatusOverlay.tsx and
- * confirmationTypography.ts so this reads as the same family of card. That
- * component is deliberately NOT modified: the password flows depend on it.
+ * Geometry is SuccessModal's (sucessmodal.tsx), the card the app shows today,
+ * so the swap is invisible at rest (D8). CustomAlert, SuccessModal and
+ * InlineStatusOverlay are deliberately NOT modified.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -62,14 +66,21 @@ export type PipActionStatus =
   | { phase: 'idle' }
   // Request in flight. Pip: loading. Button: disabled "Saving…" with spinner.
   | { phase: 'loading'; operationId: number; title: string; message: string }
-  // Request finished. Pip reacting, copy swapped. Button: disabled, already
-  // labelled with the outcome's action.
+  // Request finished; copy swapped; Pip starting to react. Button: disabled for
+  // one short beat, already labelled with the outcome's action.
   | { phase: 'settled'; operationId: number; result: MealLogResult }
-  // Pip finished. Button enabled; the card waits for acknowledgement.
+  // Beat over. Button enabled; the card waits for acknowledgement while Pip's
+  // one-shot plays beside it.
   | { phase: 'ready'; operationId: number; result: MealLogResult };
 
 /** Never show a fast response as a flash (D3). The request itself is never delayed. */
 export const PIP_ACTION_MIN_LOADING_MS = 800;
+/**
+ * How long the outcome sits on screen before the button becomes tappable (D7).
+ * Only so the label is not changing under the thumb in the same frame it goes
+ * live; the system's signal, not Pip's animation, is what wakes the button.
+ */
+export const PIP_ACTION_READY_BEAT_MS = 400;
 
 /* ---------------------------------------------------------------------------
  * Hook
@@ -93,7 +104,6 @@ export type PipActionStatusController = {
   /** Props for <PipActionStatusCard>. Spread them; do not wire the card by hand. */
   cardProps: {
     status: PipActionStatus;
-    onPipSettled: () => void;
     onConfirm: () => void;
   };
 };
@@ -101,7 +111,7 @@ export type PipActionStatusController = {
 /**
  * Owns the lifecycle so a call site cannot forget any of it: the in-flight
  * guard before the first await, the loading floor, the stale-completion
- * check, the settled→ready gate, and timer cleanup on unmount (Pip work log
+ * check, the settled→ready beat, and timer cleanup on unmount (Pip work log
  * 044: refocus must never replay stale work).
  */
 export function usePipActionStatus(): PipActionStatusController {
@@ -163,10 +173,9 @@ export function usePipActionStatus(): PipActionStatusController {
       statusRef.current = settled;
       setStatus(settled);
 
-      // Hard fallback for the settled→ready gate. The card normally advances
-      // it from PipBird's onAnimationComplete or its own short beat; this only
-      // exists so the button can never stay disabled forever.
-      later(3500, () => {
+      // D7: the button wakes on the system's signal, one beat after the
+      // outcome lands. Pip's one-shot is not consulted.
+      later(PIP_ACTION_READY_BEAT_MS, () => {
         if (!isCurrent()) return;
         if (statusRef.current.phase !== 'settled') return;
         const ready: PipActionStatus = { phase: 'ready', operationId, result };
@@ -179,18 +188,10 @@ export function usePipActionStatus(): PipActionStatusController {
     [later]
   );
 
-  const onPipSettled = useCallback(() => {
-    const current = statusRef.current;
-    if (current.phase !== 'settled') return;
-    const ready: PipActionStatus = { phase: 'ready', operationId: current.operationId, result: current.result };
-    statusRef.current = ready;
-    setStatus(ready);
-  }, []);
-
   const onConfirm = useCallback(() => {
     const current = statusRef.current;
     // The disabled look also blocks touches, but this is the real defence:
-    // nothing dismisses the card before Pip is done.
+    // nothing dismisses the card before the beat is over.
     if (current.phase !== 'ready') return;
     clearTimers();
     const idle: PipActionStatus = { phase: 'idle' };
@@ -205,7 +206,7 @@ export function usePipActionStatus(): PipActionStatusController {
     status,
     isBusy: status.phase !== 'idle',
     run,
-    cardProps: { status, onPipSettled, onConfirm },
+    cardProps: { status, onConfirm },
   };
 }
 
@@ -222,7 +223,7 @@ type PipActionStatusCardProps = PipActionStatusController['cardProps'] & {
 };
 
 const PAL = {
-  // Matches customAlert.tsx / sucessmodal.tsx / InlineStatusOverlay's bg-black/50.
+  // Matches customAlert.tsx / sucessmodal.tsx's bg-black/50.
   backdrop: 'rgba(0,0,0,0.5)',
   primary: '#007BFF',
   // Tailwind blue-300: the disabled primary pill AddFoodModal already uses on a
@@ -230,23 +231,18 @@ const PAL = {
   primaryDisabled: '#93C5FD',
 };
 
-/** Beat before the button wakes for poses that have no one-shot to wait for. */
-const SETTLE_BEAT_MS = 600;
-/** Reduce Motion plays nothing, so wake the button after a readable pause. */
-const REDUCE_MOTION_BEAT_MS = 400;
-/** Local safety net if a one-shot never reports back (the hook has its own). */
-const ONE_SHOT_FALLBACK_MS = 3000;
+/** SuccessModal's Pip size (sucessmodal.tsx). */
+const PIP_SIZE = 104;
 
-const isOneShot = (pip: PipState) => pip === 'eating' || pip === 'happy';
-
-export function PipActionStatusCard({ status, onPipSettled, onConfirm, style }: PipActionStatusCardProps) {
+export function PipActionStatusCard({ status, onConfirm, style }: PipActionStatusCardProps) {
   const visible = status.phase !== 'idle';
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const copyOpacity = useRef(new Animated.Value(1)).current;
   const wake = useRef(new Animated.Value(0)).current;
-  const gateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
 
+  // Reduce Motion only shortens the card's own fades to 0 ms. The phase
+  // timing is identical with it on or off (D7).
   useEffect(() => {
     let active = true;
     AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
@@ -267,11 +263,11 @@ export function PipActionStatusCard({ status, onPipSettled, onConfirm, style }: 
     wake.setValue(0);
     Animated.timing(overlayOpacity, {
       toValue: 1,
-      duration: 200,
+      duration: reduceMotion ? 0 : 200,
       easing: Easing.out(Easing.ease),
       useNativeDriver: true,
     }).start();
-  }, [visible, overlayOpacity, wake]);
+  }, [visible, overlayOpacity, wake, reduceMotion]);
 
   // Copy swap: fade the new title/message in over the same slot.
   const phase = status.phase;
@@ -296,41 +292,11 @@ export function PipActionStatusCard({ status, onPipSettled, onConfirm, style }: 
     }).start();
   }, [phase, wake, reduceMotion]);
 
-  // settled → ready gate for the poses that are not one-shots, and for Reduce
-  // Motion where PipBird animates nothing and so never reports completion.
-  const settledPip = status.phase === 'settled' ? status.result.pip : null;
-  useEffect(() => {
-    if (gateTimer.current) {
-      clearTimeout(gateTimer.current);
-      gateTimer.current = null;
-    }
-    if (!settledPip) return;
-    const wait = reduceMotion
-      ? REDUCE_MOTION_BEAT_MS
-      : isOneShot(settledPip)
-        ? ONE_SHOT_FALLBACK_MS
-        : SETTLE_BEAT_MS;
-    gateTimer.current = setTimeout(() => {
-      gateTimer.current = null;
-      onPipSettled();
-    }, wait);
-    return () => {
-      if (gateTimer.current) clearTimeout(gateTimer.current);
-      gateTimer.current = null;
-    };
-  }, [settledPip, reduceMotion, onPipSettled]);
-
   // Screen readers hear the status and then the outcome, in that order.
   useEffect(() => {
     if (status.phase === 'loading') AccessibilityInfo.announceForAccessibility(status.title);
     if (status.phase === 'settled') AccessibilityInfo.announceForAccessibility(status.result.title);
   }, [status]);
-
-  const handleAnimationComplete = useCallback(() => {
-    // Only meaningful while settled; a late callback after Confirm is ignored
-    // by the hook's phase check.
-    onPipSettled();
-  }, [onPipSettled]);
 
   if (!visible) return null;
 
@@ -356,7 +322,7 @@ export function PipActionStatusCard({ status, onPipSettled, onConfirm, style }: 
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
         >
-          <PipBird size={92} state={pip} onAnimationComplete={handleAnimationComplete} />
+          <PipBird size={PIP_SIZE} state={pip} />
         </View>
 
         <Animated.View style={[styles.copy, { opacity: copyOpacity }]} accessibilityLiveRegion="polite">
@@ -383,54 +349,60 @@ export function PipActionStatusCard({ status, onPipSettled, onConfirm, style }: 
   );
 }
 
+// Every number below is sucessmodal.tsx's: `flex-1 bg-black/50 justify-center
+// items-center px-6` around `bg-white w-full max-w-sm rounded-3xl p-6
+// items-center shadow-2xl`, a 104 px Pip slot with mb-2, title mb-2, message
+// mb-6, and `w-full py-3 rounded-full` with `text-lg font-bold`.
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: PAL.backdrop,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: 24,
     zIndex: 50,
   },
-  // InlineStatusOverlay's card, at a FIXED width: the copy swaps mid-action and
-  // a min/max-width card would resize under the user's thumb.
+  // `alignSelf: 'stretch'` rather than `width: '100%'`: the overlay's padding
+  // sets the width, and a percentage against an indefinite parent does not
+  // fill it (the same lesson as InlineStatusOverlay's cardWide).
   card: {
+    alignSelf: 'stretch',
+    maxWidth: 384,
     backgroundColor: '#fff',
     borderRadius: 24,
-    paddingVertical: 26,
-    paddingHorizontal: 28,
+    padding: 24,
     alignItems: 'center',
-    width: 244,
+    // Tailwind shadow-2xl.
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
+    shadowOffset: { width: 0, height: 25 },
     shadowOpacity: 0.25,
-    shadowRadius: 24,
-    elevation: 10,
+    shadowRadius: 25,
+    elevation: 24,
   },
   // Bottom-aligned so Pip stands on the card's baseline rather than floating.
   pipSlot: {
-    height: 92,
+    height: PIP_SIZE,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    marginBottom: 6,
+    marginBottom: 8,
   },
-  // Fixed minimum so a shorter outcome line cannot move the button.
+  // Fixed minimum (one title line + one message line) so a shorter outcome
+  // cannot move the button; a longer one grows the card, never the reverse.
   copy: {
-    minHeight: 43,
+    minHeight: 56,
     alignSelf: 'stretch',
     alignItems: 'center',
+    marginBottom: 24,
   },
   title: {
-    ...confirmationType.titleCompact,
-    marginBottom: 4,
+    ...confirmationType.title,
+    marginBottom: 8,
   },
-  message: confirmationType.messageCompact,
+  message: confirmationType.message,
   buttonTouch: {
-    marginTop: 12,
     alignSelf: 'stretch',
   },
-  // Pill, per InlineStatusOverlay's primaryButton. Colour is animated on the
-  // wrapping Animated.View, so it is deliberately absent here.
+  // Colour is animated on the wrapping Animated.View, so it is absent here.
   button: {
     borderRadius: 999,
     paddingVertical: 12,
@@ -438,11 +410,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 10,
   },
   buttonText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 18,
+    lineHeight: 28,
     fontWeight: '700',
   },
 });
