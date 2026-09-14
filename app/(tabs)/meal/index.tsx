@@ -1,7 +1,7 @@
 import { View, Text, ScrollView } from 'react-native';
 import React from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import MenuOptions from '../../../components/menuoptions';
 import PipMenuScene from '../../../components/pip/pip-menu-scene';
@@ -49,6 +49,17 @@ const MealScreen = () => {
                     title="My Shopping list" 
                     onPress={() => router.push('/(tabs)/meal/shopping')} 
                 />
+
+                {/* Dev-only preview of the meal-log status card. Checklist p9-2:
+                    remove this row (and app/dev-pip-status.tsx) before release.
+                    The cast is because expo-router's generated route types only
+                    learn about a new file once the dev server has run. */}
+                {__DEV__ && (
+                    <MenuOptions
+                        title="Pip status harness (dev)"
+                        onPress={() => router.push('/dev-pip-status' as unknown as Href)}
+                    />
+                )}
 
 
             </ScrollView>
