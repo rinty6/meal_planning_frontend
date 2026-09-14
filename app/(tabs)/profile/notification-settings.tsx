@@ -17,6 +17,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import { authedFetch } from '../../../services/authedFetch';
+import PipBird from '../../../components/pip/PipBird';
 
 const NotificationSettingsScreen = () => {
   const router = useRouter();
@@ -125,8 +126,15 @@ const NotificationSettingsScreen = () => {
         </View>
       ) : (
         <View className="px-5 pt-5">
-          <View className="rounded-2xl border border-gray-200 bg-white p-4">
-            <View className="flex-row items-center justify-between">
+          <View className="rounded-2xl border border-gray-200 bg-white p-4 flex-row items-center">
+            <View
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={{ alignItems: 'center', height: 72, justifyContent: 'center', marginRight: 10, width: 64 }}
+            >
+              <PipBird size={64} state={masterEnabled ? 'reminding' : 'sleeping'} />
+            </View>
+            <View className="flex-1 flex-row items-center justify-between">
               <View className="flex-1 pr-3">
                 <Text className="text-base font-bold text-[#1F2937]">Enable Notifications</Text>
                 <Text className="text-sm text-[#64748B] mt-1 leading-5">

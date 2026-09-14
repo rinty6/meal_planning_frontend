@@ -14,12 +14,21 @@ import Animated, {
 } from 'react-native-reanimated';
 
 export type PipState =
+  | 'answering'
   | 'happy'
   | 'sad'
   | 'confident'
   | 'care'
   | 'idle'
-  | 'eating';
+  | 'eating'
+  | 'empty'
+  | 'hydrating'
+  | 'listening'
+  | 'loading'
+  | 'reminding'
+  | 'sleeping'
+  | 'streak'
+  | 'thinking';
 
 type PipOneShotState = Extract<PipState, 'happy' | 'eating'>;
 
@@ -122,6 +131,8 @@ type RestingPose = {
 
 function restingPose(state: PipState): RestingPose {
   switch (state) {
+    case 'answering':
+      return { leftWing: 10, rightWing: -42, wholeRotation: 0 };
     case 'sad':
       return { leftWing: 16, rightWing: -16, wholeRotation: 0 };
     case 'confident':
@@ -130,6 +141,21 @@ function restingPose(state: PipState): RestingPose {
       return { leftWing: 10, rightWing: -52, wholeRotation: -4.5 };
     case 'eating':
       return { leftWing: 12, rightWing: -46, wholeRotation: 0 };
+    case 'empty':
+      return { leftWing: 14, rightWing: -14, wholeRotation: -5 };
+    case 'hydrating':
+      return { leftWing: 8, rightWing: -46, wholeRotation: 0 };
+    case 'listening':
+      return { leftWing: 8, rightWing: -40, wholeRotation: -3 };
+    case 'loading':
+    case 'thinking':
+      return { leftWing: 6, rightWing: -38, wholeRotation: -7 };
+    case 'reminding':
+      return { leftWing: 10, rightWing: -48, wholeRotation: 0 };
+    case 'sleeping':
+      return { leftWing: 14, rightWing: -14, wholeRotation: 0 };
+    case 'streak':
+      return { leftWing: 8, rightWing: -8, wholeRotation: 0 };
     case 'idle':
       return { leftWing: 6, rightWing: -6, wholeRotation: 0 };
     case 'happy':
@@ -222,11 +248,12 @@ function Tuft({ state }: { state: PipState }) {
 }
 
 function Eyes({ state }: { state: PipState }) {
-  if (state === 'eating') {
+  if (state === 'eating' || state === 'sleeping') {
+    const isSleeping = state === 'sleeping';
     return (
       <G fill="none" stroke={palette.eye} strokeLinecap="round" strokeWidth={5.5}>
-        <Path d="M67 104Q80 113 93 104" />
-        <Path d="M107 104Q120 113 133 104" />
+        <Path d={isSleeping ? 'M67 108Q80 118 93 108' : 'M67 104Q80 113 93 104'} />
+        <Path d={isSleeping ? 'M107 108Q120 118 133 108' : 'M107 104Q120 113 133 104'} />
       </G>
     );
   }
@@ -256,18 +283,24 @@ function Eyes({ state }: { state: PipState }) {
 
   const isConfident = state === 'confident';
   const isCare = state === 'care';
+  const isThinking = state === 'thinking' || state === 'loading';
+  const isEmpty = state === 'empty';
 
   return (
     <>
-      {(isConfident || isCare) && (
+      {(isConfident || isCare || isThinking || isEmpty) && (
         <Path
           d={
             isConfident
               ? 'M64 86Q79 80 94 86M108 80Q122 72 136 82'
+              : isThinking
+                ? 'M64 87Q79 80 94 87M106 82Q121 76 136 84'
+                : isEmpty
+                  ? 'M64 91Q79 84 94 90M106 90Q121 84 136 91'
               : 'M64 88Q79 82 94 88M106 88Q121 82 136 88'
           }
           fill="none"
-          opacity={isCare ? 0.7 : 0.85}
+          opacity={isCare || isEmpty ? 0.7 : 0.85}
           stroke={palette.eye}
           strokeLinecap="round"
           strokeWidth={5}
@@ -276,14 +309,14 @@ function Eyes({ state }: { state: PipState }) {
       <Circle cx={80} cy={106} fill="#fff" r={15} />
       <Circle cx={120} cy={106} fill="#fff" r={15} />
       <Circle
-        cx={isConfident ? 83 : 81}
-        cy={isConfident || isCare ? 108 : 107}
+        cx={isConfident ? 83 : isThinking ? 84 : 81}
+        cy={isConfident || isCare ? 108 : isThinking ? 104 : 107}
         fill={palette.eye}
         r={isCare ? 8.5 : 8}
       />
       <Circle
-        cx={isConfident ? 123 : 121}
-        cy={isConfident || isCare ? 108 : 107}
+        cx={isConfident ? 123 : isThinking ? 124 : 121}
+        cy={isConfident || isCare ? 108 : isThinking ? 104 : 107}
         fill={palette.eye}
         r={isCare ? 8.5 : 8}
       />
@@ -396,6 +429,82 @@ function Accessories({ crumb, heartA, heartB, sparkleA, sparkleB, state, tear }:
           <Circle cx={120} cy={142} fill={palette.accentDark} r={3} />
         </AnimatedG>
       </>
+    );
+  }
+
+  if (state === 'listening') {
+    return (
+      <G fill="none" stroke={palette.accent} strokeLinecap="round" strokeWidth={4}>
+        <Path d="M163 82Q179 96 163 110" />
+        <Path d="M172 74Q196 96 172 118" opacity={0.72} />
+        <Path d="M154 89Q161 96 154 103" opacity={0.86} />
+      </G>
+    );
+  }
+
+  if (state === 'thinking' || state === 'loading') {
+    return (
+      <G fill={palette.body}>
+        <Circle cx={28} cy={72} r={5} />
+        <Circle cx={46} cy={62} r={6.5} opacity={0.8} />
+        <Circle cx={67} cy={50} r={8} opacity={0.62} />
+      </G>
+    );
+  }
+
+  if (state === 'answering') {
+    return (
+      <G>
+        <Path d="M144 62H190Q196 62 196 68V97Q196 103 190 103H166L154 113L157 103H144Q138 103 138 97V68Q138 62 144 62Z" fill="#fff" stroke="#DAE2EC" strokeWidth={2} />
+        <Path d="M151 76H184M151 87H176" fill="none" stroke={palette.body} strokeLinecap="round" strokeWidth={4} />
+      </G>
+    );
+  }
+
+  if (state === 'reminding') {
+    return (
+      <G>
+        <Path d="M168 70C156 70 154 80 154 91V104H182V91C182 80 180 70 168 70Z" fill="#fff" stroke={palette.accent} strokeWidth={4} />
+        <Path d="M150 104H186" fill="none" stroke={palette.accent} strokeLinecap="round" strokeWidth={4} />
+        <Circle cx={168} cy={110} fill={palette.accentDark} r={4.5} />
+        <Path d="M147 78Q139 86 147 94M189 78Q197 86 189 94" fill="none" opacity={0.78} stroke={palette.accent} strokeLinecap="round" strokeWidth={3.5} />
+      </G>
+    );
+  }
+
+  if (state === 'hydrating') {
+    return (
+      <G>
+        <Path d="M159 82H185L181 147H163Z" fill="#fff" stroke="#DAE2EC" strokeWidth={2} />
+        <Path d="M163 112H181L180 143H164Z" fill="#7FB2F0" />
+        <Path d="M162 82H182" fill="none" stroke={palette.accent} strokeLinecap="round" strokeWidth={4} />
+        <Path d="M146 65S154 75 154 81A8 8 0 0 1 138 81C138 75 146 65 146 65Z" fill="#7FB2F0" />
+      </G>
+    );
+  }
+
+  if (state === 'streak') {
+    return (
+      <G>
+        <Path d="M160 68C171 80 165 87 174 91C180 84 180 75 175 68C185 77 191 89 188 104C185 121 169 129 155 121C141 113 140 97 148 87C148 98 156 101 160 94C164 87 154 79 160 68Z" fill={palette.accent} />
+        <Path d="M166 89C172 96 171 104 166 111C159 106 157 99 162 93Z" fill="#FFF4E4" />
+        <Path d="M147 132H189M153 132V143H183V132" fill="none" stroke={palette.accent} strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} />
+      </G>
+    );
+  }
+
+  if (state === 'sleeping') {
+    return <Path d="M152 70H170L160 82H173L156 100H163L146 113H155L140 126" fill="none" opacity={0.92} stroke={palette.belly} strokeLinecap="round" strokeLinejoin="round" strokeWidth={6} />;
+  }
+
+  if (state === 'empty') {
+    return (
+      <G>
+        <Ellipse cx={170} cy={151} fill="#fff" rx={22} ry={6.5} stroke="#DAE2EC" strokeWidth={2} />
+        <Path d="M153 151Q170 159 187 151" fill="none" stroke="#DAE2EC" strokeWidth={2} />
+        <Path d="M165 86C165 76 180 75 180 86C180 93 173 94 173 101" fill="none" stroke={palette.body} strokeLinecap="round" strokeWidth={5} />
+        <Circle cx={173} cy={111} fill={palette.body} r={3.5} />
+      </G>
     );
   }
 
@@ -844,6 +953,13 @@ export default function PipBird({
     };
 
     switch (displayedState) {
+      case 'answering':
+        bodyY.value = withRepeat(withSequence(withTiming(-4, { duration: 450 }), withTiming(0, { duration: 450 })), -1, false);
+        wholeRotation.value = withRepeat(withSequence(withTiming(3, { duration: 450 }), withTiming(-1, { duration: 450 })), -1, false);
+        rightWing.value = withRepeat(withSequence(withTiming(-58, { duration: 450 }), withTiming(-42, { duration: 450 })), -1, false);
+        startSoftShadow(450);
+        startBlink(3200);
+        break;
       case 'happy': {
         const hopEasing = Easing.bezier(0.3, 0, 0.35, 1);
         bodyY.value = withRepeat(
@@ -1088,6 +1204,57 @@ export default function PipBird({
           false
         );
         startSoftShadow(350);
+        break;
+      case 'empty':
+        bodyY.value = withRepeat(withSequence(withTiming(4, { duration: 1250 }), withTiming(0, { duration: 1250 })), -1, false);
+        wholeRotation.value = withRepeat(withSequence(withTiming(-8, { duration: 1250 }), withTiming(-3, { duration: 1250 })), -1, false);
+        leftWing.value = withRepeat(withSequence(withTiming(20, { duration: 1250 }), withTiming(14, { duration: 1250 })), -1, false);
+        rightWing.value = withRepeat(withSequence(withTiming(-20, { duration: 1250 }), withTiming(-14, { duration: 1250 })), -1, false);
+        startSoftShadow(1250);
+        startBlink(3600);
+        break;
+      case 'hydrating':
+        bodyY.value = withRepeat(withSequence(withTiming(-4, { duration: 700 }), withTiming(0, { duration: 700 })), -1, false);
+        rightWing.value = withRepeat(withSequence(withTiming(-54, { duration: 700 }), withTiming(-46, { duration: 700 })), -1, false);
+        startSoftShadow(700);
+        startBlink(3200);
+        break;
+      case 'listening':
+        bodyY.value = withRepeat(withSequence(withTiming(-3, { duration: 550 }), withTiming(0, { duration: 550 })), -1, false);
+        wholeRotation.value = withRepeat(withSequence(withTiming(1, { duration: 550 }), withTiming(-5, { duration: 550 })), -1, false);
+        rightWing.value = withRepeat(withSequence(withTiming(-48, { duration: 550 }), withTiming(-40, { duration: 550 })), -1, false);
+        startSoftShadow(550);
+        startBlink(2800);
+        break;
+      case 'loading':
+      case 'thinking':
+        wholeRotation.value = withRepeat(withSequence(withTiming(-10, { duration: 900 }), withTiming(-3, { duration: 900 })), -1, false);
+        bodyY.value = withRepeat(withSequence(withTiming(-2, { duration: 900 }), withTiming(0, { duration: 900 })), -1, false);
+        rightWing.value = withRepeat(withSequence(withTiming(-44, { duration: 900 }), withTiming(-38, { duration: 900 })), -1, false);
+        startSoftShadow(900);
+        startBlink(2500);
+        break;
+      case 'reminding':
+        wholeRotation.value = withRepeat(withSequence(withTiming(5, { duration: 450 }), withTiming(-5, { duration: 450 })), -1, false);
+        rightWing.value = withRepeat(withSequence(withTiming(-60, { duration: 450 }), withTiming(-48, { duration: 450 })), -1, false);
+        startSoftShadow(450);
+        startBlink(3200);
+        break;
+      case 'sleeping':
+        bodyY.value = withRepeat(withSequence(withTiming(3, { duration: 1700 }), withTiming(0, { duration: 1700 })), -1, false);
+        bodyScaleX.value = withRepeat(withSequence(withTiming(1.045, { duration: 1700 }), withTiming(1, { duration: 1700 })), -1, false);
+        bodyScaleY.value = withRepeat(withSequence(withTiming(0.955, { duration: 1700 }), withTiming(1, { duration: 1700 })), -1, false);
+        startSoftShadow(1700);
+        break;
+      case 'streak':
+        bodyY.value = withRepeat(withSequence(withTiming(-7, { duration: 650 }), withTiming(0, { duration: 650 })), -1, false);
+        bodyScaleX.value = withRepeat(withSequence(withTiming(1.08, { duration: 650 }), withTiming(1, { duration: 650 })), -1, false);
+        bodyScaleY.value = withRepeat(withSequence(withTiming(0.94, { duration: 650 }), withTiming(1, { duration: 650 })), -1, false);
+        leftWing.value = withRepeat(withSequence(withTiming(-38, { duration: 325 }), withTiming(8, { duration: 325 })), -1, false);
+        rightWing.value = withRepeat(withSequence(withTiming(38, { duration: 325 }), withTiming(-8, { duration: 325 })), -1, false);
+        startSoftShadow(650);
+        startSparkle(sparkleAOpacity, sparkleAScale, 1300, 0);
+        startSparkle(sparkleBOpacity, sparkleBScale, 1300, 350);
         break;
     }
 

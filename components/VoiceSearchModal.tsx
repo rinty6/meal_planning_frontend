@@ -49,7 +49,7 @@ import { authedFetch } from '../services/authedFetch';
 import { markMealsSummaryDirty } from '../services/mealsSummaryStore';
 import { zoneFromPayload } from '../services/calorieBand';
 import InlineStatusOverlay, { type InlineStatusVariant } from './InlineStatusOverlay';
-import { type PipState } from './pip/PipBird';
+import PipBird, { type PipState } from './pip/PipBird';
 
 type VoiceSearchMode = 'food' | 'recipe';
 type VoiceSearchScreen = 'chooser' | 'listening' | 'searching' | 'results' | 'notfound';
@@ -803,6 +803,9 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
 
       {screen === 'notfound' && (
         <FadeIn style={[styles.searchWrap, styles.centered]}>
+          <View style={{ alignItems: 'center', height: 124, justifyContent: 'flex-end', marginBottom: 6 }}>
+            <PipBird accessibilityLabel="Pip could not find a match" size={116} state="empty" />
+          </View>
           <Text style={styles.listenErrorTitle}>
             {throttled
               ? 'Too many requests'
