@@ -15,10 +15,12 @@
  * worklets:false and New Architecture is off, so worklet code silently fails
  * (see StartupLoadingAnimation.tsx and ERROR_LOG Error 007).
  *
- * OVERLAYS: the meal picker and the success/error status card (InlineStatusOverlay)
+ * OVERLAYS: the meal picker and the meal-log status card (PipActionStatusCard)
  * are plain Views layered inside this Modal, never nested <Modal>s — those stack
  * unreliably on top of a Modal on iOS (same reason addfoodmodal.tsx renders its
- * alert as an in-modal overlay).
+ * alert as an in-modal overlay). The card is the same one every other meal-log
+ * commit uses: it blocks the sheet from the meal choice until the outcome is
+ * acknowledged, and it no longer auto-dismisses.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -34,7 +36,6 @@ import {
   Animated,
   Easing,
   Linking,
-  ActivityIndicator,
   StyleProp,
   ViewStyle,
 } from 'react-native';
@@ -47,9 +48,9 @@ import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
 import { searchFoodItems, searchRecipes } from '../services/mealAPI';
 import { authedFetch } from '../services/authedFetch';
 import { markMealsSummaryDirty } from '../services/mealsSummaryStore';
-import { zoneFromPayload } from '../services/calorieBand';
-import InlineStatusOverlay, { type InlineStatusVariant } from './InlineStatusOverlay';
-import PipBird, { type PipState } from './pip/PipBird';
+import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../services/mealLogOutcome';
+import { PipActionStatusCard, usePipActionStatus } from './pip/PipActionStatusCard';
+import PipBird from './pip/PipBird';
 
 type VoiceSearchMode = 'food' | 'recipe';
 type VoiceSearchScreen = 'chooser' | 'listening' | 'searching' | 'results' | 'notfound';
@@ -283,8 +284,9 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
   const [throttled, setThrottled] = useState(false);
   const [pendingItem, setPendingItem] = useState<any>(null);
   const [logServings, setLogServings] = useState(1);
-  const [addingId, setAddingId] = useState<string | null>(null);
-  const [statusOverlay, setStatusOverlay] = useState<{ variant: InlineStatusVariant; title: string; message: string; pip?: PipState } | null>(null);
+  // One status card for the final write (redesign Phase 6). Search, listening
+  // and not-found keep their own UI; only the meal-log commit uses this.
+  const pipStatus = usePipActionStatus();
 
   // Same guard as addfoodmodal.tsx: a slow earlier search must never overwrite a
   // newer one's results.
@@ -293,12 +295,6 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
   const { state, interimTranscript, finalTranscript, error, start, stop, reset } = useVoiceRecognition();
 
   const modeWord = mode === 'food' ? 'food' : 'recipe';
-
-  // `pip` is optional: only the meal-logged confirmations carry the bird, so
-  // search and sign-in messages keep the plain icon card.
-  const flashStatus = useCallback((variant: InlineStatusVariant, title: string, message: string, pip?: PipState) => {
-    setStatusOverlay({ variant, title, message, pip });
-  }, []);
 
   const runSearch = useCallback(async (rawText: string, searchMode: VoiceSearchMode) => {
     const text = rawText.trim().slice(0, MAX_TRANSCRIPT_LENGTH);
@@ -372,6 +368,9 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
   );
 
   const handleClose = useCallback(() => {
+    // The card swallows taps, but onRequestClose (Android back) bypasses it:
+    // never dismiss the sheet mid-save or before the outcome is acknowledged.
+    if (pipStatus.isBusy) return;
     reset(); // stops the recognizer — never leave the mic running behind a closed modal
     latestSearchRequestRef.current += 1;
     setScreen('chooser');
@@ -380,10 +379,8 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
     setSearchFailed(false);
     setThrottled(false);
     setPendingItem(null);
-    setAddingId(null);
-    setStatusOverlay(null);
     onClose();
-  }, [onClose, reset]);
+  }, [onClose, pipStatus.isBusy, reset]);
 
   const openFoodDetail = useCallback(
     (item: any) => {
@@ -416,73 +413,62 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
 
   const addToMealLog = useCallback(
     async (item: any, mealType: MealType, servings: number) => {
-      if (!userId) {
-        flashStatus('error', 'Sign-in required', 'You must be logged in to save meals.');
-        return;
-      }
-
       const itemId = String(item?.id ?? '');
-      setAddingId(itemId);
+      const itemLabel = String(item?.title || `this ${modeWord}`).trim();
       const date = formatLocalYYYYMMDD(new Date());
 
-      try {
-        // Log exactly the serving the card showed — its macros, serving_id and
-        // serving_description, which foods.search already returns. Re-resolving via
-        // food.get would risk logging a DIFFERENT serving than the user tapped:
-        // the backend's pickBestServing scores richness*2 but the expected-calorie
-        // match only *1.5, so a richer serving outranks an exact calorie match.
-        //
-        // calories/protein/carbs/fats are stored as the TOTAL and `servings` as the
-        // multiplier; meal summary derives per-serving as total / servings, so the
-        // macros must be scaled here (ERROR_LOG Error 061).
-        const servingText = String(item?.serving_description ?? '').trim();
-        const payload = {
-          clerkId: userId,
-          date,
-          mealType,
-          foodName: item?.title || 'Unknown item',
-          calories: toNumber(item?.calories) * servings,
-          protein: toNumber(item?.protein) * servings,
-          carbs: toNumber(item?.carbs ?? item?.carbohydrate) * servings,
-          fats: toNumber(item?.fats ?? item?.fat) * servings,
-          image: item?.image || '',
-          externalId: itemId,
-          source: mode === 'food' ? 'fatsecret_food' : 'fatsecret_recipe',
-          servingId: String(item?.serving_id ?? ''),
-          servings,
-          servingDescription:
-            servings === 1 ? servingText || '1 serving' : `${formatServings(servings)} servings`,
-          nutrients: {},
-        };
+      await pipStatus.run({
+        loading: { title: `Adding ${itemLabel}…`, message: `Saving to ${mealType}` },
+        context: { itemLabel, mealType },
+        task: async (): Promise<MealLogOutcome> => {
+          if (!userId) throw new MealLogRequestError('You must be logged in to save meals.', 401);
 
-        const response = await authedFetch('/api/meals/add', {
-          method: 'POST',
-          getToken,
-          clerkId: userId,
-          body: JSON.stringify(payload),
-        });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body?.error || 'Failed to save meal');
+          // Log exactly the serving the card showed — its macros, serving_id and
+          // serving_description, which foods.search already returns. Re-resolving via
+          // food.get would risk logging a DIFFERENT serving than the user tapped:
+          // the backend's pickBestServing scores richness*2 but the expected-calorie
+          // match only *1.5, so a richer serving outranks an exact calorie match.
+          //
+          // calories/protein/carbs/fats are stored as the TOTAL and `servings` as the
+          // multiplier; meal summary derives per-serving as total / servings, so the
+          // macros must be scaled here (ERROR_LOG Error 061).
+          const servingText = String(item?.serving_description ?? '').trim();
+          const payload = {
+            clerkId: userId,
+            date,
+            mealType,
+            foodName: item?.title || 'Unknown item',
+            calories: toNumber(item?.calories) * servings,
+            protein: toNumber(item?.protein) * servings,
+            carbs: toNumber(item?.carbs ?? item?.carbohydrate) * servings,
+            fats: toNumber(item?.fats ?? item?.fat) * servings,
+            image: item?.image || '',
+            externalId: itemId,
+            source: mode === 'food' ? 'fatsecret_food' : 'fatsecret_recipe',
+            servingId: String(item?.serving_id ?? ''),
+            servings,
+            servingDescription:
+              servings === 1 ? servingText || '1 serving' : `${formatServings(servings)} servings`,
+            nutrients: {},
+          };
 
-        markMealsSummaryDirty(userId, date);
+          const response = await authedFetch('/api/meals/add', {
+            method: 'POST',
+            getToken,
+            clerkId: userId,
+            body: JSON.stringify(payload),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new MealLogRequestError(body?.error || 'Failed to save meal', response.status);
 
-        // Same tolerance band as everywhere else — see services/calorieBand.ts.
-        const slot = mealType[0].toUpperCase() + mealType.slice(1);
-        const zone = zoneFromPayload(body);
-        if (zone === 'over') {
-          flashStatus('success', 'Added — over target', `${slot}: tomorrow is a clean slate`, 'confident');
-        } else if (body?.reachedTarget) {
-          flashStatus('success', 'Added — nice!', `${slot}: you're on target for today`, 'happy');
-        } else {
-          flashStatus('success', 'Added to your meal plan', slot, 'eating');
-        }
-      } catch {
-        flashStatus('error', 'Could not add', `We couldn't add this ${modeWord}. Please try again.`);
-      } finally {
-        setAddingId(null);
-      }
+          markMealsSummaryDirty(userId, date);
+          // Same tolerance band and copy as every other entry point.
+          return resolveMealLogOutcome(body, { itemLabel, mealType });
+        },
+        // No onDismiss: the sheet stays on the results list after Confirm.
+      });
     },
-    [userId, getToken, mode, modeWord, flashStatus]
+    [userId, getToken, mode, modeWord, pipStatus]
   );
 
   const openMealPicker = useCallback((item: any) => {
@@ -719,14 +705,10 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.solidButton}
-                        disabled={addingId === itemId}
+                        disabled={pipStatus.isBusy}
                         onPress={() => openMealPicker(item)}
                       >
-                        {addingId === itemId ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <Text style={styles.solidButtonText}>Add to meal plan</Text>
-                        )}
+                        <Text style={styles.solidButtonText}>Add to meal plan</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -790,14 +772,9 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
             </View>
           )}
 
-          <InlineStatusOverlay
-            visible={!!statusOverlay}
-            variant={statusOverlay?.variant ?? 'success'}
-            title={statusOverlay?.title ?? ''}
-            message={statusOverlay?.message ?? ''}
-            pip={statusOverlay?.pip}
-            onHide={() => setStatusOverlay(null)}
-          />
+          {/* Shown after the picker sheet has closed; a plain View over the
+              results, never a nested Modal. Waits for Confirm, no auto-dismiss. */}
+          <PipActionStatusCard {...pipStatus.cardProps} />
         </View>
       )}
 
