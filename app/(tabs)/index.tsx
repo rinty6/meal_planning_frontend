@@ -7,8 +7,6 @@ import { useAuth, useUser } from '@clerk/clerk-expo';
 import CircularProgress from '../../components/CircularProgress';
 import NextFeatureShowcase from '../../components/NextFeatureShowcase';
 import AddFoodModal from '../../components/addfoodmodal';
-import SuccessModal from '../../components/sucessmodal';
-import CustomAlert from '../../components/customAlert';
 import GuidanceContent from '../../components/GuidanceContent';
 import SafeFullScreenModal from '../../components/SafeFullScreenModal';
 import NotificationMessage from '../../components/notificationmessage';
@@ -25,8 +23,7 @@ import {
 } from '../../services/mealsSummaryStore';
 import PipReminderCard from '../../components/pip/PipReminderCard';
 import { extractLoggedMealTypes, resolvePipCard } from '../../components/pip/pipHomeState';
-import { type PipState } from '../../components/pip/PipBird';
-import { zoneFromPayload } from '../../services/calorieBand';
+import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../../services/mealLogOutcome';
 import { authedFetch } from '../../services/authedFetch';
 import {
     fetchAndCacheHomeDashboard,
@@ -137,36 +134,9 @@ const HomeScreen = () => {
 
     const [isAddFoodModalVisible, setIsAddFoodModalVisible] = useState(false);
     const [activeMealType, setActiveMealType] = useState<MealLogType>('breakfast');
-    const [showSuccess, setShowSuccess] = useState(false);
-    // The success dialog reflects where the meal left the user against their
-    // target band, not just "saved".
-    const [successPip, setSuccessPip] = useState<PipState>('eating');
-    const [successMessage, setSuccessMessage] = useState('Meal added successfully!');
     const [isGuidanceVisible, setIsGuidanceVisible] = useState(false);
     const [isNotificationMessagesVisible, setIsNotificationMessagesVisible] = useState(false);
     const [isFeedbackVisible, setIsFeedbackVisible] = useState(false);
-    const [alertVisible, setAlertVisible] = useState(false);
-    const [alertConfig, setAlertConfig] = useState({
-        title: '',
-        message: '',
-        confirmText: 'OK',
-        variant: 'default' as 'default' | 'success',
-    });
-
-    const showCustomAlert = useCallback((
-        title: string,
-        message: string,
-        options: { confirmText?: string; variant?: 'default' | 'success' } = {}
-    ) => {
-        setAlertConfig({
-            title,
-            message,
-            confirmText: options.confirmText || 'OK',
-            variant: options.variant || 'default',
-        });
-        setAlertVisible(true);
-    }, []);
-
     const hydrateFromCache = useCallback(() => {
         if (!userId) return;
         const cached = getCachedHomeSnapshot(userId);
@@ -295,65 +265,50 @@ const HomeScreen = () => {
         setIsAddFoodModalVisible(true);
     };
 
-    const handleAddHomeFood = async (foodItem: any, mealTypeOverride?: MealLogType) => {
-        if (!userId) {
-            showCustomAlert('Error', 'You must be logged in to save meals.');
-            return;
-        }
+    // AddFoodModal owns the status card for this path (redesign Phase 5): this
+    // returns the resolved outcome and throws on failure; it never closes the
+    // modal or opens a success surface of its own.
+    const handleAddHomeFood = async (foodItem: any): Promise<MealLogOutcome> => {
+        if (!userId) throw new MealLogRequestError('You must be logged in to save meals.', 401);
+        const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
+        if (!apiURL) throw new MealLogRequestError('Missing backend URL', 0);
+        const mealType = activeMealType;
 
-        try {
-            const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
-            if (!apiURL) throw new Error('Missing backend URL');
-            const mealType = mealTypeOverride || activeMealType;
-
-            const response = await authedFetch(`/api/meals/add`, {
-                method: 'POST',
-                getToken: getTokenRef.current,
+        const response = await authedFetch(`/api/meals/add`, {
+            method: 'POST',
+            getToken: getTokenRef.current,
+            clerkId: userId,
+            body: JSON.stringify({
                 clerkId: userId,
-                body: JSON.stringify({
-                    clerkId: userId,
-                    date: getTodayFormatted(),
-                    mealType,
-                    foodName: foodItem.title || foodItem.food_name || 'Unknown Item',
-                    calories: toNumber(foodItem.calories),
-                    protein: toNumber(foodItem.protein),
-                    carbs: toNumber(foodItem.carbs),
-                    fats: firstNumber(foodItem.fats, foodItem.fat),
-                    image: foodItem.image || '',
-                    externalId: getFoodExternalId(foodItem),
-                    source: foodItem.source || foodItem.type || '',
-                    servingId: foodItem.servingId || foodItem.serving_id || '',
-                    servingDescription: foodItem.servingDescription || foodItem.serving_description || '',
-                    nutrients: foodItem.nutrients || {},
-                }),
-            });
+                date: getTodayFormatted(),
+                mealType,
+                foodName: foodItem.title || foodItem.food_name || 'Unknown Item',
+                calories: toNumber(foodItem.calories),
+                protein: toNumber(foodItem.protein),
+                carbs: toNumber(foodItem.carbs),
+                fats: firstNumber(foodItem.fats, foodItem.fat),
+                image: foodItem.image || '',
+                externalId: getFoodExternalId(foodItem),
+                source: foodItem.source || foodItem.type || '',
+                servingId: foodItem.servingId || foodItem.serving_id || '',
+                servingDescription: foodItem.servingDescription || foodItem.serving_description || '',
+                nutrients: foodItem.nutrients || {},
+            }),
+        });
 
-            if (!response.ok) throw new Error('Could not save food');
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new MealLogRequestError(payload?.error || 'Could not save food', response.status);
 
-            // Home used to ignore the server's target flags entirely, so the same
-            // food gave different feedback depending on which screen logged it.
-            // Now it reads the same tolerance band as everywhere else.
-            const payload = await response.json().catch(() => null);
-            const zone = zoneFromPayload(payload);
-            setSuccessPip(payload?.reachedTarget ? 'happy' : zone === 'over' ? 'confident' : 'eating');
-            setSuccessMessage(
-                payload?.reachedTarget
-                    ? "You're on target for today. Nice work!"
-                    : zone === 'over'
-                        ? 'Meal added. Tomorrow is a clean slate.'
-                        : 'Meal added successfully!'
-            );
-
-            markMealsSummaryDirty(userId, getTodayFormatted());
-            setIsAddFoodModalVisible(false);
-            setShowSuccess(true);
-            void loadDashboardData({ showSpinner: false });
-            // Refresh the Pip card so a just-logged meal clears its reminder.
-            void loadTodayMeals();
-        } catch (error) {
-            console.error('Home add food error:', error);
-            showCustomAlert('Error', 'Failed to add food item.');
-        }
+        markMealsSummaryDirty(userId, getTodayFormatted());
+        void loadDashboardData({ showSpinner: false });
+        // Refresh the Pip card so a just-logged meal clears its reminder.
+        void loadTodayMeals();
+        // Home reads the same tolerance band as everywhere else, through the
+        // shared resolver (reachedTarget stays edge-triggered).
+        return resolveMealLogOutcome(payload, {
+            itemLabel: String(foodItem.title || foodItem.food_name || 'This food').trim(),
+            mealType,
+        });
     };
 
     const categories = [
@@ -593,15 +548,6 @@ const HomeScreen = () => {
 
             </ScrollView>
 
-            {showSuccess && (
-                <SuccessModal
-                    visible={showSuccess}
-                    message={successMessage}
-                    pip={successPip}
-                    onClose={() => setShowSuccess(false)}
-                />
-            )}
-
             {isAddFoodModalVisible && (
                 <AddFoodModal
                     visible={isAddFoodModalVisible}
@@ -610,15 +556,6 @@ const HomeScreen = () => {
                     onAddFood={handleAddHomeFood}
                 />
             )}
-
-            <CustomAlert
-                visible={alertVisible}
-                title={alertConfig.title}
-                message={alertConfig.message}
-                confirmText={alertConfig.confirmText}
-                variant={alertConfig.variant}
-                onConfirm={() => setAlertVisible(false)}
-            />
 
             <SafeFullScreenModal
                 visible={isGuidanceVisible}

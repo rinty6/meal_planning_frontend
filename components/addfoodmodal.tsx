@@ -37,12 +37,21 @@ import type { PredictionResult, FoodCandidate } from '../services/foodRecognitio
 // stacks unreliably on top of AddFoodModal on iOS. The alert is now rendered
 // as an in-modal overlay View near the bottom of this file.
 import FoodRecognitionResultModal from './FoodRecognitionResultModal';
+import { PipActionStatusCard, usePipActionStatus } from './pip/PipActionStatusCard';
+import { MealLogRequestError, type MealLogOutcome } from '../services/mealLogOutcome';
 
 interface AddFoodModalProps {
   visible: boolean;
   onClose: () => void;
   mealType: string;
-  onAddFood: (foodItem: any) => void | Promise<any>;
+  /**
+   * The parent's whole commit: POST, dirty flags, its own refreshes. It
+   * RETURNS the resolved outcome (services/mealLogOutcome.ts) and THROWS on
+   * failure; it must not close this modal or open a success surface of its
+   * own. This modal owns the one loading-to-outcome card for the whole save
+   * (redesign D5), which is what rules out a parent/child double overlay.
+   */
+  onAddFood: (foodItem: any) => Promise<MealLogOutcome>;
 }
 
 const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalProps) => {
@@ -63,7 +72,6 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasCompletedSearch, setHasCompletedSearch] = useState(false);
-  const [addingId, setAddingId] = useState<string | null>(null);
   const latestSearchRequestRef = useRef(0);
 
   // --- MANUAL ENTRY ---
@@ -73,13 +81,42 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   const [manualCarbs, setManualCarbs] = useState('');
   const [manualFat, setManualFat] = useState('');
   const [manualImage, setManualImage] = useState<string | null>(null);
-  // Locks the manual save flow: shows a spinner and blocks close/back/re-tap until
-  // the parent's save + result message have completed (prevents double-add / races).
-  const [savingManual, setSavingManual] = useState(false);
 
-  // True while EITHER add path is saving. Both paths await the parent's full save,
-  // so this is the one flag that blocks close/back/re-tap for the whole operation.
-  const isSavingFood = savingManual || addingId !== null;
+  // --- SAVE LIFECYCLE ---
+  // One Pip status card for every commit path (manual, search result, barcode-
+  // filled manual, recognised food). Its guard runs before the first await, the
+  // 800 ms floor and the settled→ready beat live in the hook, and the card is
+  // rendered inside this modal's content (never a nested native Modal).
+  const pipStatus = usePipActionStatus();
+  // True from the tap until the user acknowledges the outcome. Blocks
+  // close/back/re-tap for the whole operation, exactly as before.
+  const isSavingFood = pipStatus.isBusy;
+
+  const foodLabel = (food: any) => String(food?.title || food?.food_name || 'this food').trim();
+
+  /**
+   * The one way any path commits. `lookup` is the pre-save step (FatSecret
+   * detail fetch for a search result) and is part of the awaited action, so
+   * the card is up for it too. On a successful acknowledgement the modal
+   * closes itself; on an error it stays open with the entered details intact.
+   */
+  const commitFood = (label: string, lookup: () => Promise<any>) =>
+    pipStatus.run({
+      loading: { title: `Adding ${label}…`, message: `Saving to ${mealType}` },
+      context: { itemLabel: label, mealType },
+      task: async () => {
+        const food = await lookup();
+        if (!food) {
+          // Nothing was attempted against the log, so say so (status-carrying
+          // error = "Nothing was saved" copy, not the ambiguous one).
+          throw new MealLogRequestError('Could not load this food', 0);
+        }
+        return onAddFood(food);
+      },
+      onDismiss: (result) => {
+        if (result.kind === 'success') closeAndReset();
+      },
+    });
 
   // --- BARCODE ---
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -247,7 +284,9 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
       type: 'recognition',
     };
     clearRecognitionState();
-    onAddFood(newFood);
+    // C3: this used to call onAddFood without awaiting it, escaping the busy
+    // guard entirely. It now runs the same lifecycle as every other path.
+    void commitFood(foodLabel(newFood), async () => newFood);
   };
 
   const handleEditRecognitionDetails = (candidate: FoodCandidate) => {
@@ -305,24 +344,11 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setHasCompletedSearch(false);
   };
 
-  const handleAddClick = async (id: string) => {
-    // Re-entrancy guard, mirroring handleSaveManual. Adding a search result is two
-    // sequential round trips (FatSecret detail lookup, then the parent's POST), so
-    // without this a second tap during that window logs the meal twice.
-    if (isSavingFood) return;
-    setAddingId(id);
-    try {
-      const detailedFood = await getFoodById(id);
-      // Await the parent's whole save (network + result message) so the busy state
-      // covers the entire operation. Previously this returned after the detail
-      // lookup, leaving the modal fully interactive while the POST was still in
-      // flight — closing it then popped the success dialog onto another screen.
-      if (detailedFood) await onAddFood(detailedFood);
-    } catch (error) {
-      console.error('Error adding food:', error);
-    } finally {
-      setAddingId(null);
-    }
+  const handleAddClick = (item: any) => {
+    // Adding a search result is two sequential round trips (FatSecret detail
+    // lookup, then the parent's POST). Both sit inside the card's task, so the
+    // guard covers the whole window; a second tap can never log twice.
+    void commitFood(foodLabel(item), () => getFoodById(String(item.id)));
   };
 
   // --- MANUAL FORM ---
@@ -343,31 +369,22 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
       setManualImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
   };
 
-  const handleSaveManual = async () => {
-    if (savingManual) return;
+  const handleSaveManual = () => {
+    if (isSavingFood) return;
     if (!manualName || !manualCalories) {
       showCustomAlert('Missing Fields', 'Please enter at least a Food Name and Calories.');
       return;
     }
-    setSavingManual(true);
-    try {
-      // Wait for the parent to finish the whole save (network + result message).
-      // On success the parent closes this modal, which unmounts and clears the form;
-      // on failure it surfaces an error and leaves the modal open so the entered
-      // details are preserved for another attempt.
-      await onAddFood({
-        title: manualName,
-        calories: parseFloat(manualCalories) || 0,
-        protein: parseFloat(manualProtein) || 0,
-        carbs: parseFloat(manualCarbs) || 0,
-        fats: parseFloat(manualFat) || 0,
-        image: manualImage || '',
-        food_name: manualName,
-        type: 'manual',
-      });
-    } finally {
-      setSavingManual(false);
-    }
+    void commitFood(manualName.trim(), async () => ({
+      title: manualName,
+      calories: parseFloat(manualCalories) || 0,
+      protein: parseFloat(manualProtein) || 0,
+      carbs: parseFloat(manualCarbs) || 0,
+      fats: parseFloat(manualFat) || 0,
+      image: manualImage || '',
+      food_name: manualName,
+      type: 'manual',
+    }));
   };
 
   const resetManualForm = () => {
@@ -378,7 +395,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
 
   const resetSearchState = () => {
     setQuery(''); setResults([]); setLoading(false);
-    setHasCompletedSearch(false); setAddingId(null);
+    setHasCompletedSearch(false);
     latestSearchRequestRef.current += 1;
   };
 
@@ -416,12 +433,16 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     return macros.length > 0 ? macros.join('  ') : String(item?.description || '').trim();
   };
 
-  const handleClose = () => {
-    if (isSavingFood) return; // don't let the user dismiss mid-save (either path)
+  const closeAndReset = () => {
     resetManualForm();
     resetSearchState();
     clearRecognitionState();
     onClose();
+  };
+
+  const handleClose = () => {
+    if (isSavingFood) return; // don't let the user dismiss mid-save (any path)
+    closeAndReset();
   };
 
   const handleBackPress = () => {
@@ -511,13 +532,11 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                         {/* Every row is disabled while any add is in flight, not just
                             the tapped one — otherwise a second tap logs a second meal. */}
                         <TouchableOpacity
-                          onPress={() => handleAddClick(item.id)}
+                          onPress={() => handleAddClick(item)}
                           disabled={isSavingFood}
                           className={`px-5 py-2 rounded-full ${isSavingFood ? 'bg-blue-300' : 'bg-primary'}`}
                         >
-                          {addingId === item.id
-                            ? <ActivityIndicator size="small" color="white" />
-                            : <Text className="text-white font-bold">Add</Text>}
+                          <Text className="text-white font-bold">Add</Text>
                         </TouchableOpacity>
                       </View>
                     )}
@@ -617,14 +636,10 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   </View>
                   <TouchableOpacity
                     onPress={handleSaveManual}
-                    disabled={savingManual}
-                    className={`w-full py-4 rounded-xl items-center mt-4 flex-row justify-center ${savingManual ? 'bg-blue-300' : 'bg-primary'}`}
+                    disabled={isSavingFood}
+                    className={`w-full py-4 rounded-xl items-center mt-4 flex-row justify-center ${isSavingFood ? 'bg-blue-300' : 'bg-primary'}`}
                   >
-                    {savingManual ? (
-                      <ActivityIndicator color="white" />
-                    ) : (
-                      <Text className="text-white font-bold text-lg">Save Food</Text>
-                    )}
+                    <Text className="text-white font-bold text-lg">Save Food</Text>
                   </TouchableOpacity>
                 </View>
               </ScrollView>
@@ -760,25 +775,12 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
           </View>
         )}
 
-        {/* Blocking "Adding food" state. Logging a search result is two sequential
-            round trips (FatSecret detail lookup, then the save) and can take a few
-            seconds; without this the modal looks idle and invites a second tap.
-            An absolute-fill View also swallows touches, so it guards the whole
-            surface rather than just the buttons we remembered to disable.
-            Plain View, never a nested Modal — see the header note. */}
-        {isSavingFood && (
-          <View style={styles.savingOverlay}>
-            <View className="bg-white px-8 py-6 rounded-3xl items-center shadow-xl">
-              <ActivityIndicator size="large" color="#007BFF" />
-              {/* Same confirmation type scale as the success/alert dialogs, at the
-                  compact size — consistent weight, colour and alignment. */}
-              <Text style={confirmationType.titleCompact} className="mt-3">Adding food…</Text>
-              <Text style={confirmationType.messageCompact} className="mt-1">
-                This can take a few seconds
-              </Text>
-            </View>
-          </View>
-        )}
+        {/* The one loading-to-outcome card for every commit path. A plain
+            absolute-fill View inside this modal's content, never a nested
+            Modal (Errors 019, 055); it swallows touches so it guards the whole
+            surface, and sits above alertOverlay so a save in flight always
+            wins the layer order. */}
+        <PipActionStatusCard {...pipStatus.cardProps} style={styles.savingOverlay} />
         </View>
       </Modal>
     </>
@@ -796,13 +798,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   // Sits above alertOverlay so a save in flight always wins the layer order.
+  // Only the layer order: the card brings its own backdrop and geometry.
   savingOverlay: {
-    ...StyleSheet.absoluteFillObject,
     zIndex: 10000,
     elevation: 10000,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
 });
 

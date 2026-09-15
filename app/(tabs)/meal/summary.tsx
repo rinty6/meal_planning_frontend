@@ -6,9 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import { authedFetch } from '../../../services/authedFetch';
 import AddFoodModal from '../../../components/addfoodmodal';
-import SuccessModal from '../../../components/sucessmodal';
-import { type PipState } from '../../../components/pip/PipBird';
-import { zoneFromPayload } from '../../../services/calorieBand';
+import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../../../services/mealLogOutcome';
 import {
   fetchMealsSummaryWithCache,
   getCachedMealsSummary,
@@ -116,9 +114,6 @@ export default function SummaryScreen() {
   const [meals, setMeals] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [successPip, setSuccessPip] = useState<PipState>('eating');
-  const [successMessage, setSuccessMessage] = useState('Meal added successfully!');
   const [activeMealType, setActiveMealType] = useState('breakfast');
 
   // --- GENERATE DATES FOR THE MONTH ---
@@ -261,48 +256,41 @@ export default function SummaryScreen() {
   };
 
   // --- HANDLER: ADD NEW FOOD (MODAL) ---
-  const handleAddNewFood = async (foodItem: any) => {
-    try {
-      const formattedDate = formatLocalYYYYMMDD(selectedDate);
+  // AddFoodModal owns the status card for this path (redesign Phase 5): this
+  // returns the resolved outcome and throws on failure; it never closes the
+  // modal or opens a success surface. It used to ignore response.ok, so a 500
+  // rendered as success (plan correction C6).
+  const handleAddNewFood = async (foodItem: any): Promise<MealLogOutcome> => {
+    if (!userId) throw new MealLogRequestError('You must be logged in to save meals.', 401);
+    const formattedDate = formatLocalYYYYMMDD(selectedDate);
 
-      const payload = {
+    const payload = {
+      clerkId: userId,
+      date: formattedDate,
+      mealType: activeMealType,
+      foodName: foodItem.title,
+      calories: foodItem.calories,
+      protein: foodItem.protein,
+      carbs: foodItem.carbs,
+      fats: foodItem.fats,
+      image: foodItem.image || ""
+    };
+
+    const response = await authedFetch(`/api/meals/add`, {
+        method: 'POST',
+        getToken,
         clerkId: userId,
-        date: formattedDate,
-        mealType: activeMealType,
-        foodName: foodItem.title,
-        calories: foodItem.calories,
-        protein: foodItem.protein,
-        carbs: foodItem.carbs,
-        fats: foodItem.fats,
-        image: foodItem.image || ""
-      };
-      
-      const response = await authedFetch(`/api/meals/add`, {
-          method: 'POST',
-          getToken,
-          clerkId: userId,
-          body: JSON.stringify(payload)
-      });
-      markMealsSummaryDirty(userId, formattedDate);
+        body: JSON.stringify(payload)
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new MealLogRequestError(body?.error || 'Could not save food', response.status);
 
-      // This screen previously gave no confirmation at all — the modal just closed.
-      // Show the same Pip success the other log flows use, reading the same
-      // tolerance band (services/calorieBand.ts).
-      const body = await response.json().catch(() => null);
-      const zone = zoneFromPayload(body);
-      setSuccessPip(body?.reachedTarget ? 'happy' : zone === 'over' ? 'confident' : 'eating');
-      setSuccessMessage(
-        body?.reachedTarget
-          ? "You're on target for today. Nice work!"
-          : zone === 'over'
-            ? 'Meal added. Tomorrow is a clean slate.'
-            : 'Meal added successfully!'
-      );
-
-      setIsAddModalVisible(false);
-      fetchMeals(); // Keep fetchMeals here as Modal closing transition hides the reload well enough
-      setShowSuccess(true);
-    } catch (e) { console.error(e); }
+    markMealsSummaryDirty(userId, formattedDate);
+    fetchMeals(); // the card covers the reload; the list is fresh by the time it closes
+    return resolveMealLogOutcome(body, {
+      itemLabel: String(foodItem.title || foodItem.food_name || 'This food').trim(),
+      mealType: activeMealType,
+    });
   };
 
   const handleOpenAddModal = (type: string) => {
@@ -400,18 +388,6 @@ export default function SummaryScreen() {
           onClose={() => setIsAddModalVisible(false)}
           mealType={activeMealType}
           onAddFood={handleAddNewFood}
-        />
-      )}
-
-      {/* Conditionally rendered, matching the AddFoodModal above: the two never
-          need to be mounted at once, which keeps us clear of the iOS stacked-Modal
-          problem (Errors 019 / 055). */}
-      {showSuccess && (
-        <SuccessModal
-          visible={showSuccess}
-          message={successMessage}
-          pip={successPip}
-          onClose={() => setShowSuccess(false)}
         />
       )}
 

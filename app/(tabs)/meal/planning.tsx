@@ -25,7 +25,6 @@ import Food3DIcon from "../../../components/Food3DIcon";
 import InfoButton from "../../../components/InforButton";
 import MostConsumedFoodsStrip from "../../../components/MostConsumedFoodsStrip";
 import RecentMealsModal from "../../../components/RecentMealModal";
-import SuccessModal from "../../../components/sucessmodal";
 import {
   addMealsBatch,
   fetchDailyCalorieProgress,
@@ -43,10 +42,9 @@ import {
 } from "../../../services/planning.types";
 import type { ItemsByMeal, MealType } from "../../../services/planning.types";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
-import { zoneFromPayload } from "../../../services/calorieBand";
 import { type PipState } from "../../../components/pip/PipBird";
 import { PipActionStatusCard, usePipActionStatus } from "../../../components/pip/PipActionStatusCard";
-import { resolveMealLogOutcome, type MealLogOutcome } from "../../../services/mealLogOutcome";
+import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from "../../../services/mealLogOutcome";
 import { getCachedHomeSnapshot } from "../../../services/homeStore";
 import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { authedFetch } from "../../../services/authedFetch";
@@ -409,7 +407,6 @@ const PlanningScreen = () => {
   const [isRecentModalVisible, setIsRecentModalVisible] = useState(false);
   const [isRecommendationInfoVisible, setIsRecommendationInfoVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [favoriteItemKeys, setFavoriteItemKeys] = useState<Record<string, boolean>>({});
   const [favoriteExternalIds, setFavoriteExternalIds] = useState<Set<string>>(() => new Set());
   const [favoriteLoadingKey, setFavoriteLoadingKey] = useState<string | null>(null);
@@ -934,25 +931,6 @@ const PlanningScreen = () => {
     return !!externalId && favoriteExternalIds.has(externalId);
   }, [favoriteExternalIds, favoriteItemKeys]);
 
-  // Zone comes from the server's tolerance band (services/calorieBand.ts).
-  // Previously this tested `exceededLimit` first, and that flag was true at one
-  // calorie over target, so "Calorie Target Reached" was unreachable in practice
-  // (ERROR_LOG Error 074).
-  //
-  // Only the AddFoodModal path still uses this; Pick, batch and recent go
-  // through the Pip status card and services/mealLogOutcome.ts, which keeps the
-  // same precedence. This goes when AddFoodModal migrates (redesign Phase 5).
-  const showMealLogOutcome = (payload: any) => {
-    const zone = zoneFromPayload(payload);
-    if (zone === "over") {
-      showCustomAlert("Over your target", "Food added. Tomorrow is a clean slate.", undefined, { pip: "confident" });
-    } else if (payload?.reachedTarget) {
-      showCustomAlert("Calorie Target Reached", "Great job! You're on target for today.", undefined, { pip: "happy" });
-    } else {
-      setShowSuccessModal(true);
-    }
-  };
-
   // The item label the outcome copy shows: "Grilled chicken salad is in your lunch."
   const itemLabelOf = (item: any) => String(item?.title || item?.food_name || "This dish").trim();
 
@@ -1074,9 +1052,13 @@ const PlanningScreen = () => {
     });
   };
 
-  const handleAddManualFood = async (foodItem: any) => {
-    if (!userId || !configuredApiURL) return;
-    if (addRequestInFlightRef.current) return; // ignore re-taps / other add actions mid-save
+  // AddFoodModal owns the status card for this path (redesign Phase 5): this
+  // returns the resolved outcome and throws on failure; it never closes the
+  // modal or opens a success surface. addRequestInFlightRef still guards it
+  // against the direct paths above.
+  const handleAddManualFood = async (foodItem: any): Promise<MealLogOutcome> => {
+    if (!userId || !configuredApiURL) throw new MealLogRequestError("You must be logged in to save meals.", 401);
+    if (addRequestInFlightRef.current) throw new MealLogRequestError("Another save is still in progress.", 409);
     addRequestInFlightRef.current = true;
     try {
       const date = formatLocalYYYYMMDD(selectedDate);
@@ -1103,14 +1085,11 @@ const PlanningScreen = () => {
       });
 
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.error || "Could not save food");
+      if (!response.ok) throw new MealLogRequestError(payload?.error || "Could not save food", response.status);
       markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories + Number(foodItem?.calories || 0))));
-      setIsModalVisible(false);
       void refreshDailyProgress();
-      showMealLogOutcome(payload);
-    } catch {
-      showCustomAlert("Error", "Network error while adding custom food.");
+      return resolveMealLogOutcome(payload, { itemLabel: itemLabelOf(foodItem), mealType: selectedMealType });
     } finally {
       addRequestInFlightRef.current = false;
     }
@@ -1618,13 +1597,6 @@ const PlanningScreen = () => {
           onCancel={undefined}
         />
       )}
-
-      <SuccessModal
-        visible={showSuccessModal}
-        message="Meal added successfully!"
-        pip="eating"
-        onClose={() => setShowSuccessModal(false)}
-      />
 
       {loadingPreferences && (
         // StyleSheet.absoluteFill, not Tailwind's `inset-0`: NativeWind does not
