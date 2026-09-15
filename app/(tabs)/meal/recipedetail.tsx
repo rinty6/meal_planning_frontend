@@ -12,7 +12,9 @@ import { authedFetch } from '../../../services/authedFetch';
 import { uploadRecipeImage } from '../../../services/recipeImages';
 import IngredientIcon from '../../../components/IngredientIcon';
 import { resolveIngredientImage } from '../../../services/ingredientImages';
-import SuccessModal from '../../../components/sucessmodal'; 
+import SuccessModal from '../../../components/sucessmodal';
+import { PipActionStatusCard, usePipActionStatus } from '../../../components/pip/PipActionStatusCard';
+import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../../../services/mealLogOutcome';
 import { markMealsSummaryDirty } from '../../../services/mealsSummaryStore';
 import { cleanShoppingItemName, markShoppingListsDirty } from '../../../services/shoppingStore';
 import { formatServingsLabel } from '../../../services/servingLabel';
@@ -103,8 +105,11 @@ const RecipeDetailScreen = () => {
   // Modal State
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showMealSelector, setShowMealSelector] = useState(false);
+  // Pip status card for "Add to meal log" only (redesign Phase 4). Saving the
+  // recipe and the shopping list keep SuccessModal and their native alerts.
+  const pipStatus = usePipActionStatus();
   const [successMessage, setSuccessMessage] = useState("");
-  const [successAction, setSuccessAction] = useState<'recipe' | 'shopping' | 'meal' | null>(null);
+  const [successAction, setSuccessAction] = useState<'recipe' | 'shopping' | null>(null);
 
   // 3. INITIALIZATION LOGIC
   useEffect(() => {
@@ -485,58 +490,63 @@ const RecipeDetailScreen = () => {
   };
 
   const saveRecipeToMealLog = async (mealType: 'breakfast' | 'lunch' | 'dinner') => {
-    if (!userId) return;
+    if (!userId || activeAction) return;
 
     const date = formatLocalYYYYMMDD(new Date());
     const recipeName = recipeTitle.trim() || baseRecipeInfo?.title || "My Custom Recipe";
 
-    setActiveAction('meal');
-    try {
-      const response = await authedFetch(`/api/meals/add`, {
-        method: 'POST',
-        getToken,
-        clerkId: userId,
-        body: JSON.stringify({
-          clerkId: userId,
-          date,
-          mealType,
-          foodName: recipeName,
-          // recipeCalories/macros are per-serving for FatSecret, but a WHOLE-RECIPE
-          // total for TheMealDB/custom. Divide by the recipe's servings count first
-          // so "log 1" always means one true serving — not the entire dish — then
-          // scale by how many the user picked. TheMealDB uses its estimated servings
-          // (ERROR_LOG Error 061 follow-up); custom uses whatever the user typed in
-          // the servings pill; falls back to 1 (whole dish) when no count is known.
-          calories: (caloriesFromInput(recipeCalories) / logUnitDivisor) * logServings,
-          protein: (macroFromInput(recipeProtein) / logUnitDivisor) * logServings,
-          carbs: (macroFromInput(recipeCarbs) / logUnitDivisor) * logServings,
-          fats: (macroFromInput(recipeFats) / logUnitDivisor) * logServings,
-          servings: logServings,
-          servingDescription: `${logServings} serving${logServings === 1 ? "" : "s"}`,
-          image: baseRecipeInfo?.image || (previewImage as string) || "",
-          externalId: baseRecipeInfo?.id || savedRecipeId || id || recipeName,
-          source: savedRecipeId || isCreating === "true"
-            ? "custom_recipe"
-            : isThemealdb ? "themealdb_recipe" : "fatsecret_recipe",
-        }),
-      });
+    await pipStatus.run({
+      loading: { title: `Adding ${recipeName}…`, message: `Saving to ${mealType}` },
+      context: { itemLabel: recipeName, mealType },
+      task: async (): Promise<MealLogOutcome> => {
+        // activeAction is the guard shared with the recipe and shopping-list
+        // saves; the card itself blocks the screen for the rest of the lifecycle.
+        setActiveAction('meal');
+        try {
+          const response = await authedFetch(`/api/meals/add`, {
+            method: 'POST',
+            getToken,
+            clerkId: userId,
+            body: JSON.stringify({
+              clerkId: userId,
+              date,
+              mealType,
+              foodName: recipeName,
+              // recipeCalories/macros are per-serving for FatSecret, but a WHOLE-RECIPE
+              // total for TheMealDB/custom. Divide by the recipe's servings count first
+              // so "log 1" always means one true serving — not the entire dish — then
+              // scale by how many the user picked. TheMealDB uses its estimated servings
+              // (ERROR_LOG Error 061 follow-up); custom uses whatever the user typed in
+              // the servings pill; falls back to 1 (whole dish) when no count is known.
+              calories: (caloriesFromInput(recipeCalories) / logUnitDivisor) * logServings,
+              protein: (macroFromInput(recipeProtein) / logUnitDivisor) * logServings,
+              carbs: (macroFromInput(recipeCarbs) / logUnitDivisor) * logServings,
+              fats: (macroFromInput(recipeFats) / logUnitDivisor) * logServings,
+              servings: logServings,
+              servingDescription: `${logServings} serving${logServings === 1 ? "" : "s"}`,
+              image: baseRecipeInfo?.image || (previewImage as string) || "",
+              externalId: baseRecipeInfo?.id || savedRecipeId || id || recipeName,
+              source: savedRecipeId || isCreating === "true"
+                ? "custom_recipe"
+                : isThemealdb ? "themealdb_recipe" : "fatsecret_recipe",
+            }),
+          });
 
-      if (!response.ok) {
-        throw new Error("Failed to add recipe to meal log");
-      }
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new MealLogRequestError(payload?.error || "Failed to add recipe to meal log", response.status);
+          }
 
-      markMealsSummaryDirty(userId, date);
-      setSuccessAction('meal');
-      setSuccessMessage("Meal added successfully!");
-      setShowSuccessModal(true);
-    } catch (error) {
-      console.error(error);
-      Alert.alert("Error", "Could not add this recipe to your meal log.");
-    } finally {
-      setActiveAction(null);
-    }
+          markMealsSummaryDirty(userId, date);
+          return resolveMealLogOutcome(payload, { itemLabel: recipeName, mealType });
+        } finally {
+          setActiveAction(null);
+        }
+      },
+      // Dismiss only: logging a meal has never left this screen.
+    });
   };
-  
+
   const handleCloseModal = () => {
       setShowSuccessModal(false);
       // Navigate back after saving
@@ -977,14 +987,8 @@ const RecipeDetailScreen = () => {
                 disabled={!!activeAction}
                 className={`w-full py-4 rounded-xl shadow-md flex-row justify-center items-center mb-3 ${activeAction ? 'bg-blue-300' : 'bg-primary'}`}
              >
-                 {activeAction === 'meal' ? (
-                     <ActivityIndicator size="small" color="white" />
-                 ) : (
-                    <>
-                      <Ionicons name="add" size={18} color="white" />
-                      <Text className="text-white text-center font-bold text-base ml-2">Add to meal log</Text>
-                    </>
-                 )}
+                 <Ionicons name="add" size={18} color="white" />
+                 <Text className="text-white text-center font-bold text-base ml-2">Add to meal log</Text>
              </TouchableOpacity>
 
              <View className="flex-row gap-2">
@@ -1074,16 +1078,17 @@ const RecipeDetailScreen = () => {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* This screen reuses one SuccessModal for several outcomes. Only logging a
-          meal gets the eating bird; saving a recipe or shopping list keeps the
-          original checkmark. */}
+      {/* SuccessModal now serves only the recipe and shopping-list saves (the
+          original checkmark). Logging a meal uses the Pip status card below. */}
       <SuccessModal
         visible={showSuccessModal}
         message={successMessage}
-        pip={successAction === 'meal' ? 'eating' : undefined}
         onClose={handleCloseModal}
       />
-      
+
+      {/* Plain-view status card, shown after the meal selector Modal has
+          closed; never a second native Modal (Errors 019, 055). */}
+      <PipActionStatusCard {...pipStatus.cardProps} />
     </SafeAreaView>
   );
 };

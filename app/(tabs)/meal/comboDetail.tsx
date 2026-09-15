@@ -7,7 +7,13 @@ import { useAuth } from "@clerk/clerk-expo";
 
 import IngredientIcon from "../../../components/IngredientIcon";
 import CustomAlert from "../../../components/customAlert";
-import SuccessModal from "../../../components/sucessmodal";
+import { PipActionStatusCard, usePipActionStatus } from "../../../components/pip/PipActionStatusCard";
+import {
+  MealLogPartialError,
+  MealLogRequestError,
+  resolveMealLogOutcome,
+  type MealLogOutcome,
+} from "../../../services/mealLogOutcome";
 import FoodFactsCard from "../../../components/FoodFactsCard";
 import { buildNutritionFactsFromFood, fetchFoodDetailForFacts, getRecipeDetails } from "../../../services/mealAPI";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
@@ -144,12 +150,14 @@ const FoodDetailScreen = () => {
   const params = useLocalSearchParams();
   const { userId, getToken } = useAuth();
 
-  const [adding, setAdding] = useState(false);
   const [showMealSelector, setShowMealSelector] = useState(false);
+  // The one Pip status card for "Add to Meal Plan": blocks the screen from the
+  // meal choice until the outcome is acknowledged, then goes back (the
+  // screen's existing post-success behaviour).
+  const pipStatus = usePipActionStatus();
   // Servings quantity for the Add-to-meal picker (0.5 increments; one unit = what a
   // single tap logs today — one serving of this food/recipe).
   const [logServings, setLogServings] = useState(1);
-  const [showSuccess, setShowSuccess] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [nutritionFacts, setNutritionFacts] = useState<NutritionFactsState | null>(null);
   const [detailItem, setDetailItem] = useState<ComboDetailItem | null>(null);
@@ -362,11 +370,6 @@ const FoodDetailScreen = () => {
     setAlertVisible(true);
   };
 
-  const handleCloseSuccess = () => {
-    setShowSuccess(false);
-    router.back();
-  };
-
   const handleAddToLog = () => {
     if (!userId) {
       showAlert("Error", "You must be logged in to save meals.");
@@ -383,58 +386,83 @@ const FoodDetailScreen = () => {
 
   const saveItemsToDB = async (mealType: string) => {
     if (!userId) return;
-    setAdding(true);
     const dateStr = dateFromPlanning || formatLocalYYYYMMDD(new Date());
+    const itemsToSave =
+      displayComboItems.length > 0
+        ? displayComboItems
+        : detailItem
+          ? [mergeFoodSnapshot(item, detailItem)]
+          : [];
+    if (itemsToSave.length === 0) return;
+    const total = itemsToSave.length;
+    const plural = total > 1;
+    const itemLabel = plural ? `${total} items` : String(itemsToSave[0].title || "This dish").trim();
 
-    try {
-      const itemsToSave =
-        displayComboItems.length > 0
-          ? displayComboItems
-          : detailItem
-            ? [mergeFoodSnapshot(item, detailItem)]
-            : [];
-      for (const comboItem of itemsToSave) {
-        const payload = {
-          clerkId: userId,
-          date: dateStr,
-          mealType,
-          foodName: comboItem.title || "Unknown Item",
-          // comboItem macros are per serving; scale by the chosen servings quantity.
-          calories: (parseFloat(comboItem.calories) || 0) * logServings,
-          protein: (parseFloat(comboItem.protein) || 0) * logServings,
-          carbs: (parseFloat(comboItem.carbs) || 0) * logServings,
-          fats: (parseFloat(comboItem.fats) || 0) * logServings,
-          image: comboItem.image || "",
-          externalId: cleanId(comboItem.externalId || comboItem.external_id || comboItem.recipe_id || comboItem.fatsecret_food_id || comboItem.food_id || comboItem.id),
-          source: cleanId(comboItem.source) || (isRecipeLikeItem(comboItem) ? "fatsecret_recipe" : "fatsecret_food"),
-          servingId: cleanId(comboItem.servingId || comboItem.serving_id),
-          servings: logServings,
-          servingDescription: logServings === 1
-            ? (cleanId(comboItem.servingDescription || comboItem.serving_description) || "1 serving")
-            : `${logServings} servings`,
-          nutrients: comboItem.nutrients && typeof comboItem.nutrients === "object" ? comboItem.nutrients : {},
-        };
+    await pipStatus.run({
+      loading: { title: `Adding ${itemLabel}…`, message: `Saving to ${mealType}` },
+      context: { itemLabel, mealType, plural },
+      task: async (): Promise<MealLogOutcome> => {
+        // A combo is main + side + drink, one POST each. The card covers the
+        // whole loop; no per-item success is shown early. The outcome is
+        // resolved from the LAST reply (it carries the final daily total and
+        // zone) with reachedTarget OR-ed across replies, because the band can
+        // be entered by a middle item and the flag is edge-triggered.
+        let saved = 0;
+        let lastPayload: any = null;
+        let reachedTarget = false;
+        try {
+          for (const comboItem of itemsToSave) {
+            const payload = {
+              clerkId: userId,
+              date: dateStr,
+              mealType,
+              foodName: comboItem.title || "Unknown Item",
+              // comboItem macros are per serving; scale by the chosen servings quantity.
+              calories: (parseFloat(comboItem.calories) || 0) * logServings,
+              protein: (parseFloat(comboItem.protein) || 0) * logServings,
+              carbs: (parseFloat(comboItem.carbs) || 0) * logServings,
+              fats: (parseFloat(comboItem.fats) || 0) * logServings,
+              image: comboItem.image || "",
+              externalId: cleanId(comboItem.externalId || comboItem.external_id || comboItem.recipe_id || comboItem.fatsecret_food_id || comboItem.food_id || comboItem.id),
+              source: cleanId(comboItem.source) || (isRecipeLikeItem(comboItem) ? "fatsecret_recipe" : "fatsecret_food"),
+              servingId: cleanId(comboItem.servingId || comboItem.serving_id),
+              servings: logServings,
+              servingDescription: logServings === 1
+                ? (cleanId(comboItem.servingDescription || comboItem.serving_description) || "1 serving")
+                : `${logServings} servings`,
+              nutrients: comboItem.nutrients && typeof comboItem.nutrients === "object" ? comboItem.nutrients : {},
+            };
 
-        const res = await authedFetch(`/api/meals/add`, {
-          method: "POST",
-          getToken,
-          clerkId: userId,
-          body: JSON.stringify(payload),
-        });
-
-        if (!res.ok) {
-          const errorText = await res.text();
-          throw new Error(errorText || "Failed to save meal");
+            const res = await authedFetch(`/api/meals/add`, {
+              method: "POST",
+              getToken,
+              clerkId: userId,
+              body: JSON.stringify(payload),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              throw new MealLogRequestError(body?.error || "Failed to save meal", res.status);
+            }
+            saved += 1;
+            lastPayload = body;
+            if (body?.reachedTarget) reachedTarget = true;
+          }
+        } catch (error) {
+          // Truthful partial failure: earlier items ARE in the log.
+          if (saved > 0) throw new MealLogPartialError(saved, total, error);
+          throw error;
+        } finally {
+          if (saved > 0) markMealsSummaryDirty(userId, dateStr);
         }
-      }
 
-      markMealsSummaryDirty(userId, dateStr);
-      setShowSuccess(true);
-    } catch {
-      showAlert("Error", "Could not save this food item.");
-    } finally {
-      setAdding(false);
-    }
+        return resolveMealLogOutcome({ ...(lastPayload || {}), reachedTarget }, { itemLabel, mealType, plural });
+      },
+      onDismiss: (result) => {
+        // Success has always left this screen after the acknowledgement; an
+        // error stays so the chosen servings survive a retry.
+        if (result.kind === "success") router.back();
+      },
+    });
   };
 
   if (!item) {
@@ -572,25 +600,19 @@ const FoodDetailScreen = () => {
 
         <TouchableOpacity
           onPress={handleAddToLog}
-          disabled={adding}
+          disabled={pipStatus.isBusy}
           className={`w-full py-4 rounded-2xl mb-10 flex-row justify-center items-center ${
             activeIsRecipeLike ? "bg-white border-2 border-primary" : "bg-primary shadow-md"
           }`}
         >
-          {adding ? (
-            <ActivityIndicator color={activeIsRecipeLike ? "#007BFF" : "white"} />
-          ) : (
-            <>
-              <Ionicons name="add-circle" size={24} color={activeIsRecipeLike ? "#007BFF" : "white"} />
-              <Text
-                className={`text-center font-bold text-lg ml-2 ${
-                  activeIsRecipeLike ? "text-primary" : "text-white"
-                }`}
-              >
-                Add to Meal Plan
-              </Text>
-            </>
-          )}
+          <Ionicons name="add-circle" size={24} color={activeIsRecipeLike ? "#007BFF" : "white"} />
+          <Text
+            className={`text-center font-bold text-lg ml-2 ${
+              activeIsRecipeLike ? "text-primary" : "text-white"
+            }`}
+          >
+            Add to Meal Plan
+          </Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -650,12 +672,9 @@ const FoodDetailScreen = () => {
         onCancel={alertConfig.onCancel}
       />
 
-      <SuccessModal
-        visible={showSuccess}
-        message="Meal added successfully!"
-        pip="eating"
-        onClose={handleCloseSuccess}
-      />
+      {/* Plain-view status card, mounted after the meal selector Modal has
+          closed; never a second native Modal (Errors 019, 055). */}
+      <PipActionStatusCard {...pipStatus.cardProps} />
     </SafeAreaView>
   );
 };

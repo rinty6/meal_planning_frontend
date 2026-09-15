@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { PipActionStatusCard, usePipActionStatus } from '../components/pip/PipActionStatusCard';
 import {
+  MealLogPartialError,
   MealLogRequestError,
   resolveMealLogOutcome,
   type MealLogOutcome,
@@ -28,7 +29,7 @@ type Scenario = {
   plural?: boolean;
   delayMs: number;
   payload?: Record<string, unknown>;
-  failWith?: 'server' | 'network';
+  failWith?: 'server' | 'network' | 'partial';
 };
 
 const SCENARIOS: Scenario[] = [
@@ -41,6 +42,7 @@ const SCENARIOS: Scenario[] = [
   { label: 'Long item name', detail: 'title must wrap inside the 244 px card, never widen it', itemLabel: 'Slow-roasted Mediterranean vegetable and halloumi grain bowl with tahini', delayMs: 600, payload: { targetZone: 'under' } },
   { label: 'Failed · server replied', detail: '500 with a body → "Nothing was saved."', itemLabel: 'Grilled chicken salad', delayMs: 900, failWith: 'server' },
   { label: 'Failed · connection dropped', detail: 'no reply → "Check your meal log before trying again."', itemLabel: 'Grilled chicken salad', delayMs: 900, failWith: 'network' },
+  { label: 'Failed · partial combo', detail: 'combo item 3 of 3 refused after 2 saved → count stated (Phase 4)', itemLabel: '3 items', plural: true, delayMs: 900, failWith: 'partial' },
 ];
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -58,6 +60,7 @@ export default function DevPipStatusScreen() {
           await wait(scenario.delayMs);
           if (scenario.failWith === 'server') throw new MealLogRequestError('Could not save food', 500);
           if (scenario.failWith === 'network') throw new TypeError('Network request failed');
+          if (scenario.failWith === 'partial') throw new MealLogPartialError(2, 3, new MealLogRequestError('Could not save food', 500));
           return resolveMealLogOutcome(scenario.payload, {
             itemLabel: scenario.itemLabel,
             mealType: 'lunch',

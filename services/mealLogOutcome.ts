@@ -73,6 +73,24 @@ export class MealLogRequestError extends Error {
   }
 }
 
+/**
+ * Thrown by multi-item call sites (combo detail) when one item failed AFTER
+ * earlier ones were written. "Nothing was saved" would be a lie and "check
+ * your log" alone hides what happened, so the copy states the count.
+ */
+export class MealLogPartialError extends Error {
+  saved: number;
+  total: number;
+
+  constructor(saved: number, total: number, cause?: unknown) {
+    super(`Saved ${saved} of ${total} items`);
+    this.name = 'MealLogPartialError';
+    this.saved = saved;
+    this.total = total;
+    if (cause !== undefined) (this as { cause?: unknown }).cause = cause;
+  }
+}
+
 const mealLabel = (mealType: string) => String(mealType || 'meal').trim().toLowerCase();
 
 export const resolveMealLogOutcome = (payload: unknown, context: MealLogContext): MealLogOutcome => {
@@ -117,6 +135,17 @@ export const resolveMealLogOutcome = (payload: unknown, context: MealLogContext)
 export const resolveMealLogFailure = (error: unknown, context: Pick<MealLogContext, 'itemLabel'>): MealLogFailure => {
   const serverReplied = error instanceof MealLogRequestError;
   const item = context.itemLabel || 'this';
+
+  if (error instanceof MealLogPartialError) {
+    return {
+      kind: 'error',
+      title: 'Only part of this was added',
+      message: `${error.saved} of ${error.total} items were saved. Check your meal log before trying again.`,
+      pip: 'sad',
+      actionLabel: 'OK',
+      ambiguous: false,
+    };
+  }
 
   if (serverReplied) {
     return {
