@@ -1,6 +1,7 @@
 // Authenticated network boundary for Meal Planning. The progress helper deliberately
 // reads /api/calorie/summary so the planning card cannot invent its own target rules.
 import { authedFetch, type GetToken } from "./authedFetch";
+import { MealLogRequestError } from "./mealLogOutcome";
 
 export type AddMealPayload = {
   apiURL: string;
@@ -132,7 +133,10 @@ export const addMealsBatch = async (inputs: AddMealPayload[]): Promise<AddMealRe
 
   const data = await readResponseJson(response);
   if (!response.ok) {
-    throw new Error(data?.error || "Could not add meals");
+    // Status-carrying so the Pip status card can say, truthfully, that the
+    // server refused and nothing was saved; a thrown fetch (no status) means
+    // the write may or may not have landed (services/mealLogOutcome.ts).
+    throw new MealLogRequestError(data?.error || "Could not add meals", response.status);
   }
 
   return {

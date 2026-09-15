@@ -45,6 +45,8 @@ import type { ItemsByMeal, MealType } from "../../../services/planning.types";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
 import { zoneFromPayload } from "../../../services/calorieBand";
 import { type PipState } from "../../../components/pip/PipBird";
+import { PipActionStatusCard, usePipActionStatus } from "../../../components/pip/PipActionStatusCard";
+import { resolveMealLogOutcome, type MealLogOutcome } from "../../../services/mealLogOutcome";
 import { getCachedHomeSnapshot } from "../../../services/homeStore";
 import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { authedFetch } from "../../../services/authedFetch";
@@ -164,7 +166,6 @@ const DishCard = ({
   onToggleSelect,
   onSkip,
   onLove,
-  isAdding = false,
   isFavorite = false,
   isFavoriteLoading = false,
 }: {
@@ -174,7 +175,6 @@ const DishCard = ({
   onToggleSelect: () => void;
   onSkip: () => void;
   onLove: () => void;
-  isAdding?: boolean;
   isFavorite?: boolean;
   isFavoriteLoading?: boolean;
 }) => {
@@ -350,7 +350,6 @@ const DishCard = ({
 
           <TouchableOpacity
             onPress={onToggleSelect}
-            disabled={isAdding}
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -361,11 +360,7 @@ const DishCard = ({
               backgroundColor: isSelected ? "#0B2149" : "#FF9500",
             }}
           >
-            {isAdding ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Ionicons name="add" size={17} color="#fff" />
-            )}
+            <Ionicons name="add" size={17} color="#fff" />
             <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>{isSelected ? "Added" : "Pick"}</Text>
           </TouchableOpacity>
         </View>
@@ -380,6 +375,10 @@ const PlanningScreen = () => {
   const configuredApiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
   const isMountedRef = useRef(true);
   const addRequestInFlightRef = useRef(false);
+  // One Pip status card for every direct meal-log commit on this screen (Pick,
+  // batch add, recent re-log). Mounted once per action, morphs in place, and
+  // blocks the whole screen until the user acknowledges the outcome.
+  const pipStatus = usePipActionStatus();
   const prewarmRequestKeyRef = useRef("");
   const shuffleSeedRef = useRef(0);
   const dailyProgressRequestIdRef = useRef(0);
@@ -411,7 +410,6 @@ const PlanningScreen = () => {
   const [isRecommendationInfoVisible, setIsRecommendationInfoVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [pickingItemKey, setPickingItemKey] = useState<string | null>(null);
   const [favoriteItemKeys, setFavoriteItemKeys] = useState<Record<string, boolean>>({});
   const [favoriteExternalIds, setFavoriteExternalIds] = useState<Set<string>>(() => new Set());
   const [favoriteLoadingKey, setFavoriteLoadingKey] = useState<string | null>(null);
@@ -940,6 +938,10 @@ const PlanningScreen = () => {
   // Previously this tested `exceededLimit` first, and that flag was true at one
   // calorie over target, so "Calorie Target Reached" was unreachable in practice
   // (ERROR_LOG Error 074).
+  //
+  // Only the AddFoodModal path still uses this; Pick, batch and recent go
+  // through the Pip status card and services/mealLogOutcome.ts, which keeps the
+  // same precedence. This goes when AddFoodModal migrates (redesign Phase 5).
   const showMealLogOutcome = (payload: any) => {
     const zone = zoneFromPayload(payload);
     if (zone === "over") {
@@ -951,102 +953,125 @@ const PlanningScreen = () => {
     }
   };
 
+  // The item label the outcome copy shows: "Grilled chicken salad is in your lunch."
+  const itemLabelOf = (item: any) => String(item?.title || item?.food_name || "This dish").trim();
+
+  // Shared tail of every successful direct commit: cache invalidation and the
+  // screen's own totals. Runs INSIDE the card's task so the card stays in its
+  // loading phase until Planning is consistent, and the outcome copy is
+  // resolved from the whole payload (reachedTarget is edge-triggered; C2).
+  const settleMealLogSuccess = (payload: any, date: string) => {
+    markMealsSummaryDirty(userId!, date);
+    setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
+    void refreshDailyProgress();
+  };
+
   const handlePickItem = async (item: any) => {
+    // Both guards run before any await (Error 071). pipStatus.run has its own
+    // guard for the card lifecycle; addRequestInFlightRef is shared with the
+    // AddFoodModal path so no two commits can ever overlap.
     if (!userId || !configuredApiURL || addRequestInFlightRef.current) return;
-    const itemKey = createItemKey(item);
-    addRequestInFlightRef.current = true;
-    setPickingItemKey(itemKey || null);
+    const itemLabel = itemLabelOf(item);
 
-    try {
-      const date = formatLocalYYYYMMDD(selectedDate);
-      const payload = await addMealsBatch([
-        {
-          apiURL: configuredApiURL,
-          getToken,
-          clerkId: userId,
-          date,
-          mealType: selectedMealType,
-          foodName: item.title || item.food_name || "Unknown Item",
-          calories: toNumber(item.calories),
-          protein: toNumber(item.protein),
-          carbs: toNumber(item.carbs),
-          fats: toNumber(item.fats),
-          image: item.image || "",
-          externalId: getExternalId(item),
-          source: item.source || item.type || "",
-          servingId: item.serving_id || "",
-          servingDescription: item.serving_description || "",
-          nutrients: buildNutrientsSnapshot(item),
-        },
-      ]);
+    await pipStatus.run({
+      loading: { title: `Adding ${itemLabel}…`, message: `Saving to ${selectedMealType}` },
+      context: { itemLabel, mealType: selectedMealType },
+      task: async (): Promise<MealLogOutcome> => {
+        addRequestInFlightRef.current = true;
+        try {
+          const date = formatLocalYYYYMMDD(selectedDate);
+          const payload = await addMealsBatch([
+            {
+              apiURL: configuredApiURL,
+              getToken,
+              clerkId: userId,
+              date,
+              mealType: selectedMealType,
+              foodName: item.title || item.food_name || "Unknown Item",
+              calories: toNumber(item.calories),
+              protein: toNumber(item.protein),
+              carbs: toNumber(item.carbs),
+              fats: toNumber(item.fats),
+              image: item.image || "",
+              externalId: getExternalId(item),
+              source: item.source || item.type || "",
+              servingId: item.serving_id || "",
+              servingDescription: item.serving_description || "",
+              nutrients: buildNutrientsSnapshot(item),
+            },
+          ]);
 
-      markMealsSummaryDirty(userId, date);
-      setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
-      setSelectedItemKeys({});
-      void refreshDailyProgress();
-      void sendMealPlanEvent({
-        apiURL: configuredApiURL,
-        clerkId: userId,
-        getToken,
-        eventType: "accepted",
-        mealType: selectedMealType,
-        item,
-        preferences,
-      });
-      showMealLogOutcome(payload);
-    } catch {
-      showCustomAlert("Error", "Failed to add this dish.");
-    } finally {
-      addRequestInFlightRef.current = false;
-      setPickingItemKey(null);
-    }
+          settleMealLogSuccess(payload, date);
+          setSelectedItemKeys({});
+          // Fire-and-forget: analytics never sit on the awaited path (Error 072).
+          void sendMealPlanEvent({
+            apiURL: configuredApiURL,
+            clerkId: userId,
+            getToken,
+            eventType: "accepted",
+            mealType: selectedMealType,
+            item,
+            preferences,
+          });
+          return resolveMealLogOutcome(payload, { itemLabel, mealType: selectedMealType });
+        } finally {
+          addRequestInFlightRef.current = false;
+        }
+      },
+    });
   };
 
   const handleAddSelectedItems = async () => {
     if (!userId || !configuredApiURL || selectedItems.length === 0 || addRequestInFlightRef.current) return;
-    addRequestInFlightRef.current = true;
-    try {
-      const date = formatLocalYYYYMMDD(selectedDate);
-      const payload = await addMealsBatch(
-        selectedItems.map((item: any) => ({
-          apiURL: configuredApiURL,
-          getToken,
-          clerkId: userId,
-          date,
-          mealType: selectedMealType,
-          foodName: item.title || item.food_name || "Unknown Item",
-          calories: toNumber(item.calories),
-          protein: toNumber(item.protein),
-          carbs: toNumber(item.carbs),
-          fats: toNumber(item.fats),
-          image: item.image || "",
-          externalId: getExternalId(item),
-          source: item.source || item.type || "",
-          servingId: item.serving_id || "",
-          servingDescription: item.serving_description || "",
-          nutrients: buildNutrientsSnapshot(item),
-        }))
-      );
+    const count = selectedItems.length;
+    const itemLabel = count === 1 ? itemLabelOf(selectedItems[0]) : `${count} items`;
+    const plural = count > 1;
 
-      markMealsSummaryDirty(userId, date);
-      setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
-      setSelectedItemKeys({});
-      void refreshDailyProgress();
-      void sendMealPlanEvent({
-        apiURL: configuredApiURL,
-        clerkId: userId,
-        getToken,
-        eventType: "accepted",
-        mealType: selectedMealType,
-        items: selectedItems,
-        preferences,
-      });
-      showMealLogOutcome(payload);
-    } catch {
-      showCustomAlert("Error", "Failed to add selected dishes.");
-    } finally {
-      addRequestInFlightRef.current = false;
-    }
+    await pipStatus.run({
+      loading: { title: `Adding ${itemLabel}…`, message: `Saving to ${selectedMealType}` },
+      context: { itemLabel, mealType: selectedMealType, plural },
+      task: async (): Promise<MealLogOutcome> => {
+        addRequestInFlightRef.current = true;
+        try {
+          const date = formatLocalYYYYMMDD(selectedDate);
+          const payload = await addMealsBatch(
+            selectedItems.map((item: any) => ({
+              apiURL: configuredApiURL,
+              getToken,
+              clerkId: userId,
+              date,
+              mealType: selectedMealType,
+              foodName: item.title || item.food_name || "Unknown Item",
+              calories: toNumber(item.calories),
+              protein: toNumber(item.protein),
+              carbs: toNumber(item.carbs),
+              fats: toNumber(item.fats),
+              image: item.image || "",
+              externalId: getExternalId(item),
+              source: item.source || item.type || "",
+              servingId: item.serving_id || "",
+              servingDescription: item.serving_description || "",
+              nutrients: buildNutrientsSnapshot(item),
+            }))
+          );
+
+          settleMealLogSuccess(payload, date);
+          setSelectedItemKeys({});
+          void sendMealPlanEvent({
+            apiURL: configuredApiURL,
+            clerkId: userId,
+            getToken,
+            eventType: "accepted",
+            mealType: selectedMealType,
+            items: selectedItems,
+            preferences,
+          });
+          return resolveMealLogOutcome(payload, { itemLabel, mealType: selectedMealType, plural });
+        } finally {
+          addRequestInFlightRef.current = false;
+        }
+      },
+    });
   };
 
   const handleAddManualFood = async (foodItem: any) => {
@@ -1093,40 +1118,48 @@ const PlanningScreen = () => {
 
   const handleAddRecentMeals = async (mealsToAdd: any[]) => {
     if (!userId || !configuredApiURL || mealsToAdd.length === 0 || addRequestInFlightRef.current) return;
-    addRequestInFlightRef.current = true;
+    // Close the native selector FIRST, then show the plain-view card on Planning
+    // underneath: never a second surface over an open Modal (Errors 019, 055).
     setIsRecentModalVisible(false);
-    try {
-      const date = formatLocalYYYYMMDD(selectedDate);
-      const payload = await addMealsBatch(
-        mealsToAdd.map((meal) => ({
-          apiURL: configuredApiURL,
-          getToken,
-          clerkId: userId,
-          date,
-          mealType: selectedMealType,
-          foodName: meal.foodName || "Unknown Item",
-          calories: toNumber(meal.calories),
-          protein: toNumber(meal.protein),
-          carbs: toNumber(meal.carbs),
-          fats: toNumber(meal.fats),
-          image: meal.image || "",
-          externalId: meal.externalId || "",
-          source: meal.source || "",
-          servingId: meal.servingId || "",
-          servingDescription: meal.servingDescription || "",
-          nutrients: meal.nutrients || {},
-        }))
-      );
+    const count = mealsToAdd.length;
+    const itemLabel = count === 1 ? String(mealsToAdd[0]?.foodName || "This meal").trim() : `${count} items`;
+    const plural = count > 1;
 
-      markMealsSummaryDirty(userId, date);
-      setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
-      void refreshDailyProgress();
-      showMealLogOutcome(payload);
-    } catch {
-      showCustomAlert("Error", "Network error while adding recent meals.");
-    } finally {
-      addRequestInFlightRef.current = false;
-    }
+    await pipStatus.run({
+      loading: { title: `Adding ${itemLabel}…`, message: `Saving to ${selectedMealType}` },
+      context: { itemLabel, mealType: selectedMealType, plural },
+      task: async (): Promise<MealLogOutcome> => {
+        addRequestInFlightRef.current = true;
+        try {
+          const date = formatLocalYYYYMMDD(selectedDate);
+          const payload = await addMealsBatch(
+            mealsToAdd.map((meal) => ({
+              apiURL: configuredApiURL,
+              getToken,
+              clerkId: userId,
+              date,
+              mealType: selectedMealType,
+              foodName: meal.foodName || "Unknown Item",
+              calories: toNumber(meal.calories),
+              protein: toNumber(meal.protein),
+              carbs: toNumber(meal.carbs),
+              fats: toNumber(meal.fats),
+              image: meal.image || "",
+              externalId: meal.externalId || "",
+              source: meal.source || "",
+              servingId: meal.servingId || "",
+              servingDescription: meal.servingDescription || "",
+              nutrients: meal.nutrients || {},
+            }))
+          );
+
+          settleMealLogSuccess(payload, date);
+          return resolveMealLogOutcome(payload, { itemLabel, mealType: selectedMealType, plural });
+        } finally {
+          addRequestInFlightRef.current = false;
+        }
+      },
+    });
   };
 
   const dates = Array.from({ length: 7 }, (_, index) => {
@@ -1291,7 +1324,6 @@ const PlanningScreen = () => {
                     onToggleSelect={() => handlePickItem(item)}
                     onSkip={() => handleSkipItem(item, index)}
                     onLove={() => handleLoveItem(item)}
-                    isAdding={pickingItemKey === key}
                   />
                 );
               })
@@ -1604,6 +1636,9 @@ const PlanningScreen = () => {
           <ActivityIndicator size="large" color="#007BFF" />
         </View>
       )}
+
+      {/* Last child of the root so it sits above the footer and the AddFoodModal trigger. */}
+      <PipActionStatusCard {...pipStatus.cardProps} />
     </SafeAreaView>
   );
 };
