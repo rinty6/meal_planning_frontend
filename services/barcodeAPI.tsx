@@ -1,8 +1,14 @@
 /**
- * Barcode API service.
+ * FROZEN 2026-09-18. No new exports, no new logic. Bug fixes only.
  *
- * Looks up scanned packaged-food barcodes in Open Food Facts and converts the
- * response into the shape consumed by AddFoodModal.
+ * Barcode API service. Looks up scanned packaged-food barcodes with a LIVE
+ * Open Food Facts call and converts the response into the shape consumed by
+ * AddFoodModal. Replaced by GET /api/catalog/foods/barcode/:code through
+ * api/addFood/ (45,718 scannable products already in the catalogue); see
+ * api/README.md, "Migration map", and the checklist task p6-01 / p7-05.
+ *
+ * Remaining importers as of the freeze:
+ *   components/addfoodmodal.tsx        fetchBarcodeData
  */
 
 interface NutrimentData {

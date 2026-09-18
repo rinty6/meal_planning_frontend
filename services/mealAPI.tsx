@@ -1,3 +1,25 @@
+/**
+ * FROZEN 2026-09-18. No new exports, no new logic. Bug fixes only.
+ *
+ * This file is the old FatSecret-era API layer (search, detail, recipes,
+ * image-lookup heuristics, three caches). It is being replaced one consumer
+ * at a time by feature folders under meal_app/api/ (see api/README.md,
+ * "Migration map"). ESLint blocks any importer not on the allowlist in
+ * eslint.config.js.
+ *
+ * Remaining importers as of the freeze:
+ *   components/addfoodmodal.tsx        searchFoodItems, getFoodById   -> api/addFood/
+ *   components/VoiceSearchModal.tsx    searchFoodItems, searchRecipes -> api/addFood/, api/recipes/
+ *   app/(tabs)/meal/recipe/index.tsx   searchRecipes                  -> api/recipes/
+ *   app/(tabs)/meal/recipedetail.tsx   getRecipeDetails               -> api/recipes/
+ *   app/(tabs)/meal/comboDetail.tsx    fetchFoodDetailForFacts,
+ *                                      buildNutritionFactsFromFood,
+ *                                      getRecipeDetails               -> api/recommendations/
+ *   services/recommendation.ts         resolveFoodImageFromFatSecret  -> api/recommendations/
+ *
+ * Delete an export only when `grep -rn "<name>" meal_app --include=*.ts*`
+ * returns zero hits. Delete the file when it is empty.
+ */
 // This file acts as the api communicator
 // Collect recipes and foods' details and then send to the frontend
 

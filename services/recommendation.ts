@@ -1,3 +1,13 @@
+/**
+ * FROZEN 2026-09-18. No new exports, no new logic. Bug fixes only.
+ *
+ * Client-side recommendation hydration (image lookups via the FatSecret
+ * proxy, AsyncStorage caches). Being replaced by api/recommendations/ once the
+ * foods and recipes groups have migrated (see api/README.md, "Migration map").
+ *
+ * Remaining importers as of the freeze:
+ *   app/(tabs)/meal/comboDetail.tsx    peekCachedRecommendations
+ */
 import { Image as RNImage } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 

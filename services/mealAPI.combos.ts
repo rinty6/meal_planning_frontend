@@ -1,3 +1,10 @@
+/**
+ * FROZEN 2026-09-18. No new exports, no new logic. Bug fixes only.
+ *
+ * Meal-combo generation over FatSecret search + detail resolvers. Only
+ * services/mealAPI.tsx imports it; it goes when mealAPI.tsx goes
+ * (see api/README.md, "Migration map").
+ */
 export interface MealCombo {
   id: string;
   title: string;
