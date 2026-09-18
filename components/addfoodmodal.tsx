@@ -42,6 +42,7 @@ import {
   type FoodCardVM,
 } from '../api/addFood/addFoodApi';
 import type { ApiFailure } from '../api/core/request';
+import { energyValue, formatEnergy, parseEnergyInput } from '../utils/energy';
 import FoodResultCard from './addfood/FoodResultCard';
 import RefineRow from './addfood/RefineRow';
 import SearchStateMessage from './addfood/SearchStateMessage';
@@ -232,7 +233,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
 
       const { foodName, calories, protein, carbs, fats, image } = response.data;
       setManualName(foodName);
-      setManualCalories(calories.toString());
+      setManualCalories(String(energyValue(calories) ?? ''));
       setManualProtein(protein.toString());
       setManualCarbs(carbs.toString());
       setManualFat(fats.toString());
@@ -319,7 +320,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   const handleEditRecognitionDetails = (candidate: FoodCandidate) => {
     setManualName(candidate.display_name);
     if (candidate.nutrition) {
-      setManualCalories(candidate.nutrition.calories != null ? Math.round(candidate.nutrition.calories).toString() : '');
+      setManualCalories(candidate.nutrition.calories != null ? String(energyValue(candidate.nutrition.calories) ?? '') : '');
       setManualProtein(candidate.nutrition.protein_g != null ? candidate.nutrition.protein_g.toFixed(1) : '');
       setManualCarbs(candidate.nutrition.carbs_g != null ? candidate.nutrition.carbs_g.toFixed(1) : '');
       setManualFat(candidate.nutrition.fat_g != null ? candidate.nutrition.fat_g.toFixed(1) : '');
@@ -475,7 +476,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     }
     void commitFood(manualName.trim(), async () => ({
       title: manualName,
-      calories: parseFloat(manualCalories) || 0,
+      calories: parseEnergyInput(manualCalories) ?? 0, // field is kJ; meal_logs.calories is kcal
       protein: parseFloat(manualProtein) || 0,
       carbs: parseFloat(manualCarbs) || 0,
       fats: parseFloat(manualFat) || 0,
@@ -678,7 +679,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   />
                   <View className="flex-row flex-wrap justify-between">
                     {[
-                      { label: 'Calories', value: manualCalories, setter: setManualCalories, unit: 'kcal' },
+                      { label: 'Energy', value: manualCalories, setter: setManualCalories, unit: 'kJ' },
                       { label: 'Protein',  value: manualProtein,  setter: setManualProtein,  unit: 'g' },
                       { label: 'Carbs',    value: manualCarbs,    setter: setManualCarbs,    unit: 'g' },
                       { label: 'Fat',      value: manualFat,      setter: setManualFat,      unit: 'g' },

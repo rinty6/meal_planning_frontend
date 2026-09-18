@@ -8,6 +8,7 @@ import Svg, { Path, Circle } from 'react-native-svg';
 import InfoButton from '../../../components/InforButton';
 import CustomAlert from '../../../components/customAlert';
 import { authedFetch } from '../../../services/authedFetch';
+import { formatEnergy } from '../../../utils/energy';
 
 const ITEM_WIDTH = 48; // Width of the date box (w-12 is ~48px)
 const ITEM_MARGIN = 12; // Margin right (mr-3 is ~12px)
@@ -594,16 +595,16 @@ const CalorieSummaryScreen = () => {
                 <>
                   {/* 1. MAIN CALORIE RING */}
                   <View className="bg-white border border-gray-200 rounded-3xl p-6 shadow-sm mb-6">
-                    <Text className="text-center text-gray-500 font-bold mb-4 uppercase tracking-widest">Calories</Text>
+                    <Text className="text-center text-gray-500 font-bold mb-4 uppercase tracking-widest">Energy (kJ)</Text>
                     <View className="flex-row justify-between items-end mb-2">
                       <View>
                         <Text className="text-gray-400 text-xs font-bold mb-1">EATEN</Text>
-                        <Text className="text-3xl font-extrabold text-blue-500">{data.consumed.calories}</Text>
+                        <Text className="text-3xl font-extrabold text-blue-500">{formatEnergy(data.consumed.calories, { withUnit: false })}</Text>
                       </View>
                       <View className="items-end">
                         <Text className="text-gray-400 text-xs font-bold mb-1">{isOverTarget ? 'EXHAUSTED' : 'REMAINING'}</Text>
                         <Text className={`text-3xl font-extrabold ${isOverTarget ? 'text-red-500' : 'text-gray-800'}`}>
-                          {isOverTarget ? exhausted : remaining}
+                          {formatEnergy(isOverTarget ? exhausted : remaining, { withUnit: false })}
                         </Text>
                       </View>
                     </View>
@@ -631,7 +632,7 @@ const CalorieSummaryScreen = () => {
                             className="items-center flex-1"
                           >
                             <Text className={`text-[10px] mb-2 ${isOverDayTarget ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
-                              {dayCalories}
+                              {formatEnergy(dayCalories, { withUnit: false })}
                             </Text>
                             <View className="w-2 bg-gray-100 h-32 rounded-full justify-end overflow-hidden">
                               <AnimatedVerticalFill percentage={percentage} color={barColor} />

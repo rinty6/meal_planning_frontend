@@ -8,6 +8,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { searchRecipes } from '../../../../services/mealAPI';
+import { formatEnergy } from '../../../../utils/energy';
 import Food3DIcon from '../../../../components/Food3DIcon';
 import InfoButton from '../../../../components/InforButton';
 import FatSecretInfoModal from '../../../../components/FatSecretInfoModal';
@@ -19,10 +20,11 @@ type FilterRange = {
   max?: number;
 };
 
+// Bounds are kcal (the unit recipe rows carry); labels read in kJ for the user.
 const CALORIE_RANGES: FilterRange[] = [
-  { id: 'low', label: 'Low Calorie', min: 0, max: 300 },
-  { id: 'medium', label: 'Medium Calorie', min: 300, max: 600 },
-  { id: 'high', label: 'High Calorie', min: 600, max: Infinity },
+  { id: 'low', label: 'Low Energy (under 1,250 kJ)', min: 0, max: 300 },
+  { id: 'medium', label: 'Medium Energy (1,250–2,500 kJ)', min: 300, max: 600 },
+  { id: 'high', label: 'High Energy (over 2,500 kJ)', min: 600, max: Infinity },
 ];
 
 const PROTEIN_RANGES: FilterRange[] = [
@@ -203,7 +205,7 @@ const RecipeScreen = () => {
          )}
       </View>
       <Text className="font-bold text-base text-gray-900 mb-1" numberOfLines={1}>{item.title}</Text>
-      <Text className="font-bold text-black">{item.calories} kcal</Text>
+      <Text className="font-bold text-black">{formatEnergy(item.calories)}</Text>
       <Text className="text-gray-400 text-xs">per serving</Text>
     </TouchableOpacity>
   );
@@ -299,10 +301,10 @@ const RecipeScreen = () => {
                     <Text className="text-center text-lg">Relevance (Default)</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => {setSortOption('calories_low'); setIsSortVisible(false)}} className="p-3 border-b border-gray-100">
-                    <Text className="text-center text-lg">Calories (Low to High)</Text>
+                    <Text className="text-center text-lg">Energy (Low to High)</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => {setSortOption('calories_high'); setIsSortVisible(false)}} className="p-3">
-                    <Text className="text-center text-lg">Calories (High to Low)</Text>
+                    <Text className="text-center text-lg">Energy (High to Low)</Text>
                 </TouchableOpacity>
             </View>
          </TouchableOpacity>
@@ -325,7 +327,7 @@ const RecipeScreen = () => {
             {/* FILTER SECTIONS */}
             <FlatList
                data={[
-                  { section: 'Calories', items: CALORIE_RANGES },
+                  { section: 'Energy', items: CALORIE_RANGES },
                   { section: 'Protein', items: PROTEIN_RANGES },
                ]}
                keyExtractor={(item: any) => item.section}

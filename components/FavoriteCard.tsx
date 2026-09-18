@@ -4,6 +4,7 @@ import { View, Text, TouchableOpacity, Image, ActivityIndicator } from 'react-na
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import Food3DIcon from './Food3DIcon';
+import { formatEnergy } from '../utils/energy';
 
 interface FavoriteCardProps {
   item: any;
@@ -35,7 +36,7 @@ const FavoriteCard = ({ item, onPress, onDelete, isDeleting = false }: FavoriteC
         </Text>
         <View className="flex-row items-center mt-1">
           <Ionicons name="flame" size={14} color="orange" />
-          <Text className="text-gray-500 font-bold ml-1">{Math.round(item.calories)} kcal</Text>
+          <Text className="text-gray-500 font-bold ml-1">{formatEnergy(item.calories)}</Text>
         </View>
       </View>
 

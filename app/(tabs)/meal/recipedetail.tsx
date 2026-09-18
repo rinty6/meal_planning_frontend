@@ -18,7 +18,8 @@ import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from 
 import { markMealsSummaryDirty } from '../../../services/mealsSummaryStore';
 import { cleanShoppingItemName, markShoppingListsDirty } from '../../../services/shoppingStore';
 import { formatServingsLabel } from '../../../services/servingLabel';
-import { getServingsCount, formatKcal } from '../../../services/recipeNutrition';
+import { getServingsCount } from '../../../services/recipeNutrition';
+import { energyValue, formatEnergy, parseEnergyInput } from '../../../utils/energy';
 
 const formatLocalYYYYMMDD = (date: Date) => {
   const year = date.getFullYear();
@@ -85,6 +86,19 @@ const RecipeDetailScreen = () => {
   // Tap-to-edit: each value shows as clean Text (like Food detail) until its pencil
   // is tapped, which flips just that one field into an inline input while editing.
   const [editingCalories, setEditingCalories] = useState(false);
+  // What the user types while the calorie pill is in edit mode, in kJ. The
+  // saved value (recipeCalories) stays a kcal string; conversion happens once
+  // on commit through utils/energy.ts (Phase 8).
+  const [caloriesDraftKj, setCaloriesDraftKj] = useState("");
+  const beginEditingCalories = () => {
+    setCaloriesDraftKj(String(energyValue(caloriesFromInput(recipeCalories)) ?? 0));
+    setEditingCalories(true);
+  };
+  const commitCaloriesDraft = () => {
+    const kcal = parseEnergyInput(caloriesDraftKj);
+    if (kcal !== null) setRecipeCalories(normalizeCaloriesInput(kcal));
+    setEditingCalories(false);
+  };
   const [editingServing, setEditingServing] = useState(false);
   const [editingFat, setEditingFat] = useState(false);
   const [editingProtein, setEditingProtein] = useState(false);
@@ -749,10 +763,10 @@ const RecipeDetailScreen = () => {
                         <>
                            <TextInput
                               autoFocus
-                              value={recipeCalories}
-                              onChangeText={(text) => setRecipeCalories(text.replace(/[^0-9.]/g, ""))}
-                              onBlur={() => { setRecipeCalories(normalizeCaloriesInput(recipeCalories)); setEditingCalories(false); }}
-                              onSubmitEditing={() => { setRecipeCalories(normalizeCaloriesInput(recipeCalories)); setEditingCalories(false); }}
+                              value={caloriesDraftKj}
+                              onChangeText={(text) => setCaloriesDraftKj(text.replace(/[^0-9.]/g, ""))}
+                              onBlur={commitCaloriesDraft}
+                              onSubmitEditing={commitCaloriesDraft}
                               keyboardType="numeric"
                               returnKeyType="done"
                               className="font-bold ml-2 text-base text-gray-900"
@@ -760,14 +774,14 @@ const RecipeDetailScreen = () => {
                               placeholder="0"
                               placeholderTextColor="#9CA3AF"
                            />
-                           {scalePerServing ? <Text className="text-gray-400 ml-1 text-xs">kcal/serving</Text> : null}
+                           <Text className="text-gray-400 ml-1 text-xs">{scalePerServing ? 'kJ/serving' : 'kJ'}</Text>
                         </>
                      ) : (
                         <Text className="font-bold ml-2 text-base text-gray-900">
-                           {scalePerServing ? formatKcal(caloriesFromInput(recipeCalories) * recipeServingsNum) : recipeCalories} kcal
+                           {formatEnergy(scalePerServing ? caloriesFromInput(recipeCalories) * recipeServingsNum : caloriesFromInput(recipeCalories))}
                         </Text>
                      )}
-                     <TouchableOpacity onPress={() => setEditingCalories(true)} className="ml-2 w-6 h-6 rounded-full bg-blue-50 items-center justify-center">
+                     <TouchableOpacity onPress={beginEditingCalories} className="ml-2 w-6 h-6 rounded-full bg-blue-50 items-center justify-center">
                         <Ionicons name="create-outline" size={13} color="#007BFF" />
                      </TouchableOpacity>
                   </View>
@@ -801,7 +815,7 @@ const RecipeDetailScreen = () => {
                   {/* Anchor the two numbers so the total pill can't be misread as per-serving */}
                   {scalePerServing ? (
                      <Text className="text-gray-400" style={{ fontSize: 11 }}>
-                        {recipeCalories} kcal per serving × {recipeServingsNum}
+                        {formatEnergy(caloriesFromInput(recipeCalories))} per serving × {recipeServingsNum}
                      </Text>
                   ) : null}
                </View>
@@ -1056,7 +1070,7 @@ const RecipeDetailScreen = () => {
                   </TouchableOpacity>
                 </View>
                 <Text className="text-gray-400 text-center text-xs mb-6">
-                  = {Math.round((caloriesFromInput(recipeCalories) / logUnitDivisor) * logServings)} kcal
+                  = {formatEnergy((caloriesFromInput(recipeCalories) / logUnitDivisor) * logServings)}
                 </Text>
 
                 <Text className="text-gray-400 text-center text-sm mb-4">When are you eating this?</Text>

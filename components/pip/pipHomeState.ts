@@ -8,6 +8,7 @@
 
 import type { PipState } from './PipBird';
 import { resolveCalorieZone } from '../../services/calorieBand';
+import { KJ_PER_KCAL, formatEnergy, kcalToKj } from '../../utils/energy';
 
 export type MealLogType = 'breakfast' | 'lunch' | 'dinner';
 
@@ -73,8 +74,11 @@ const SKIP_COPY: Record<MealLogType, { subline: string; title: string }> = {
   },
 };
 
-const kcal = (value: number) => Math.round(value).toLocaleString('en-US');
-const roundTo10 = (value: number) => Math.max(0, Math.round(value / 10) * 10);
+// Copy reads in kJ; every value handed in is kcal (utils/energy.ts, Phase 8).
+const kj = (value: number) => formatEnergy(value, { withUnit: false });
+// A suggested meal size reads as a round kJ figure ("A 2,100 kJ lunch"), so the
+// kcal value is rounded to whatever lands on a multiple of 50 kJ.
+const roundToKj50 = (kcal: number) => Math.max(0, Math.round(kcalToKj(kcal) / 50) * 50) / KJ_PER_KCAL;
 
 export function resolvePipCard({
   calorieTarget,
@@ -103,7 +107,7 @@ export function resolvePipCard({
     return {
       mealType: null,
       state: 'happy',
-      subline: `${kcal(consumedCalories)} of ${kcal(calorieTarget)} kcal logged today.`,
+      subline: `${kj(consumedCalories)} of ${kj(calorieTarget)} kJ logged today.`,
       title: 'Target smashed!',
     };
   }
@@ -115,7 +119,7 @@ export function resolvePipCard({
       mealType: null,
       state: 'confident',
       subline: 'Tomorrow is a clean slate. One day does not undo a week.',
-      title: `${kcal(consumedCalories - calorieTarget)} kcal over today.`,
+      title: `${kj(consumedCalories - calorieTarget)} kJ over today.`,
     };
   }
 
@@ -127,11 +131,11 @@ export function resolvePipCard({
   // lunchtime, the useful thing to say is "time for lunch", not "you missed
   // breakfast" — the design's own note is that guilt loses users.
   if (openWindow && !loggedMealTypes?.has(openWindow.type)) {
-    const suggested = roundTo10(Math.min(remaining, calorieTarget * MEAL_SHARE[openWindow.type]));
+    const suggested = roundToKj50(Math.min(remaining, calorieTarget * MEAL_SHARE[openWindow.type]));
     return {
       mealType: openWindow.type,
       state: 'care',
-      subline: `You’re ${kcal(remaining)} kcal short. A ${kcal(suggested)} kcal ${openWindow.type} keeps today on track.`,
+      subline: `You’re ${kj(remaining)} kJ short. A ${kj(suggested)} kJ ${openWindow.type} keeps today on track.`,
       title: `Time for ${openWindow.type}?`,
     };
   }
@@ -182,7 +186,7 @@ export function resolvePipCard({
       mealType: null,
       state: 'confident',
       subline: 'Plenty of day left to get there.',
-      title: `${kcal(remaining)} kcal to go — easy.`,
+      title: `${kj(remaining)} kJ to go — easy.`,
     };
   }
 

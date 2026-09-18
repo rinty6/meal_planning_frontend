@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import CustomAlert from '../../../components/customAlert';
 import { authedFetch } from '../../../services/authedFetch';
+import { formatEnergy } from '../../../utils/energy';
 import {
     fetchCalorieGoalsWithCache,
     getCachedCalorieGoals,
@@ -120,7 +121,7 @@ const SavedGoalScreen = () => {
             <View className="flex-row items-center space-x-4">
                 <View className="flex-row items-center bg-gray-100 px-3 py-1 rounded-lg">
                     <Ionicons name="flame" size={16} color="orange" />
-                    <Text className="text-gray-700 font-bold ml-2">{item.dailyCalories} kcal/day</Text>
+                    <Text className="text-gray-700 font-bold ml-2">{formatEnergy(item.dailyCalories)}/day</Text>
                 </View>
             </View>
 

@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import type { PredictionResult, FoodCandidate } from '../services/foodRecognitionAPI';
 import { submitFoodFeedback } from '../services/feedbackAPI';
+import { energyValue } from '../utils/energy';
 
 interface Props {
   result: PredictionResult;
@@ -235,7 +236,7 @@ const FoodRecognitionResultModal = ({
               <>
                 <View className="flex-row flex-wrap justify-between">
                   {top.nutrition.calories != null && (
-                    <NutrientBadge label="Calories" value={Math.round(top.nutrition.calories)} unit="kcal" />
+                    <NutrientBadge label="Energy" value={energyValue(top.nutrition.calories) ?? 0} unit="kJ" />
                   )}
                   {top.nutrition.protein_g != null && (
                     <NutrientBadge label="Protein" value={top.nutrition.protein_g.toFixed(1)} unit="g" />

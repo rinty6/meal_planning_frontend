@@ -5,6 +5,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import { authedFetch } from '../../../services/authedFetch';
+import { formatEnergy } from '../../../utils/energy';
 import AddFoodModal from '../../../components/addfoodmodal';
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../../../services/mealLogOutcome';
 import {
@@ -55,7 +56,7 @@ const MealSection = ({ title, items, colorClass, icon, onChangeServings, onDelet
             <Text className="text-white font-bold ml-1 text-xs">Add Food</Text>
           </TouchableOpacity>
         </View>
-        <Text className="text-white/90 font-medium ml-8">{Math.round(totalKcal)} kcal</Text>
+        <Text className="text-white/90 font-medium ml-8">{formatEnergy(totalKcal)}</Text>
       </View>
 
       {/* ITEMS LIST */}
@@ -70,7 +71,7 @@ const MealSection = ({ title, items, colorClass, icon, onChangeServings, onDelet
             <View className="flex-1">
               <Text className="text-gray-900 font-bold text-lg">{item.foodName}</Text>
               <Text className="text-gray-500 text-xs mt-1">
-                {Math.round(Number(item.calories) || 0)} kcal | P: {round1(item.protein)}g . C: {round1(item.carbs)}g . F: {round1(item.fats)}g
+                {formatEnergy(item.calories)} | P: {round1(item.protein)}g . C: {round1(item.carbs)}g . F: {round1(item.fats)}g
               </Text>
               <Text className="text-gray-400 text-xs mt-0.5">{formatServings(servings)} serving{servings === 1 ? '' : 's'}</Text>
             </View>

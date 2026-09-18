@@ -12,6 +12,7 @@ import TextInputArea from '../../../components/TextInput';
 import Button from '../../../components/Button';
 import SuccessModal from '../../../components/sucessmodal';
 import CustomAlert from '../../../components/customAlert';
+import { formatEnergy, parseEnergyInput } from '../../../utils/energy';
 
 const addDays = (date: Date, days: number) => {
   const next = new Date(date);
@@ -73,7 +74,8 @@ const GoalSettingScreen = () => {
 
                 if (res.ok && !controller.signal.aborted) {
                     setGoalName(data.goalName);
-                    setDailyCalories(String(data.dailyCalories));
+                    // Stored in kcal; the field is edited in kJ (utils/energy.ts, Phase 8).
+                    setDailyCalories(formatEnergy(data.dailyCalories, { withUnit: false }).replace(/,/g, ''));
                     setDescription(data.description || "");
                     setStartDate(new Date(data.startDate));
                     setEndDate(new Date(data.endDate));
@@ -120,6 +122,12 @@ const GoalSettingScreen = () => {
           showCustomAlert("Missing Fields", "Please fill in all required fields.");
           return;
       }
+      // The field is typed in kJ; users.daily_calories is an integer kcal column.
+      const dailyCaloriesKcal = parseEnergyInput(dailyCalories);
+      if (dailyCaloriesKcal === null || dailyCaloriesKcal <= 0) {
+          showCustomAlert("Check the energy target", "Enter your daily energy target in kilojoules, for example 8700.");
+          return;
+      }
 
       setLoading(true);
       try {
@@ -127,7 +135,7 @@ const GoalSettingScreen = () => {
           const payload = {
               clerkId: userId,
               goalName,
-              dailyCalories,
+              dailyCalories: Math.round(dailyCaloriesKcal),
               description,
               // Convert Date objects to local YYYY-MM-DD strings for DB.
               startDate: formatLocalYYYYMMDD(startDate),
@@ -187,8 +195,8 @@ const GoalSettingScreen = () => {
         <Text className="font-bold mb-2 ml-1">Goal Name *</Text>
         <TextInputArea placeholder="e.g. Summer Fitness Goal" value={goalName} onChangeText={setGoalName} />
 
-        <Text className="font-bold mb-2 ml-1">Daily Calorie Target (kcal) *</Text>
-        <TextInputArea placeholder="e.g. 2000" value={dailyCalories} onChangeText={setDailyCalories} keyboardType="numeric" />
+        <Text className="font-bold mb-2 ml-1">Daily Energy Target (kJ) *</Text>
+        <TextInputArea placeholder="e.g. 8700" value={dailyCalories} onChangeText={setDailyCalories} keyboardType="numeric" />
 
         <Text className="font-bold mb-2 ml-1">Description (optional)</Text>
         <TextInputArea placeholder="Add any additional notes..." value={description} onChangeText={setDescription} />

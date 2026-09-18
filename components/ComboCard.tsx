@@ -7,6 +7,7 @@ import { Image as ExpoImage } from "expo-image";
 import Food3DIcon from "./Food3DIcon";
 import { markFavoritesDirty } from "../services/favoritesStore";
 import { authedFetch } from "../services/authedFetch";
+import { formatEnergy } from "../utils/energy";
 
 const FOOD_IMAGE_BLURHASH = "L6Pj0^i_.AyE_3t7t7R**0o#DgR4";
 
@@ -179,7 +180,7 @@ const ComboCard = ({
 
           <View className="flex-row items-center mb-2">
             <Ionicons name="flame-outline" size={15} color="#6B7280" />
-            <Text className="text-gray-600 text-xs ml-1 mr-3">{Math.round(Number(totalCalories || 0))} kcal</Text>
+            <Text className="text-gray-600 text-xs ml-1 mr-3">{formatEnergy(totalCalories)}</Text>
             <Ionicons name={isRecipeItem && comboItems.length <= 1 ? "restaurant-outline" : "scale-outline"} size={15} color="#6B7280" />
             <Text className="text-gray-600 text-xs ml-1">{servingText}</Text>
           </View>

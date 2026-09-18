@@ -17,7 +17,8 @@ import {
 import FoodFactsCard from "../../../components/FoodFactsCard";
 import { buildNutritionFactsFromFood, fetchFoodDetailForFacts, getRecipeDetails } from "../../../services/mealAPI";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
-import { getServingsCount, formatKcal, formatGrams } from "../../../services/recipeNutrition";
+import { getServingsCount, formatGrams } from "../../../services/recipeNutrition";
+import { formatEnergy } from "../../../utils/energy";
 import { peekCachedRecommendations } from "../../../services/recommendation";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
 import { authedFetch } from "../../../services/authedFetch";
@@ -534,7 +535,7 @@ const FoodDetailScreen = () => {
             <View style={{ gap: 9 }}>
               <View className="flex-row items-center self-start bg-white border border-gray-200 px-4 py-2 rounded-full shadow-sm">
                 <Ionicons name="flame" size={19} color="#FF9500" />
-                <Text className="font-bold ml-2 text-base">{formatKcal(Number(totalCalories) * recipeServingsCount)} kcal</Text>
+                <Text className="font-bold ml-2 text-base">{formatEnergy(Number(totalCalories) * recipeServingsCount)}</Text>
                 {scaleForTotal ? (
                   <Text className="text-gray-400 ml-1 text-xs">· whole recipe</Text>
                 ) : null}
@@ -641,7 +642,7 @@ const FoodDetailScreen = () => {
                   </TouchableOpacity>
                 </View>
                 <Text className="text-gray-400 text-center text-xs mb-6">
-                  = {Math.round(Number(totalCalories) * logServings)} kcal
+                  = {formatEnergy(Number(totalCalories) * logServings)}
                 </Text>
 
                 <Text className="text-gray-400 text-center text-sm mb-4">When are you eating this?</Text>

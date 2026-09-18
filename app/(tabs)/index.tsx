@@ -25,6 +25,7 @@ import PipReminderCard from '../../components/pip/PipReminderCard';
 import { extractLoggedMealTypes, resolvePipCard } from '../../components/pip/pipHomeState';
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../../services/mealLogOutcome';
 import { authedFetch } from '../../services/authedFetch';
+import { energyValue, formatEnergy } from '../../utils/energy';
 import {
     fetchAndCacheHomeDashboard,
     buildTargetMacros,
@@ -431,7 +432,7 @@ const HomeScreen = () => {
                                 Target
                             </Text>
                             <Text className="text-base font-bold text-textPrimary">
-                                {formatWholeNumber(calorieTarget)} kcal / day
+                                {formatEnergy(calorieTarget)} / day
                             </Text>
                         </View>
                         <Ionicons name="ellipsis-horizontal" size={20} color="#A0AEC0" />
@@ -439,10 +440,10 @@ const HomeScreen = () => {
 
                     <View className="flex-row justify-between items-center mb-2">
                         <Text className="text-xs text-textSecondary">
-                            {formatWholeNumber(consumedCalories)} consumed
+                            {formatEnergy(consumedCalories)} consumed
                         </Text>
                         <Text className={`text-xs font-bold ${isCalorieOverTarget ? 'text-error' : 'text-success'}`}>
-                            {formatWholeNumber(isCalorieOverTarget ? exhaustedCalories : remainingCalories)} {isCalorieOverTarget ? 'exhausted' : 'remaining'}
+                            {formatEnergy(isCalorieOverTarget ? exhaustedCalories : remainingCalories)} {isCalorieOverTarget ? 'exhausted' : 'remaining'}
                         </Text>
                     </View>
 
@@ -507,8 +508,8 @@ const HomeScreen = () => {
                             animated={true}
                         />
                         <CircularProgress 
-                            value={macros.consumed.calories} 
-                            maxValue={calorieTarget} 
+                            value={energyValue(macros.consumed.calories) ?? 0} 
+                            maxValue={energyValue(calorieTarget) ?? 1} 
                             radius={27}
                             strokeWidth={5}
                             color={THEME_COLORS.success}
@@ -516,8 +517,8 @@ const HomeScreen = () => {
                             valueColor={THEME_COLORS.textPrimary}
                             labelColor={THEME_COLORS.textSecondary}
                             percentColor={THEME_COLORS.success}
-                            label="Calories"
-                            unit="cal"
+                            label="Energy"
+                            unit="kJ"
                             showConsumed={true}
                             showPercent={true}
                             animated={true}

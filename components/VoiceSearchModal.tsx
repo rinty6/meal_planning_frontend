@@ -49,6 +49,7 @@ import { searchFoodItems, searchRecipes } from '../services/mealAPI';
 import { authedFetch } from '../services/authedFetch';
 import { markMealsSummaryDirty } from '../services/mealsSummaryStore';
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../services/mealLogOutcome';
+import { formatEnergy } from '../utils/energy';
 import { PipActionStatusCard, usePipActionStatus } from './pip/PipActionStatusCard';
 import PipBird from './pip/PipBird';
 
@@ -687,7 +688,7 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
                           </View>
                           <View style={[styles.macroPill, { backgroundColor: '#DFF7EF' }]}>
                             <Text style={[styles.macroText, { color: '#0E9F6E' }]}>
-                              {Math.round(toNumber(item?.calories))} cal
+                              {formatEnergy(item?.calories)}
                             </Text>
                           </View>
                         </View>
@@ -747,7 +748,7 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.stepperPreview}>
-                  = {Math.round(toNumber(pendingItem?.calories) * logServings)} kcal
+                  = {formatEnergy(toNumber(pendingItem?.calories) * logServings)}
                 </Text>
 
                 <Text style={styles.pickerLabel}>When are you eating this?</Text>

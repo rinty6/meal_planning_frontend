@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import IngredientIcon from './IngredientIcon';
 import { authedFetch } from '../services/authedFetch';
+import { formatEnergy } from '../utils/energy';
 
 interface RecentMealsModalProps {
   visible: boolean;
@@ -91,7 +92,7 @@ const RecentMealsModal = ({ visible, onClose, onAddSelected }: RecentMealsModalP
                 <Text className="text-gray-900 font-bold text-base" numberOfLines={1}>{meal.foodName}</Text>
                 <View className="flex-row items-center mt-1">
                   <Ionicons name="flame-outline" size={14} color="#FF9500" />
-                  <Text className="text-gray-500 text-xs ml-1">{Math.round(meal.calories)} kcal</Text>
+                  <Text className="text-gray-500 text-xs ml-1">{formatEnergy(meal.calories)}</Text>
                 </View>
               </View>
             </TouchableOpacity>

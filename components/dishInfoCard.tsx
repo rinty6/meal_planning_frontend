@@ -4,6 +4,7 @@
 import { View, Text, Image, TouchableOpacity } from 'react-native';
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { formatEnergy } from '../utils/energy';
 
 interface RecipeCardProps {
   title: string;
@@ -42,7 +43,7 @@ const RecipeCard = ({ title, calories, time, image, onAdd, onToggleFavorite, isF
         <View className="flex-row items-center space-x-4 mt-1">
           <View className="flex-row items-center">
             <Ionicons name="flame" size={18} color="orange" />
-            <Text className="text-gray-500 text-sm ml-1 font-medium">{calories} kcal</Text>
+            <Text className="text-gray-500 text-sm ml-1 font-medium">{formatEnergy(calories)}</Text>
           </View>
 
           <Text className="text-gray-300 mx-1">|</Text>

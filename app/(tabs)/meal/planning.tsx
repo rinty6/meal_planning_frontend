@@ -48,6 +48,7 @@ import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from 
 import { getCachedHomeSnapshot } from "../../../services/homeStore";
 import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { authedFetch } from "../../../services/authedFetch";
+import { energyValue, formatEnergy, parseEnergyInput } from "../../../utils/energy";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
 
 const ALLERGEN_OPTIONS = [
@@ -81,7 +82,8 @@ const DIET_DETAILS = [
 ];
 
 const NUTRIENT_OPTIONS = [
-  { key: "calories", label: "Calories", unit: "kcal" },
+  // Energy is edited and shown in kJ; the stored limit stays kcal (utils/energy.ts).
+  { key: "calories", label: "Energy", unit: "kJ" },
   { key: "protein", label: "Protein", unit: "g" },
   { key: "carbs", label: "Carbs", unit: "g" },
   { key: "fat", label: "Fat", unit: "g" },
@@ -112,9 +114,11 @@ const formatNutrientChip = (key: string, value: { min?: number; max?: number }) 
   const option = NUTRIENT_OPTIONS.find((item) => item.key === key);
   const label = option?.label || key;
   const unit = option?.unit || "";
-  if (value.min !== undefined && value.max !== undefined) return `${label} ${value.min}-${value.max}${unit}`;
-  if (value.min !== undefined) return `${label} >= ${value.min}${unit}`;
-  if (value.max !== undefined) return `${label} <= ${value.max}${unit}`;
+  // Limits are stored in kcal; the chip reads in the display unit.
+  const show = (n: number) => (key === "calories" ? String(energyValue(n) ?? n) : String(n));
+  if (value.min !== undefined && value.max !== undefined) return `${label} ${show(value.min)}-${show(value.max)}${unit}`;
+  if (value.min !== undefined) return `${label} >= ${show(value.min)}${unit}`;
+  if (value.max !== undefined) return `${label} <= ${show(value.max)}${unit}`;
   return label;
 };
 
@@ -210,10 +214,10 @@ const DishCard = ({
               </Text>
               <View className="flex-row items-baseline" style={{ gap: 5 }}>
                 <Text className="text-secondary" style={{ fontSize: 24, fontWeight: "800" }}>
-                  {Math.round(toNumber(item?.calories))}
+                  {formatEnergy(item?.calories, { withUnit: false })}
                 </Text>
                 <Text className="text-gray-500" style={{ fontSize: 12, fontWeight: "600" }}>
-                  kcal · {servingText}
+                  kJ · {servingText}
                 </Text>
               </View>
               {isRecipeItem ? (
@@ -715,9 +719,11 @@ const PlanningScreen = () => {
     setDraftPreferences((current) => {
       const nextLimits = { ...(current.nutrientLimits || {}) };
       const nextValue = { ...(nextLimits[key] || {}) };
-      const parsed = value.trim() === "" ? undefined : Number(value);
+      // The energy field is typed in kJ; every limit is stored in kcal, which is
+      // what the recommendation API and the recipe/food rows use.
+      const parsed = value.trim() === "" ? undefined : key === "calories" ? parseEnergyInput(value) : Number(value);
 
-      if (parsed === undefined || !Number.isFinite(parsed)) {
+      if (parsed === undefined || parsed === null || !Number.isFinite(parsed)) {
         delete nextValue[side];
       } else {
         nextValue[side] = Math.max(0, parsed);
@@ -1184,10 +1190,10 @@ const PlanningScreen = () => {
         <View className="bg-gray-50 rounded-2xl p-4 mb-5 border border-gray-200">
           <Text className="text-gray-700 font-bold mb-2">
             {dailyCalorieTarget !== null
-              ? `Calorie target: ${consumedCalories}/${dailyCalorieTarget} kcal`
+              ? `Energy target: ${formatEnergy(consumedCalories, { withUnit: false })}/${formatEnergy(dailyCalorieTarget)}`
               : loadingDailyProgress
-                ? "Calorie target: Loading..."
-                : "Calorie target unavailable"}
+                ? "Energy target: Loading..."
+                : "Energy target unavailable"}
           </Text>
           <View className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
             <View style={{ width: `${Math.round(progressRatio * 100)}%` }} className="h-2 bg-primary rounded-full" />
@@ -1503,7 +1509,7 @@ const PlanningScreen = () => {
                           <View className="flex-1">
                             <Text className="text-[11px] text-gray-400 mb-1">MIN</Text>
                             <TextInput
-                              value={limit.min === undefined ? "" : String(limit.min)}
+                              value={limit.min === undefined ? "" : String(nutrient.key === "calories" ? energyValue(limit.min) : limit.min)}
                               onChangeText={(value) => updateDraftNutrient(nutrient.key, "min", value)}
                               keyboardType="numeric"
                               placeholder="No min"
@@ -1513,7 +1519,7 @@ const PlanningScreen = () => {
                           <View className="flex-1">
                             <Text className="text-[11px] text-gray-400 mb-1">MAX</Text>
                             <TextInput
-                              value={limit.max === undefined ? "" : String(limit.max)}
+                              value={limit.max === undefined ? "" : String(nutrient.key === "calories" ? energyValue(limit.max) : limit.max)}
                               onChangeText={(value) => updateDraftNutrient(nutrient.key, "max", value)}
                               keyboardType="numeric"
                               placeholder="No max"
