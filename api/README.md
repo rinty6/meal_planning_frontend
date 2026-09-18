@@ -36,11 +36,22 @@ api/
     request.ts            authedFetch → ApiResult<T>, AbortSignal, timeout
     cache.ts              TTL + LRU + in-flight dedupe; memory-only unless opted in
   addFood/
-    addFoodApi.ts         searchCatalogFoods(), toMealLogPayload()
-    addFoodApi.types.ts   CatalogFoodHit, CatalogSearchResponse, FoodCardVM
-    addFoodApi.mappers.ts toFoodCardVM(), formatEnergyKj(), formatGrams(), formatServing()
+    addFoodApi.ts         searchCatalogFoods(), toFoodCards(), toLoggableFood()
+    addFoodApi.types.ts   CatalogFoodHit, CatalogSearchResponse, FoodCardVM, LoggableFood
+    addFoodApi.mappers.ts toFoodCardVM(), buildTitleAndChips(), formatGrams(), formatServing()
     addFoodApi.mappers.test.ts
+    core/cache.test.ts
+
+utils/energy.ts         the ONE place energy is converted/formatted (kJ display, kcal storage)
 ```
+
+## Tests
+
+`npm test` runs `node --experimental-strip-types --test` over `api/**/*.test.ts` and
+`utils/**/*.test.ts`. No Jest: the files under test are pure TypeScript with no React
+Native imports, so Node's built-in runner is enough and starts in under a second. Keep it
+that way: anything that needs React Native belongs in a component, not in `api/`.
+Test files import siblings with the `.ts` extension (`tsconfig.json` allows it).
 
 ## Migration map (old layer → `api/`)
 

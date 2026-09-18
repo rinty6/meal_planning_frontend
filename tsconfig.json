@@ -1,5 +1,10 @@
 {
-  "compilerOptions": {},
+  "compilerOptions": {
+    // Type checking only; Metro/Babel emit. Lets test files import "./x.ts" so
+    // Node's runner (`npm test`, --experimental-strip-types) can resolve them.
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
   "extends": "expo/tsconfig.base",
   "include": [
     "**/*.ts",

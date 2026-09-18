@@ -8,7 +8,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test": "node --experimental-strip-types --test \"api/**/*.test.ts\" \"utils/**/*.test.ts\""
   },
   "dependencies": {
     "@clerk/clerk-expo": "2.19.11",
