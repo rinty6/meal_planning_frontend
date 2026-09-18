@@ -273,7 +273,16 @@ export default function SummaryScreen() {
       protein: foodItem.protein,
       carbs: foodItem.carbs,
       fats: foodItem.fats,
-      image: foodItem.image || ""
+      image: foodItem.image || "",
+      // Catalogue rows (api/addFood toLoggableFood) carry their identity and
+      // the serving they were logged at; manual/recognition items leave these
+      // undefined and the backend stores null, exactly as before.
+      externalId: foodItem.externalId || undefined,
+      source: foodItem.source || undefined,
+      servingId: foodItem.servingId || undefined,
+      servingDescription: foodItem.servingDescription || undefined,
+      servings: foodItem.servings || undefined,
+      nutrients: foodItem.nutrients || undefined,
     };
 
     const response = await authedFetch(`/api/meals/add`, {

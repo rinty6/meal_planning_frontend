@@ -17,7 +17,7 @@
  */
 
 import { TtlCache } from "../core/cache";
-import { requestJson, type ApiResult } from "../core/request";
+import { requestJson, type CachedApiResult } from "../core/request";
 import type { GetToken } from "../../services/authedFetch";
 import { toFoodCardVM, toLoggableFood } from "./addFoodApi.mappers";
 import type { CatalogSearchParams, CatalogSearchResponse, FoodCardVM } from "./addFoodApi.types";
@@ -55,7 +55,7 @@ export type SearchCatalogFoodsOptions = {
   signal?: AbortSignal;
 };
 
-export type CatalogSearchResult = ApiResult<CatalogSearchResponse> & { fromCache: boolean };
+export type CatalogSearchResult = CachedApiResult<CatalogSearchResponse>;
 
 /**
  * Search the catalogue. Returns a discriminated result; never throws for an

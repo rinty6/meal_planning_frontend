@@ -7,8 +7,7 @@
  * "Migration map"). ESLint blocks any importer not on the allowlist in
  * eslint.config.js.
  *
- * Remaining importers as of the freeze:
- *   components/addfoodmodal.tsx        searchFoodItems, getFoodById   -> api/addFood/
+ * Remaining importers (addfoodmodal.tsx migrated to api/addFood/ on 2026-09-18):
  *   components/VoiceSearchModal.tsx    searchFoodItems, searchRecipes -> api/addFood/, api/recipes/
  *   app/(tabs)/meal/recipe/index.tsx   searchRecipes                  -> api/recipes/
  *   app/(tabs)/meal/recipedetail.tsx   getRecipeDetails               -> api/recipes/

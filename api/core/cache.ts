@@ -19,7 +19,7 @@
  * Dependency-free on purpose: tested with plain `node --test`.
  */
 
-import type { ApiResult } from "./request";
+import type { ApiResult, CachedApiResult } from "./request";
 
 export type CacheStorage = {
   getItem(key: string): Promise<string | null>;
@@ -117,7 +117,7 @@ export class TtlCache<T> {
     key: string,
     fetcher: (signal?: AbortSignal) => Promise<ApiResult<T>>,
     options: { signal?: AbortSignal } = {},
-  ): Promise<ApiResult<T> & { fromCache: boolean }> {
+  ): Promise<CachedApiResult<T>> {
     await this.ensureLoaded();
     const { signal } = options;
     if (signal?.aborted) return { ok: false, kind: "aborted", status: 0, retryable: false, message: "Request cancelled.", fromCache: false };

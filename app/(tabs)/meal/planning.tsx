@@ -124,7 +124,7 @@ const createItemKey = (item: any) =>
     .toLowerCase();
 
 const getExternalId = (item: any) =>
-  String(item?.fatsecret_food_id || item?.food_id || item?.recipe_id || item?.id || "").trim();
+  String(item?.externalId || item?.fatsecret_food_id || item?.food_id || item?.recipe_id || item?.id || "").trim();
 
 const toNumber = (value: any) => {
   const parsed = Number(value);
@@ -1078,9 +1078,12 @@ const PlanningScreen = () => {
           image: foodItem.image || "",
           externalId: getExternalId(foodItem),
           source: foodItem.source || foodItem.type || "",
-          servingId: foodItem.serving_id || "",
-          servingDescription: foodItem.serving_description || "",
-          nutrients: buildNutrientsSnapshot(foodItem),
+          servingId: foodItem.servingId || foodItem.serving_id || "",
+          servingDescription: foodItem.servingDescription || foodItem.serving_description || "",
+          servings: foodItem.servings || undefined,
+          // Catalogue rows (api/addFood toLoggableFood) bring the full
+          // nutrition_profiles row; keep the legacy snapshot keys alongside it.
+          nutrients: { ...buildNutrientsSnapshot(foodItem), ...(foodItem.nutrients || {}) },
         }),
       });
 

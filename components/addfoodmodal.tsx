@@ -29,7 +29,22 @@ import PipBird from './pip/PipBird';
 import { useAuth } from '@clerk/clerk-expo';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { searchFoodItems, getFoodById } from '../services/mealAPI';
+// Search view reads the self-owned catalogue through api/addFood (checklist
+// Phase 3). searchFoodItems/getFoodById from the frozen services/mealAPI.tsx
+// are no longer imported here; barcode still uses the frozen barcodeAPI until
+// the catalogue barcode route lands (checklist p6-01 / p7-05).
+import {
+  searchCatalogFoods,
+  toFoodCards,
+  toLoggableFood,
+  type CatalogSearchResponse,
+  type CatalogSource,
+  type FoodCardVM,
+} from '../api/addFood/addFoodApi';
+import type { ApiFailure } from '../api/core/request';
+import FoodResultCard from './addfood/FoodResultCard';
+import RefineRow from './addfood/RefineRow';
+import SearchStateMessage from './addfood/SearchStateMessage';
 import { fetchBarcodeData } from '../services/barcodeAPI';
 import { recognizeFood } from '../services/foodRecognitionAPI';
 import type { PredictionResult, FoodCandidate } from '../services/foodRecognitionAPI';
@@ -68,11 +83,23 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   // --- SEARCH ---
+  // Results are FoodCardVMs (api/addFood mappers), never raw hits. Facets feed
+  // the refine row; selectedSegments/selectedSource are the active filters and
+  // re-run the last submitted query. lastFailure drives the honest empty
+  // states: a 429 or a dropped connection must never read as "no foods".
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<any[]>([]);
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [results, setResults] = useState<FoodCardVM[]>([]);
+  const [facets, setFacets] = useState<CatalogSearchResponse['facets'] | null>(null);
+  const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
+  const [selectedSource, setSelectedSource] = useState<CatalogSource | null>(null);
+  const [lastFailure, setLastFailure] = useState<ApiFailure | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasCompletedSearch, setHasCompletedSearch] = useState(false);
   const latestSearchRequestRef = useRef(0);
+  // The in-flight search. Superseding a search aborts it (not just ignores it),
+  // so a stale request cannot hold one of the OS's few connections (ERROR_LOG 064).
+  const searchAbortRef = useRef<AbortController | null>(null);
 
   // --- MANUAL ENTRY ---
   const [manualName, setManualName] = useState('');
@@ -314,41 +341,112 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   // --- SEARCH ---
-  const handleSearch = async () => {
-    const trimmedQuery = query.trim();
+  /**
+   * Run one catalogue search. `filters` is the refine-row state to apply; a
+   * fresh submit passes empty filters, a chip tap passes the new selection.
+   * Each run supersedes the previous one twice over: the request id makes a
+   * stale result invisible, and the AbortController stops it in flight.
+   */
+  const runSearch = async (
+    text: string,
+    filters: { segments: string[]; source: CatalogSource | null },
+  ) => {
+    const trimmedQuery = text.trim();
     if (!trimmedQuery) return;
+
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
     const requestId = latestSearchRequestRef.current + 1;
     latestSearchRequestRef.current = requestId;
+
     setLoading(true);
     setHasCompletedSearch(false);
-    try {
-      const items = await searchFoodItems(trimmedQuery);
-      if (latestSearchRequestRef.current !== requestId) return;
-      setResults(items);
-    } catch {
-      if (latestSearchRequestRef.current !== requestId) return;
+    setLastFailure(null);
+
+    const result = await searchCatalogFoods(
+      { query: trimmedQuery, segments: filters.segments, source: filters.source },
+      { getToken, clerkId: userId, signal: controller.signal },
+    );
+
+    if (latestSearchRequestRef.current !== requestId) return; // superseded: render nothing
+
+    // `=== false`, not `!result.ok`: strictNullChecks is off in this project's
+    // tsconfig, and without it TypeScript will not narrow a discriminated
+    // union by truthiness (api/README.md, "Gotchas").
+    if (result.ok === false) {
+      if (result.kind === 'aborted') return;
+      // Keep the last facets so an active chip can still be un-tapped after a
+      // failure; the list itself shows the failure state, not "no foods".
       setResults([]);
-    } finally {
-      if (latestSearchRequestRef.current === requestId) {
-        setLoading(false);
-        setHasCompletedSearch(true);
-      }
+      setLastFailure(result);
+    } else {
+      setResults(toFoodCards(result.data));
+      setFacets(result.data.facets);
     }
+    setLoading(false);
+    setHasCompletedSearch(true);
+  };
+
+  // Submit (keyboard search key or the Search button): a new query starts
+  // with no filters, otherwise a chip chosen for "beer" would silently narrow
+  // the next search for "chicken".
+  const handleSearch = () => {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) return;
+    setSubmittedQuery(trimmedQuery);
+    setSelectedSegments([]);
+    setSelectedSource(null);
+    void runSearch(trimmedQuery, { segments: [], source: null });
+  };
+
+  const handleToggleSegment = (label: string) => {
+    if (isSavingFood || !submittedQuery) return;
+    const next = selectedSegments.includes(label)
+      ? selectedSegments.filter((s) => s !== label)
+      : [...selectedSegments, label];
+    setSelectedSegments(next);
+    void runSearch(submittedQuery, { segments: next, source: selectedSource });
+  };
+
+  const handleSelectSource = (source: CatalogSource | null) => {
+    if (isSavingFood || !submittedQuery) return;
+    setSelectedSource(source);
+    void runSearch(submittedQuery, { segments: selectedSegments, source });
+  };
+
+  const handleClearFilters = () => {
+    if (isSavingFood || !submittedQuery) return;
+    setSelectedSegments([]);
+    setSelectedSource(null);
+    void runSearch(submittedQuery, { segments: [], source: null });
+  };
+
+  const handleRetrySearch = () => {
+    if (isSavingFood || !submittedQuery) return;
+    void runSearch(submittedQuery, { segments: selectedSegments, source: selectedSource });
   };
 
   const handleSearchTextChange = (text: string) => {
     latestSearchRequestRef.current += 1;
+    searchAbortRef.current?.abort();
     setQuery(text);
     setResults([]);
+    setFacets(null);
+    setSelectedSegments([]);
+    setSelectedSource(null);
+    setLastFailure(null);
     setLoading(false);
     setHasCompletedSearch(false);
   };
 
-  const handleAddClick = (item: any) => {
-    // Adding a search result is two sequential round trips (FatSecret detail
-    // lookup, then the parent's POST). Both sit inside the card's task, so the
-    // guard covers the whole window; a second tap can never log twice.
-    void commitFood(foodLabel(item), () => getFoodById(String(item.id)));
+  const handleAddClick = (vm: FoodCardVM) => {
+    // One round trip, not two: the search hit already carries the default
+    // serving and its nutrition profile, so there is no detail lookup before
+    // the parent's POST (checklist p0-04; ERROR_LOG 071 documented the 3–4 s
+    // window the FatSecret two-step created). The card's task still spans the
+    // whole save, so a second tap can never log twice.
+    void commitFood(vm.title, async () => toLoggableFood(vm));
   };
 
   // --- MANUAL FORM ---
@@ -394,43 +492,11 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   const resetSearchState = () => {
-    setQuery(''); setResults([]); setLoading(false);
-    setHasCompletedSearch(false);
     latestSearchRequestRef.current += 1;
-  };
-
-  const formatMacroValue = (value: any, unit = 'g') => {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed) || parsed < 0) return null;
-    return `${parsed % 1 === 0 ? parsed.toFixed(0) : parsed.toFixed(1)}${unit}`;
-  };
-
-  // FatSecret returns a distinct serving basis per result (e.g. "1 medium (118g)",
-  // "100 g"), which is what makes otherwise-identical foods differ. Surface it so
-  // users can tell the results apart.
-  const buildServingText = (item: any) => {
-    const description = String(item?.serving_description || '').trim();
-    if (description) return description;
-    const amount = Number(item?.metric_serving_amount);
-    const unit = String(item?.metric_serving_unit || '').trim();
-    if (Number.isFinite(amount) && amount > 0) {
-      const amountText = amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(1);
-      return `${amountText} ${unit || 'g'}`.trim();
-    }
-    return '1 serving';
-  };
-
-  const buildSearchResultMacroText = (item: any) => {
-    const protein = formatMacroValue(item?.protein ?? 0);
-    const fats = formatMacroValue(item?.fats ?? item?.fat ?? 0);
-    const carbs = formatMacroValue(item?.carbs ?? item?.carbohydrate ?? 0);
-    const macros = [
-      protein ? `Protein ${protein}` : null,
-      fats ? `Fat ${fats}` : null,
-      carbs ? `Carbs ${carbs}` : null,
-    ].filter(Boolean);
-
-    return macros.length > 0 ? macros.join('  ') : String(item?.description || '').trim();
+    searchAbortRef.current?.abort();
+    setQuery(''); setSubmittedQuery(''); setResults([]); setFacets(null);
+    setSelectedSegments([]); setSelectedSource(null); setLastFailure(null);
+    setLoading(false); setHasCompletedSearch(false);
   };
 
   const closeAndReset = () => {
@@ -507,42 +573,40 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   )}
                 </View>
 
+                <RefineRow
+                  facets={facets}
+                  selectedSegments={selectedSegments}
+                  selectedSource={selectedSource}
+                  onToggleSegment={handleToggleSegment}
+                  onSelectSource={handleSelectSource}
+                  onClearAll={handleClearFilters}
+                  disabled={isSavingFood || loading}
+                />
+
                 {loading ? (
                   <ActivityIndicator size="large" color="#007BFF" className="mt-10" />
                 ) : (
                   <FlatList
                     data={results}
-                    keyExtractor={(item) => String(item.id)}
+                    keyExtractor={(item) => item.key}
                     showsVerticalScrollIndicator={false}
-                    contentContainerStyle={{ paddingBottom: 210 }}
+                    keyboardShouldPersistTaps="handled"
+                    // Cards grew by a chip row; the bar below is ~230 px tall.
+                    contentContainerStyle={{ paddingBottom: 240 }}
                     renderItem={({ item }) => (
-                      <View className="bg-white border border-gray-200 rounded-2xl p-4 mb-3 shadow-sm flex-row justify-between items-center">
-                        <View className="flex-1 mr-4">
-                          <Text className="text-lg font-bold text-black">{item.title}</Text>
-                          <View className="flex-row items-center mt-1">
-                            <Ionicons name="restaurant-outline" size={13} color="#9CA3AF" />
-                            <Text className="text-gray-400 text-xs ml-1" numberOfLines={1}>
-                              Per {buildServingText(item)}
-                            </Text>
-                          </View>
-                          <Text className="text-gray-500 text-xs mt-1" numberOfLines={2}>
-                            {buildSearchResultMacroText(item)}
-                          </Text>
-                        </View>
-                        {/* Every row is disabled while any add is in flight, not just
-                            the tapped one — otherwise a second tap logs a second meal. */}
-                        <TouchableOpacity
-                          onPress={() => handleAddClick(item)}
-                          disabled={isSavingFood}
-                          className={`px-5 py-2 rounded-full ${isSavingFood ? 'bg-blue-300' : 'bg-primary'}`}
-                        >
-                          <Text className="text-white font-bold">Add</Text>
-                        </TouchableOpacity>
-                      </View>
+                      // Every row is disabled while any add is in flight, not just
+                      // the tapped one — otherwise a second tap logs a second meal.
+                      <FoodResultCard vm={item} onAdd={handleAddClick} disabled={isSavingFood} />
                     )}
                     ListEmptyComponent={
-                      hasCompletedSearch && query.trim().length > 0
-                        ? <Text className="text-center text-gray-400 mt-10">No foods found.</Text>
+                      hasCompletedSearch && submittedQuery
+                        ? (
+                          <SearchStateMessage
+                            state={lastFailure ? { kind: 'failure', failure: lastFailure, query: submittedQuery } : { kind: 'empty', query: submittedQuery }}
+                            onRetry={handleRetrySearch}
+                            disabled={isSavingFood}
+                          />
+                        )
                         : null
                     }
                   />

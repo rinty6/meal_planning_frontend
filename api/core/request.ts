@@ -39,6 +39,9 @@ export type ApiSuccess<T> = { ok: true; data: T; status: number };
 
 export type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
+/** An ApiResult annotated with where it came from. Written as a union so `if (!r.ok)` narrows. */
+export type CachedApiResult<T> = (ApiSuccess<T> & { fromCache: boolean }) | (ApiFailure & { fromCache: boolean });
+
 export type QueryValue = string | number | boolean | null | undefined | (string | number)[];
 
 export type RequestOptions = {

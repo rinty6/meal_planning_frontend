@@ -53,6 +53,14 @@ Native imports, so Node's built-in runner is enough and starts in under a second
 that way: anything that needs React Native belongs in a component, not in `api/`.
 Test files import siblings with the `.ts` extension (`tsconfig.json` allows it).
 
+## Gotchas
+
+- **Narrow `ApiResult` with `result.ok === false`, not `!result.ok`.** This project's
+  `tsconfig` extends Expo's base, which does not enable `strict`, so `strictNullChecks`
+  is off and TypeScript will not narrow a discriminated union by truthiness. Equality
+  narrowing works. (Found 2026-09-18 wiring the modal; turning `strict` on is a separate
+  project-wide job.)
+
 ## Migration map (old layer → `api/`)
 
 Strategy decided 2026-09-18: **freeze, then strangle.** The old files keep running until
@@ -63,7 +71,7 @@ Update this table in the same commit as each migration (checklist Phase 7).
 
 | Consumer | Old imports | Target | Status |
 |---|---|---|---|
-| `components/addfoodmodal.tsx` | `mealAPI: searchFoodItems, getFoodById` · `barcodeAPI: fetchBarcodeData` | `api/addFood/` | in progress (this pass: search; barcode in Phase 6) |
+| `components/addfoodmodal.tsx` | ~~`mealAPI: searchFoodItems, getFoodById`~~ (migrated 2026-09-18) · `barcodeAPI: fetchBarcodeData` | `api/addFood/` | search DONE; barcode pending (p6-01 / p7-05) |
 | `components/VoiceSearchModal.tsx` | `mealAPI: searchFoodItems, searchRecipes` | `api/addFood/` (foods) · `api/recipes/` (recipes) | not started |
 | `services/barcodeAPI.tsx` (live Open Food Facts) | — | `api/addFood/` via `GET /api/catalog/foods/barcode/:code` | not started |
 | `app/(tabs)/meal/recipe/index.tsx` | `mealAPI: searchRecipes` | `api/recipes/` | not started (own design pass first) |
