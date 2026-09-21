@@ -193,7 +193,7 @@ export const requestJson = async <T>(path: string, options: RequestOptions = {})
       kindForStatus(response.status),
       response.status,
       serverMessage,
-      serverSaysRetryable || isRetryableStatus(response.status),
+      serverSaysRetryable === true || isRetryableStatus(response.status),
     );
   }
 
