@@ -23,6 +23,7 @@ import {
   Image,
   ScrollView,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   StyleSheet,
 } from 'react-native';
@@ -197,6 +198,11 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   const [chosenServingKey, setChosenServingKey] = useState<string | null>(null);
   const [chosenQuantity, setChosenQuantity] = useState(1);
   const [chosenMeal, setChosenMeal] = useState<string>(mealType);
+  // Which screen opened the picker. The picker is a dialog, not a step: the
+  // screen that opened it stays mounted underneath and Cancel goes back to it.
+  // Without this, "Add to Meal Plan" on the edit form unmounted the form and
+  // read as the app throwing the edit away (feedback 2026-09-23).
+  const [pickerOrigin, setPickerOrigin] = useState<'found' | 'edit'>('found');
   // The edit form, prefilled from the label so "Reset to label" has something
   // to go back to.
   const [editForm, setEditForm] = useState<BarcodeReportForm>(emptyReportForm());
@@ -276,6 +282,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setScanFailure(null);
     setChosenServingKey(null);
     setChosenQuantity(1);
+    setPickerOrigin('found');
     setEditForm(emptyReportForm());
     setLabelForm(emptyReportForm());
   };
@@ -357,8 +364,16 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setBarcodeScanning(true);
   };
 
-  /** Found → picker, or edit → picker. Same destination, same label. */
-  const openServingPicker = () => setBarcodeStage('picker');
+  /** Found → picker, or edit → picker. Same destination, same label, and the
+   *  origin stays on screen behind the dialog. */
+  const openServingPicker = (origin: 'found' | 'edit') => {
+    // The edit form can still have the keyboard up, and the keyboard is an OS
+    // layer above every view (ERROR_LOG 075): it would cover the picker's
+    // confirm button rather than sit behind the dialog.
+    Keyboard.dismiss();
+    setPickerOrigin(origin);
+    setBarcodeStage('picker');
+  };
 
   const commitScannedFood = () => {
     if (!scannedHit) return;
@@ -959,14 +974,17 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
           </View>
         )}
 
-        {!barcodeScanning && barcodeStage === 'found' && scannedHit && (
-          <View style={styles.barcodeOverlay}>
-            <View style={StyleSheet.absoluteFill} className="bg-black/50" />
+        {/* The found sheet and the edit sheet stay mounted while the picker is
+            up: it is a dialog over them, not a screen replacing them. Taps go
+            to the dialog, so the surface underneath is inert. */}
+        {!barcodeScanning && scannedHit
+          && (barcodeStage === 'found' || (barcodeStage === 'picker' && pickerOrigin === 'found')) && (
+          <View style={styles.barcodeOverlay} pointerEvents={barcodeStage === 'picker' ? 'none' : 'auto'}>
             <BarcodeFoundSheet
               vm={toScannedCardVM(scannedHit)}
               barcode={scannedCode}
               source={scannedSource}
-              onAdd={openServingPicker}
+              onAdd={() => openServingPicker('found')}
               onEdit={() => setBarcodeStage('edit')}
               onScanAgain={handleScanAgain}
               onClose={closeScanner}
@@ -975,17 +993,17 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
           </View>
         )}
 
-        {!barcodeScanning && barcodeStage === 'edit' && scannedHit && (
-          <View style={styles.barcodeOverlay}>
+        {!barcodeScanning && scannedHit
+          && (barcodeStage === 'edit' || (barcodeStage === 'picker' && pickerOrigin === 'edit')) && (
+          <View style={styles.barcodeOverlay} pointerEvents={barcodeStage === 'picker' ? 'none' : 'auto'}>
             <BarcodeEditForm
               form={editForm}
               barcode={scannedCode}
               isPristine={JSON.stringify(editForm) === JSON.stringify(labelForm)}
               onChange={(patch) => setEditForm((current) => ({ ...current, ...patch }))}
               onReset={() => setEditForm(labelForm)}
-              onSubmit={openServingPicker}
+              onSubmit={() => openServingPicker('edit')}
               onBack={() => setBarcodeStage('found')}
-              onClose={closeScanner}
               disabled={isSavingFood}
             />
           </View>
@@ -1002,7 +1020,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
               onChangeQuantity={setChosenQuantity}
               onChangeMeal={(meal: MealTypeLabel) => setChosenMeal(meal)}
               onConfirm={commitScannedFood}
-              onCancel={() => setBarcodeStage('found')}
+              onCancel={() => setBarcodeStage(pickerOrigin)}
             />
           </View>
         )}

@@ -3,9 +3,11 @@
  * carrying the same card the search results use, so a scanned food and a
  * searched food are the same object to the user.
  *
- * Three actions and no more: add it, correct it, scan the next one. The ✕
- * beside the title closes the whole scanner, and while this sheet is up the
- * camera's own ✕ is hidden so there is exactly one way out on screen.
+ * Three actions and no more: add it, correct it, scan the next one. There is
+ * no ✕ on the sheet (feedback 2026-09-23): "Scan again" goes back to the
+ * camera, which carries the only close button in the flow. Tapping the dimmed
+ * area above the sheet also backs out, which is what a sheet is expected to do
+ * and what keeps a user who does not want either action from being stuck.
  *
  * A live Open Food Facts answer says so under the numbers. It is the same
  * label data our import reads, but nobody on our side has checked this one,
@@ -13,7 +15,7 @@
  */
 
 import React from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import type { FoodCardVM } from '../../api/addFood/addFoodApi.types';
@@ -29,6 +31,7 @@ type Props = {
   onAdd: () => void;
   onEdit: () => void;
   onScanAgain: () => void;
+  /** Backing out of the whole barcode flow, onto the Add Food sheet. */
   onClose: () => void;
   disabled: boolean;
 };
@@ -37,8 +40,16 @@ const BarcodeFoundSheet = ({ vm, barcode, source, onAdd, onEdit, onScanAgain, on
   const brand = vm.tag.kind === 'brand' ? vm.tag.name : null;
 
   return (
-    <View className="absolute left-0 right-0 bottom-0">
-      <View className="rounded-t-3xl px-4 pt-2.5 pb-5" style={{ backgroundColor: '#FFFFFF' }}>
+    <View style={StyleSheet.absoluteFill}>
+      {/* The dim area is the way out now that the ✕ has gone. */}
+      <Pressable
+        style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)' }]}
+        onPress={disabled ? undefined : onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close the scanner"
+      />
+
+      <View className="absolute left-0 right-0 bottom-0 rounded-t-3xl px-4 pt-2.5 pb-5" style={{ backgroundColor: '#FFFFFF' }}>
         <View className="self-center rounded-full mb-2.5" style={{ width: 40, height: 5, backgroundColor: '#E3E8EF' }} />
 
         <View className="flex-row items-center mb-1.5">
@@ -47,16 +58,6 @@ const BarcodeFoundSheet = ({ vm, barcode, source, onAdd, onEdit, onScanAgain, on
             <Text className="text-lg font-extrabold" style={{ color: '#0B2149' }}>Found it!</Text>
             <Text className="text-[11.5px]" style={{ color: '#6B7280' }}>Barcode {barcode}</Text>
           </View>
-          <TouchableOpacity
-            onPress={onClose}
-            disabled={disabled}
-            accessibilityRole="button"
-            accessibilityLabel="Close the scanner"
-            className="rounded-full items-center justify-center"
-            style={{ width: 30, height: 30, backgroundColor: '#EEF2F6' }}
-          >
-            <Ionicons name="close" size={16} color="#5B6676" />
-          </TouchableOpacity>
         </View>
 
         {/* The Design 3 card, laid out for a sheet rather than a list row. */}
@@ -125,7 +126,7 @@ const BarcodeFoundSheet = ({ vm, barcode, source, onAdd, onEdit, onScanAgain, on
         </TouchableOpacity>
 
         <TouchableOpacity onPress={onScanAgain} disabled={disabled} accessibilityRole="button" className="py-3 items-center">
-          <Text className="font-bold text-[13px]" style={{ color: disabled ? '#BFDBFE' : '#007BFF' }}>Scan another</Text>
+          <Text className="font-bold text-[13px]" style={{ color: disabled ? '#BFDBFE' : '#007BFF' }}>Scan again</Text>
         </TouchableOpacity>
       </View>
     </View>
