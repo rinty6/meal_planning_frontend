@@ -4,9 +4,10 @@
  * Four view modes rendered inside a single Modal — no nested modals, no overlays:
  *   'search'      — search bar + results + 3 action buttons
  *   'manual'      — image, name, macros, save button
- *   'barcode'     — full-screen camera scanner (own nested Modal). Its own
- *                   stages render OVER the live frame: looking up, found,
- *                   edit, picker. The camera is never torn down between them.
+ *   'barcode'     — camera scanner in its own Modal, which covers ONLY the
+ *                   aiming stage. Everything after a decode (looking up,
+ *                   found, edit, picker) renders over this modal's own UI
+ *                   behind the usual dim scrim.
  *   'recognition' — food recognition result view
  */
 
@@ -168,11 +169,18 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     });
 
   // --- BARCODE ---
-  // One nested Modal for the whole scan, with a stage inside it (Design C).
-  // The camera keeps running underneath every stage, which is what makes
-  // "Scan another" instant and what the design is built around.
+  // Stages of one scan:
   //
   //   scanning → looking → found → (edit) → picker → the shared Pip card
+  //
+  // Only `scanning` needs the camera, and only `scanning` gets the nested
+  // Modal. The first draft kept the camera mounted under every stage so
+  // "Scan another" would be instant; on a device that put a LIVE, moving
+  // camera behind the result sheet, which is both distracting and a green
+  // recording indicator the user cannot explain (feedback 2026-09-23).
+  // Everything after a decode now renders over this modal's own content
+  // behind the same scrim the alert and the save card use, which is also what
+  // the rest of the app does.
   //
   // `report` is Phase 5; the stage exists here so the type is complete.
   type BarcodeStage = 'scanning' | 'looking' | 'found' | 'edit' | 'picker' | 'report';
@@ -295,6 +303,10 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setScannedHit(null);
     setScanFailure(null);
     setBarcodeStage('looking');
+    // The camera has done its job. Closing the Modal here also gives the
+    // lookup card a still background to appear on, and the dismiss animation
+    // reads as the deliberate hand-off the old flow faked with a timer.
+    setBarcodeScanning(false);
     const startedAt = Date.now();
 
     const lookup = await lookupBarcode(code, { getToken, clerkId: userId });
@@ -305,6 +317,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     if (lookup.ok === false) {
       setScanFailure(lookup);
       setBarcodeStage('scanning');
+      setBarcodeScanning(true); // back to the frame, with the reason on it
       isProcessingRef.current = false;
       return;
     }
@@ -319,7 +332,6 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
         'Not in our catalogue yet',
         `We could not find barcode ${lookup.data.barcode}. Add it with "Add Food Manually" for now.`,
       );
-      setBarcodeScanning(false);
       return;
     }
 
@@ -342,6 +354,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setScanFailure(null);
     setBarcodeStage('scanning');
     isProcessingRef.current = false;
+    setBarcodeScanning(true);
   };
 
   /** Found → picker, or edit → picker. Same destination, same label. */
@@ -904,19 +917,16 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                 </View>
               ) : (
                 <>
-                  {/* The camera stays mounted under every stage: tearing it
-                      down and rebuilding it between steps is what made the old
-                      flow feel like three separate screens. */}
                   <BarcodeScanner
                     active={barcodeStage === 'scanning' && !isSavingFood}
                     onScanned={handleBarcodeScan}
                     onClose={closeScanner}
-                    showClose={barcodeStage === 'scanning'}
+                    showClose
                   />
 
                   {/* A lookup that failed is not a product we do not have. It
                       says so on the live frame and lets the user try again. */}
-                  {barcodeStage === 'scanning' && scanFailure && (
+                  {scanFailure && (
                     <View className="absolute left-0 right-0 bottom-0 px-4 pb-10">
                       <View className="rounded-2xl px-4 py-3" style={{ backgroundColor: 'rgba(15,23,42,0.92)' }}>
                         <Text className="text-white font-bold text-[14px]">
@@ -934,61 +944,67 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                       </View>
                     </View>
                   )}
-
-                  {barcodeStage === 'looking' && (
-                    <BarcodeLookupCard barcode={scannedCode} stage={lookupStage} />
-                  )}
-
-                  {barcodeStage === 'found' && scannedHit && (
-                    <BarcodeFoundSheet
-                      vm={toScannedCardVM(scannedHit)}
-                      barcode={scannedCode}
-                      source={scannedSource}
-                      onAdd={openServingPicker}
-                      onEdit={() => setBarcodeStage('edit')}
-                      onScanAgain={handleScanAgain}
-                      onClose={closeScanner}
-                      disabled={isSavingFood}
-                    />
-                  )}
-
-                  {barcodeStage === 'edit' && scannedHit && (
-                    <BarcodeEditForm
-                      form={editForm}
-                      barcode={scannedCode}
-                      isPristine={JSON.stringify(editForm) === JSON.stringify(labelForm)}
-                      onChange={(patch) => setEditForm((current) => ({ ...current, ...patch }))}
-                      onReset={() => setEditForm(labelForm)}
-                      onSubmit={openServingPicker}
-                      onBack={() => setBarcodeStage('found')}
-                      onClose={closeScanner}
-                      disabled={isSavingFood}
-                    />
-                  )}
-
-                  {barcodeStage === 'picker' && scannedHit && !isSavingFood && (
-                    <MealServingPicker
-                      servings={scannedHit.servings}
-                      selectedServingKey={chosenServingKey}
-                      quantity={chosenQuantity}
-                      selectedMeal={chosenMeal}
-                      onChangeServing={setChosenServingKey}
-                      onChangeQuantity={setChosenQuantity}
-                      onChangeMeal={(meal: MealTypeLabel) => setChosenMeal(meal)}
-                      onConfirm={commitScannedFood}
-                      onCancel={() => setBarcodeStage(scannedHit ? 'found' : 'scanning')}
-                    />
-                  )}
-
-                  {/* The save card lives wherever the user is looking. While
-                      the scanner Modal is up it must render INSIDE it, or it
-                      would be hidden behind the camera (ERROR_LOG 019, 055:
-                      never a second native Modal). */}
-                  <PipActionStatusCard {...pipStatus.cardProps} />
                 </>
               )}
             </View>
           </Modal>
+        )}
+
+        {/* Everything after the decode, over this modal's own UI. Same scrim,
+            same layer discipline as the alert below and the save card above
+            it: one surface at a time, no nested Modal (Errors 019, 055). */}
+        {!barcodeScanning && barcodeStage === 'looking' && (
+          <View style={styles.barcodeOverlay} pointerEvents="auto">
+            <BarcodeLookupCard barcode={scannedCode} stage={lookupStage} />
+          </View>
+        )}
+
+        {!barcodeScanning && barcodeStage === 'found' && scannedHit && (
+          <View style={styles.barcodeOverlay}>
+            <View style={StyleSheet.absoluteFill} className="bg-black/50" />
+            <BarcodeFoundSheet
+              vm={toScannedCardVM(scannedHit)}
+              barcode={scannedCode}
+              source={scannedSource}
+              onAdd={openServingPicker}
+              onEdit={() => setBarcodeStage('edit')}
+              onScanAgain={handleScanAgain}
+              onClose={closeScanner}
+              disabled={isSavingFood}
+            />
+          </View>
+        )}
+
+        {!barcodeScanning && barcodeStage === 'edit' && scannedHit && (
+          <View style={styles.barcodeOverlay}>
+            <BarcodeEditForm
+              form={editForm}
+              barcode={scannedCode}
+              isPristine={JSON.stringify(editForm) === JSON.stringify(labelForm)}
+              onChange={(patch) => setEditForm((current) => ({ ...current, ...patch }))}
+              onReset={() => setEditForm(labelForm)}
+              onSubmit={openServingPicker}
+              onBack={() => setBarcodeStage('found')}
+              onClose={closeScanner}
+              disabled={isSavingFood}
+            />
+          </View>
+        )}
+
+        {!barcodeScanning && barcodeStage === 'picker' && scannedHit && !isSavingFood && (
+          <View style={styles.barcodeOverlay}>
+            <MealServingPicker
+              servings={scannedHit.servings}
+              selectedServingKey={chosenServingKey}
+              quantity={chosenQuantity}
+              selectedMeal={chosenMeal}
+              onChangeServing={setChosenServingKey}
+              onChangeQuantity={setChosenQuantity}
+              onChangeMeal={(meal: MealTypeLabel) => setChosenMeal(meal)}
+              onConfirm={commitScannedFood}
+              onCancel={() => setBarcodeStage('found')}
+            />
+          </View>
         )}
 
         {/* In-modal alert overlay. Keeping this inside a full-screen parent lets
@@ -1026,10 +1042,9 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
             surface, and sits above alertOverlay so a save in flight always
             wins the layer order.
 
-            While the scanner Modal is open it renders INSIDE that Modal
-            instead (see above): this copy would be behind the camera, and
-            rendering both would run two copies of one status. */}
-        {!barcodeScanning && <PipActionStatusCard {...pipStatus.cardProps} style={styles.savingOverlay} />}
+            The scanner Modal is only ever open on the aiming stage, and no
+            save can start there, so this is the only copy again. */}
+        <PipActionStatusCard {...pipStatus.cardProps} style={styles.savingOverlay} />
         </View>
       </Modal>
     </>
@@ -1045,6 +1060,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
+  },
+  // The barcode stages after a decode. Under the alert and the save card, over
+  // the modal's own content. Each stage brings its own backdrop, so this layer
+  // carries position and order only.
+  barcodeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9998,
+    elevation: 9998,
   },
   // Sits above alertOverlay so a save in flight always wins the layer order.
   // Only the layer order: the card brings its own backdrop and geometry.
