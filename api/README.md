@@ -40,7 +40,13 @@ api/
     addFoodApi.types.ts   CatalogFoodHit, CatalogSearchResponse, FoodCardVM, LoggableFood
     addFoodApi.mappers.ts toFoodCardVM(), buildTitleAndChips(), formatGrams(), formatServing()
     addFoodApi.mappers.test.ts
-    core/cache.test.ts
+  barcode/
+    barcodeApi.ts         lookupBarcode(), submitBarcodeReport()
+    barcodeApi.types.ts   BarcodeHit (a CatalogFoodHit + barcode + every serving), report shapes
+    barcodeApi.mappers.ts serving choice + quantity, the report form, toLoggableScannedFood()
+    barcodeApi.test.ts
+  core/
+    cache.test.ts
 
 utils/energy.ts         the ONE place energy is converted/formatted (kJ display, kcal storage)
 ```
@@ -53,8 +59,19 @@ Native imports, so Node's built-in runner is enough and starts in under a second
 that way: anything that needs React Native belongs in a component, not in `api/`.
 Test files import siblings with the `.ts` extension (`tsconfig.json` allows it).
 
+A file the test runner loads must use `.ts` on its **runtime** imports too, because
+Node's ESM resolver does not guess extensions; type-only imports are erased and need
+nothing. `api/barcode/barcodeApi.mappers.ts` is the first source file to do this, and
+Metro was checked against it directly (a probe bundle resolved the specifiers) rather
+than assumed. Keep runtime imports out of a `*.mappers.ts` where you can: a mapper with
+none is testable no matter what the resolver does.
+
 ## Gotchas
 
+- **A "not found" is a SUCCESS, not a failure.** `lookupBarcode` resolves `ok: true`
+  with `data.found === false` when the catalogue and Open Food Facts both miss, because
+  that is the answer the report form is for. Read `result.ok` first and `data.found`
+  second; collapsing them is the mistake ERROR_LOG 063 and 065 describe.
 - **Narrow `ApiResult` with `result.ok === false`, not `!result.ok`.** This project's
   `tsconfig` extends Expo's base, which does not enable `strict`, so `strictNullChecks`
   is off and TypeScript will not narrow a discriminated union by truthiness. Equality
@@ -71,9 +88,9 @@ Update this table in the same commit as each migration (checklist Phase 7).
 
 | Consumer | Old imports | Target | Status |
 |---|---|---|---|
-| `components/addfoodmodal.tsx` | ~~`mealAPI: searchFoodItems, getFoodById`~~ (migrated 2026-09-18) · `barcodeAPI: fetchBarcodeData` | `api/addFood/` | search DONE; barcode pending (p6-01 / p7-05) |
+| `components/addfoodmodal.tsx` | ~~`mealAPI: searchFoodItems, getFoodById`~~ (migrated 2026-09-18) · `barcodeAPI: fetchBarcodeData` | `api/addFood/` · `api/barcode/` | search DONE; barcode layer built 2026-09-23, the modal still calls `barcodeAPI` until Phase 4 rewires it |
 | `components/VoiceSearchModal.tsx` | `mealAPI: searchFoodItems, searchRecipes` | `api/addFood/` (foods) · `api/recipes/` (recipes) | not started |
-| `services/barcodeAPI.tsx` (live Open Food Facts) | — | `api/addFood/` via `GET /api/catalog/foods/barcode/:code` | not started |
+| `services/barcodeAPI.tsx` (live Open Food Facts) | — | `api/barcode/` via `GET /api/catalog/foods/barcode/:code` | replacement BUILT (lookup + label report). Delete the file at zero importers, after Phase 4/5 (checklist b7-01, b7-02) |
 | `app/(tabs)/meal/recipe/index.tsx` | `mealAPI: searchRecipes` | `api/recipes/` | not started (own design pass first) |
 | `app/(tabs)/meal/recipedetail.tsx` | `mealAPI: getRecipeDetails` · `themealdbAPI` | `api/recipes/` | not started |
 | `app/(tabs)/meal/explore.tsx` | `themealdbAPI: getCuisines, getDishesByCuisine` | `api/recipes/` (catalog categories) | not started |
