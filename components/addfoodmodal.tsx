@@ -4,7 +4,9 @@
  * Four view modes rendered inside a single Modal — no nested modals, no overlays:
  *   'search'      — search bar + results + 3 action buttons
  *   'manual'      — image, name, macros, save button
- *   'barcode'     — full-screen camera scanner (own nested Modal, unchanged)
+ *   'barcode'     — full-screen camera scanner (own nested Modal). Its own
+ *                   stages render OVER the live frame: looking up, found,
+ *                   edit, picker. The camera is never torn down between them.
  *   'recognition' — food recognition result view
  */
 
@@ -28,11 +30,10 @@ import { confirmationType } from './confirmationTypography';
 import PipBird from './pip/PipBird';
 import { useAuth } from '@clerk/clerk-expo';
 import * as ImagePicker from 'expo-image-picker';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-// Search view reads the self-owned catalogue through api/addFood (checklist
-// Phase 3). searchFoodItems/getFoodById from the frozen services/mealAPI.tsx
-// are no longer imported here; barcode still uses the frozen barcodeAPI until
-// the catalogue barcode route lands (checklist p6-01 / p7-05).
+import { useCameraPermissions } from 'expo-camera';
+// Search reads the self-owned catalogue through api/addFood, barcode through
+// api/barcode (checklist Phase 3/4). Nothing here imports the frozen
+// services/mealAPI.tsx or services/barcodeAPI.tsx any more.
 import {
   searchCatalogFoods,
   toFoodCards,
@@ -42,18 +43,34 @@ import {
   type FoodCardVM,
 } from '../api/addFood/addFoodApi';
 import type { ApiFailure } from '../api/core/request';
-import { energyValue, formatEnergy, parseEnergyInput } from '../utils/energy';
+import { energyValue, parseEnergyInput } from '../utils/energy';
 import FoodResultCard from './addfood/FoodResultCard';
 import RefineRow from './addfood/RefineRow';
 import SearchStateMessage from './addfood/SearchStateMessage';
-import { fetchBarcodeData } from '../services/barcodeAPI';
+import {
+  emptyReportForm,
+  findServing,
+  lookupBarcode,
+  normaliseBarcode,
+  servingKey,
+  toLoggableScannedFood,
+  toScannedCardVM,
+  type BarcodeHit,
+  type BarcodeReportForm,
+  type BarcodeSource,
+} from '../api/barcode/barcodeApi';
+import BarcodeScanner, { type BarcodeScanResult } from './addfood/BarcodeScanner';
+import BarcodeLookupCard from './addfood/BarcodeLookupCard';
+import BarcodeFoundSheet from './addfood/BarcodeFoundSheet';
+import BarcodeEditForm from './addfood/BarcodeEditForm';
+import MealServingPicker, { type MealTypeLabel } from './addfood/MealServingPicker';
 import { recognizeFood } from '../services/foodRecognitionAPI';
 import type { PredictionResult, FoodCandidate } from '../services/foodRecognitionAPI';
 // CustomAlert was used previously, but it relies on a top-level Modal that
 // stacks unreliably on top of AddFoodModal on iOS. The alert is now rendered
 // as an in-modal overlay View near the bottom of this file.
 import FoodRecognitionResultModal from './FoodRecognitionResultModal';
-import { PipActionStatusCard, usePipActionStatus } from './pip/PipActionStatusCard';
+import { PIP_ACTION_MIN_LOADING_MS, PipActionStatusCard, usePipActionStatus } from './pip/PipActionStatusCard';
 import { MealLogRequestError, type MealLogOutcome } from '../services/mealLogOutcome';
 
 interface AddFoodModalProps {
@@ -123,15 +140,19 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   const foodLabel = (food: any) => String(food?.title || food?.food_name || 'this food').trim();
 
   /**
-   * The one way any path commits. `lookup` is the pre-save step (FatSecret
-   * detail fetch for a search result) and is part of the awaited action, so
-   * the card is up for it too. On a successful acknowledgement the modal
-   * closes itself; on an error it stays open with the entered details intact.
+   * The one way any path commits. `lookup` is the pre-save step and is part
+   * of the awaited action, so the card is up for it too. On a successful
+   * acknowledgement the modal closes itself; on an error it stays open with
+   * the entered details intact.
+   *
+   * `targetMeal` defaults to the meal this modal was opened for. The scanner
+   * passes the one chosen in the picker, and the food object carries it too,
+   * because the PARENT is what actually writes mealType onto the log row.
    */
-  const commitFood = (label: string, lookup: () => Promise<any>) =>
+  const commitFood = (label: string, lookup: () => Promise<any>, targetMeal: string = mealType) =>
     pipStatus.run({
-      loading: { title: `Adding ${label}…`, message: `Saving to ${mealType}` },
-      context: { itemLabel: label, mealType },
+      loading: { title: `Adding ${label}…`, message: `Saving to ${targetMeal}` },
+      context: { itemLabel: label, mealType: targetMeal },
       task: async () => {
         const food = await lookup();
         if (!food) {
@@ -147,24 +168,54 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     });
 
   // --- BARCODE ---
+  // One nested Modal for the whole scan, with a stage inside it (Design C).
+  // The camera keeps running underneath every stage, which is what makes
+  // "Scan another" instant and what the design is built around.
+  //
+  //   scanning → looking → found → (edit) → picker → the shared Pip card
+  //
+  // `report` is Phase 5; the stage exists here so the type is complete.
+  type BarcodeStage = 'scanning' | 'looking' | 'found' | 'edit' | 'picker' | 'report';
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [barcodeScanning, setBarcodeScanning] = useState(false);
-  const [processingBarcode, setProcessingBarcode] = useState(false);
-  const [processingStep, setProcessingStep] = useState(0);
+  const [barcodeStage, setBarcodeStage] = useState<BarcodeStage>('scanning');
+  const [scannedCode, setScannedCode] = useState('');
+  const [scannedHit, setScannedHit] = useState<BarcodeHit | null>(null);
+  const [scannedSource, setScannedSource] = useState<BarcodeSource>('catalog');
+  const [scanFailure, setScanFailure] = useState<ApiFailure | null>(null);
+  const [lookupStage, setLookupStage] = useState<'catalog' | 'openfoodfacts'>('catalog');
+  // Serving + quantity + meal for the picker. The meal starts as the one this
+  // modal was opened for and is never inferred from the clock (checklist b0-03).
+  const [chosenServingKey, setChosenServingKey] = useState<string | null>(null);
+  const [chosenQuantity, setChosenQuantity] = useState(1);
+  const [chosenMeal, setChosenMeal] = useState<string>(mealType);
+  // The edit form, prefilled from the label so "Reset to label" has something
+  // to go back to.
+  const [editForm, setEditForm] = useState<BarcodeReportForm>(emptyReportForm());
+  const [labelForm, setLabelForm] = useState<BarcodeReportForm>(emptyReportForm());
   const isProcessingRef = useRef(false);
+  // A double decode of the same pack within this window asks before logging it
+  // twice (checklist b4-07). expo-camera fires repeatedly while a barcode is in
+  // frame, so without this a steady hand is a duplicate meal.
+  const DUPLICATE_SCAN_WINDOW_MS = 60_000;
+  const lastLoggedScanRef = useRef<{ barcode: string; at: number } | null>(null);
 
   // --- FOOD RECOGNITION ---
   const [recognitionLoading, setRecognitionLoading] = useState(false);
   const [recognitionResult, setRecognitionResult] = useState<PredictionResult | null>(null);
   const [recognitionImageUri, setRecognitionImageUri] = useState<string | null>(null);
 
-  // Barcode processing step animation
+  // The client cannot see the server switch from the catalogue to the live
+  // Open Food Facts call, so the second line lights up on elapsed time: past
+  // this point a still-running lookup is almost always the fallback.
   useEffect(() => {
-    if (!processingBarcode) { setProcessingStep(0); return; }
-    const t1 = setTimeout(() => setProcessingStep(1), 800);
-    const t2 = setTimeout(() => setProcessingStep(2), 1600);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [processingBarcode]);
+    if (barcodeStage !== 'looking') { setLookupStage('catalog'); return; }
+    const timer = setTimeout(() => setLookupStage('openfoodfacts'), 700);
+    return () => clearTimeout(timer);
+  }, [barcodeStage]);
+
+  // The picker opens on the meal this modal was opened for, every time.
+  useEffect(() => { setChosenMeal(mealType); }, [mealType, visible]);
 
   useEffect(() => {
     if (barcodeScanning && !cameraPermission?.granted) requestCameraPermissionHandler();
@@ -179,77 +230,150 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   };
 
   // --- BARCODE SCAN ---
-  // The result alert is now an in-modal overlay (see the JSX near the bottom of
-  // this file), so it no longer races with the scanner Modal's dismiss animation.
-  // The 450 ms delay is kept as a deliberate visual pause: scanner slides away,
-  // the modal content is briefly visible, then the result is announced. Without
-  // any pause the transition feels too abrupt.
-  const SCANNER_DISMISS_MS = 450;
+  // The lookup never flashes past: PIP_ACTION_MIN_LOADING_MS is the same floor
+  // the save card uses, so the two steps of one scan feel like one rhythm.
+  const MIN_LOOKUP_DISPLAY_MS = PIP_ACTION_MIN_LOADING_MS;
 
-  // After the FatSecret OAuth + apiCache warmup landed, fetchBarcodeData now
-  // returns in 200–400 ms when the cache is warm. Without a floor, the "Looking
-  // up product…" view flashes by faster than the user can read it, the scanner
-  // dismisses, the alert pops up, and the user reflexively taps it away before
-  // registering the message. Holding the processing view for at least 1.5 s
-  // guarantees the user sees what is happening before the result is announced
-  // and also gives the progressive status lines (at 800 ms / 1600 ms) a chance
-  // to render. The user perceives the flow as deliberate instead of frantic.
-  const MIN_PROCESSING_DISPLAY_MS = 1500;
+  const holdFor = async (startedAt: number, ms: number) => {
+    const remaining = ms - (Date.now() - startedAt);
+    if (remaining > 0) await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+  };
 
-  const closeScannerThenAlert = (title: string, message: string) => {
+  /** The scanned label as form values, in the units the pack prints. */
+  const labelFormFromHit = (hit: BarcodeHit): BarcodeReportForm => {
+    const serving = hit.serving;
+    const nutrition = serving?.nutrition ?? hit.nutrition;
+    const text = (value: number | null | undefined) =>
+      value === null || value === undefined || !Number.isFinite(value) ? '' : String(Math.round(value * 100) / 100);
+    return {
+      productName: hit.title ?? '',
+      brand: hit.brand ?? '',
+      servingSize: text(serving?.grams_equivalent),
+      servingUnit: serving?.metric_unit === 'ml' ? 'ml' : 'g',
+      energyKj: text(nutrition?.energy_kj),
+      proteinG: text(nutrition?.protein_g),
+      carbohydrateG: text(nutrition?.carbohydrate_g),
+      fatG: text(nutrition?.fat_g),
+      photoUrl: null,
+    };
+  };
+
+  /** Everything the scanner owns, back to zero. */
+  const resetScannerState = () => {
     isProcessingRef.current = false;
-    setProcessingBarcode(false);
     setBarcodeScanning(false);
-    // Brief pause after dismissing the scanner so the user perceives a
-    // deliberate scanner-→-result transition, not an abrupt flash.
-    setTimeout(() => showCustomAlert(title, message), SCANNER_DISMISS_MS);
+    setBarcodeStage('scanning');
+    setScannedHit(null);
+    setScannedCode('');
+    setScanFailure(null);
+    setChosenServingKey(null);
+    setChosenQuantity(1);
+    setEditForm(emptyReportForm());
+    setLabelForm(emptyReportForm());
   };
 
-  const waitForMinProcessingDisplay = async (startedAt: number) => {
-    const remainingMs = MIN_PROCESSING_DISPLAY_MS - (Date.now() - startedAt);
-    if (remainingMs > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, remainingMs));
-    }
+  const startScanner = () => {
+    setBarcodeStage('scanning');
+    setScannedCode('');
+    setScannedHit(null);
+    setScanFailure(null);
+    isProcessingRef.current = false;
+    setBarcodeScanning(true);
   };
 
-  const handleBarcodeScan = async (data: any) => {
+  const closeScanner = () => {
+    if (isSavingFood) return;
+    resetScannerState();
+  };
+
+  const handleBarcodeScan = async (result: BarcodeScanResult) => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
-    setProcessingBarcode(true);
-    const processingStartedAt = Date.now();
-    const scannedBarcode = String(data?.data || '').trim();
 
-    try {
-      const response = await fetchBarcodeData(scannedBarcode);
-      await waitForMinProcessingDisplay(processingStartedAt);
+    const code = normaliseBarcode(result?.data);
+    setScannedCode(code);
+    setScannedHit(null);
+    setScanFailure(null);
+    setBarcodeStage('looking');
+    const startedAt = Date.now();
 
-      if (!response.success || !response.data) {
-        closeScannerThenAlert(
-          'Product Not Found',
-          `We couldn't find this barcode in Open Food Facts.\n\nBarcode: ${scannedBarcode || 'Unknown'}\n\nTry scanning again or add the item manually.`
-        );
-        return;
-      }
+    const lookup = await lookupBarcode(code, { getToken, clerkId: userId });
+    await holdFor(startedAt, MIN_LOOKUP_DISPLAY_MS);
 
-      const { foodName, calories, protein, carbs, fats, image } = response.data;
-      setManualName(foodName);
-      setManualCalories(String(energyValue(calories) ?? ''));
-      setManualProtein(protein.toString());
-      setManualCarbs(carbs.toString());
-      setManualFat(fats.toString());
-      if (image) setManualImage(image);
-
-      setBarcodeScanning(false);
+    // A failure and a miss are different answers and must never be rendered as
+    // each other (ERROR_LOG 063/065): ok first, found second.
+    if (lookup.ok === false) {
+      setScanFailure(lookup);
+      setBarcodeStage('scanning');
       isProcessingRef.current = false;
-      setProcessingBarcode(false);
-      setViewMode('manual');
-    } catch {
-      await waitForMinProcessingDisplay(processingStartedAt);
-      closeScannerThenAlert(
-        'Scan Failed',
-        'We could not process this barcode. Please try scanning again or add the item manually.'
-      );
+      return;
     }
+
+    if (!lookup.data.found || !lookup.data.item) {
+      // Phase 5 puts the label-report form here. Until then, say so honestly
+      // rather than dropping the user back at a live camera with no feedback.
+      setScannedCode(lookup.data.barcode);
+      setBarcodeStage('scanning');
+      isProcessingRef.current = false;
+      showCustomAlert(
+        'Not in our catalogue yet',
+        `We could not find barcode ${lookup.data.barcode}. Add it with "Add Food Manually" for now.`,
+      );
+      setBarcodeScanning(false);
+      return;
+    }
+
+    const hit = lookup.data.item;
+    const label = labelFormFromHit(hit);
+    setScannedHit(hit);
+    setScannedSource(lookup.data.source ?? 'catalog');
+    setScannedCode(hit.barcode || lookup.data.barcode);
+    setChosenServingKey(servingKey(hit.serving));
+    setChosenQuantity(1);
+    setLabelForm(label);
+    setEditForm(label);
+    setBarcodeStage('found');
+    isProcessingRef.current = false;
+  };
+
+  const handleScanAgain = () => {
+    setScannedHit(null);
+    setScannedCode('');
+    setScanFailure(null);
+    setBarcodeStage('scanning');
+    isProcessingRef.current = false;
+  };
+
+  /** Found → picker, or edit → picker. Same destination, same label. */
+  const openServingPicker = () => setBarcodeStage('picker');
+
+  const commitScannedFood = () => {
+    if (!scannedHit) return;
+    const now = Date.now();
+    const previous = lastLoggedScanRef.current;
+    if (previous && previous.barcode === scannedCode && now - previous.at < DUPLICATE_SCAN_WINDOW_MS) {
+      showCustomAlert(
+        'Already added',
+        'You logged this same pack less than a minute ago. Scan it again to add another serving.',
+      );
+      lastLoggedScanRef.current = null; // the next tap goes through
+      return;
+    }
+
+    const serving = findServing(scannedHit, chosenServingKey);
+    const meal = String(chosenMeal || mealType).toLowerCase();
+    const food = {
+      ...toLoggableScannedFood(scannedHit, scannedSource, {
+        servingKey: servingKey(serving),
+        quantity: chosenQuantity,
+      }),
+      // The parent writes the log row, so the chosen meal travels with the
+      // food. Without this the picker is decorative and a dinner scan lands
+      // wherever the sheet happened to be opened from.
+      mealType: meal,
+    };
+    lastLoggedScanRef.current = { barcode: scannedCode, at: now };
+    commitFood(food.title, async () => food, meal);
   };
 
   // --- FOOD RECOGNITION ---
@@ -504,6 +628,10 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     resetManualForm();
     resetSearchState();
     clearRecognitionState();
+    // Dismiss the scanner explicitly rather than letting it unmount with its
+    // parent: a nested Modal torn down by its parent disappearing is the kind
+    // of iOS stacking wobble this file has had before (Errors 019, 055).
+    resetScannerState();
     onClose();
   };
 
@@ -622,7 +750,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                     <Text className="text-white font-bold text-lg">+ Add Food Manually</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={() => setBarcodeScanning(true)}
+                    onPress={startScanner}
                     className="border-2 border-primary py-3 rounded-xl items-center flex-row justify-center mb-3"
                   >
                     <Ionicons name="barcode-outline" size={18} color="#007BFF" />
@@ -755,7 +883,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
             animationType="slide"
             transparent={false}
             visible={barcodeScanning}
-            onRequestClose={() => setBarcodeScanning(false)}
+            onRequestClose={closeScanner}
           >
             <View className="flex-1 bg-black">
               {!cameraPermission ? (
@@ -770,41 +898,93 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   <Text className="text-gray-300 text-center mt-2">
                     Enable camera permissions in settings to scan barcodes.
                   </Text>
-                </View>
-              ) : processingBarcode ? (
-                <View className="flex-1 justify-center items-center px-6">
-                  <ActivityIndicator size="large" color="white" />
-                  <Text className="text-white mt-8 text-lg font-bold text-center">Looking up product...</Text>
-                  <View className="mt-6 h-24 justify-center">
-                    {processingStep >= 1 && (
-                      <Text className="text-gray-300 text-center text-base leading-6 mb-2">
-                        Reading the barcode and matching it against the food database.
-                      </Text>
-                    )}
-                    {processingStep >= 2 && (
-                      <Text className="text-gray-300 text-center text-sm leading-5">
-                        This usually takes a few seconds. Please hold the camera steady.
-                      </Text>
-                    )}
-                  </View>
+                  <TouchableOpacity onPress={closeScanner} className="mt-6 px-6 py-3 rounded-full bg-primary">
+                    <Text className="text-white font-bold">Close</Text>
+                  </TouchableOpacity>
                 </View>
               ) : (
                 <>
-                  <CameraView
-                    style={{ flex: 1 }}
-                    onBarcodeScanned={handleBarcodeScan}
-                    barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_e', 'code128', 'code39'] }}
+                  {/* The camera stays mounted under every stage: tearing it
+                      down and rebuilding it between steps is what made the old
+                      flow feel like three separate screens. */}
+                  <BarcodeScanner
+                    active={barcodeStage === 'scanning' && !isSavingFood}
+                    onScanned={handleBarcodeScan}
+                    onClose={closeScanner}
+                    showClose={barcodeStage === 'scanning'}
                   />
-                  <View className="absolute top-0 left-0 right-0 bottom-0 justify-center items-center pointer-events-none">
-                    <View className="w-64 h-64 border-2 border-green-400 rounded-lg" />
-                    <Text className="text-white text-center mt-12 text-lg">Align barcode within frame</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => setBarcodeScanning(false)}
-                    className="absolute top-12 left-6 bg-primary rounded-full p-4"
-                  >
-                    <Ionicons name="close" size={24} color="white" />
-                  </TouchableOpacity>
+
+                  {/* A lookup that failed is not a product we do not have. It
+                      says so on the live frame and lets the user try again. */}
+                  {barcodeStage === 'scanning' && scanFailure && (
+                    <View className="absolute left-0 right-0 bottom-0 px-4 pb-10">
+                      <View className="rounded-2xl px-4 py-3" style={{ backgroundColor: 'rgba(15,23,42,0.92)' }}>
+                        <Text className="text-white font-bold text-[14px]">
+                          {scanFailure.kind === 'offline'
+                            ? "Can't reach GoodHealthMate"
+                            : scanFailure.kind === 'throttled'
+                              ? 'You are scanning a bit fast'
+                              : scanFailure.kind === 'timeout'
+                                ? 'That took too long'
+                                : 'That scan did not work'}
+                        </Text>
+                        <Text className="text-[12.5px] mt-1" style={{ color: '#CBD5E1' }}>
+                          {scanFailure.message} Point the camera at the barcode to try again.
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {barcodeStage === 'looking' && (
+                    <BarcodeLookupCard barcode={scannedCode} stage={lookupStage} />
+                  )}
+
+                  {barcodeStage === 'found' && scannedHit && (
+                    <BarcodeFoundSheet
+                      vm={toScannedCardVM(scannedHit)}
+                      barcode={scannedCode}
+                      source={scannedSource}
+                      onAdd={openServingPicker}
+                      onEdit={() => setBarcodeStage('edit')}
+                      onScanAgain={handleScanAgain}
+                      onClose={closeScanner}
+                      disabled={isSavingFood}
+                    />
+                  )}
+
+                  {barcodeStage === 'edit' && scannedHit && (
+                    <BarcodeEditForm
+                      form={editForm}
+                      barcode={scannedCode}
+                      isPristine={JSON.stringify(editForm) === JSON.stringify(labelForm)}
+                      onChange={(patch) => setEditForm((current) => ({ ...current, ...patch }))}
+                      onReset={() => setEditForm(labelForm)}
+                      onSubmit={openServingPicker}
+                      onBack={() => setBarcodeStage('found')}
+                      onClose={closeScanner}
+                      disabled={isSavingFood}
+                    />
+                  )}
+
+                  {barcodeStage === 'picker' && scannedHit && !isSavingFood && (
+                    <MealServingPicker
+                      servings={scannedHit.servings}
+                      selectedServingKey={chosenServingKey}
+                      quantity={chosenQuantity}
+                      selectedMeal={chosenMeal}
+                      onChangeServing={setChosenServingKey}
+                      onChangeQuantity={setChosenQuantity}
+                      onChangeMeal={(meal: MealTypeLabel) => setChosenMeal(meal)}
+                      onConfirm={commitScannedFood}
+                      onCancel={() => setBarcodeStage(scannedHit ? 'found' : 'scanning')}
+                    />
+                  )}
+
+                  {/* The save card lives wherever the user is looking. While
+                      the scanner Modal is up it must render INSIDE it, or it
+                      would be hidden behind the camera (ERROR_LOG 019, 055:
+                      never a second native Modal). */}
+                  <PipActionStatusCard {...pipStatus.cardProps} />
                 </>
               )}
             </View>
@@ -844,8 +1024,12 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
             absolute-fill View inside this modal's content, never a nested
             Modal (Errors 019, 055); it swallows touches so it guards the whole
             surface, and sits above alertOverlay so a save in flight always
-            wins the layer order. */}
-        <PipActionStatusCard {...pipStatus.cardProps} style={styles.savingOverlay} />
+            wins the layer order.
+
+            While the scanner Modal is open it renders INSIDE that Modal
+            instead (see above): this copy would be behind the camera, and
+            rendering both would run two copies of one status. */}
+        {!barcodeScanning && <PipActionStatusCard {...pipStatus.cardProps} style={styles.savingOverlay} />}
         </View>
       </Modal>
     </>

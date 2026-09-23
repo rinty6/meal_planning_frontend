@@ -151,5 +151,9 @@ export const submitBarcodeReport = async (
     retryOnThrottle: false,
   });
 
-/** Test hook, and used when the modal closes so a re-scan re-reads. */
+/**
+ * Test hook. Deliberately NOT called when the scanner closes: the whole point
+ * of the 10-minute window is that re-scanning the same pack in one shopping
+ * trip costs nothing.
+ */
 export const clearBarcodeCaches = () => lookupCache.clear();

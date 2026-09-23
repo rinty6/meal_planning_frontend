@@ -1075,7 +1075,9 @@ const PlanningScreen = () => {
         body: JSON.stringify({
           clerkId: userId,
           date,
-          mealType: selectedMealType,
+          // The barcode scanner's picker can name the meal; everything else
+          // uses the tab the sheet was opened from.
+          mealType: foodItem.mealType || selectedMealType,
           foodName: foodItem.title || foodItem.food_name,
           calories: foodItem.calories,
           protein: foodItem.protein,
@@ -1098,7 +1100,7 @@ const PlanningScreen = () => {
       markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories + Number(foodItem?.calories || 0))));
       void refreshDailyProgress();
-      return resolveMealLogOutcome(payload, { itemLabel: itemLabelOf(foodItem), mealType: selectedMealType });
+      return resolveMealLogOutcome(payload, { itemLabel: itemLabelOf(foodItem), mealType: foodItem.mealType || selectedMealType });
     } finally {
       addRequestInFlightRef.current = false;
     }

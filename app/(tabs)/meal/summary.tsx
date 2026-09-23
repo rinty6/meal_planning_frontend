@@ -268,7 +268,10 @@ export default function SummaryScreen() {
     const payload = {
       clerkId: userId,
       date: formattedDate,
-      mealType: activeMealType,
+      // A food may name the meal it belongs to (the barcode scanner's picker
+      // lets the user choose one). Everything else falls back to the tab the
+      // sheet was opened from.
+      mealType: foodItem.mealType || activeMealType,
       foodName: foodItem.title,
       calories: foodItem.calories,
       protein: foodItem.protein,
@@ -299,7 +302,7 @@ export default function SummaryScreen() {
     fetchMeals(); // the card covers the reload; the list is fresh by the time it closes
     return resolveMealLogOutcome(body, {
       itemLabel: String(foodItem.title || foodItem.food_name || 'This food').trim(),
-      mealType: activeMealType,
+      mealType: foodItem.mealType || activeMealType,
     });
   };
 

@@ -273,7 +273,9 @@ const HomeScreen = () => {
         if (!userId) throw new MealLogRequestError('You must be logged in to save meals.', 401);
         const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
         if (!apiURL) throw new MealLogRequestError('Missing backend URL', 0);
-        const mealType = activeMealType;
+        // The barcode scanner's picker can choose a meal; everything else
+        // uses the one the sheet was opened from.
+        const mealType = foodItem.mealType || activeMealType;
 
         const response = await authedFetch(`/api/meals/add`, {
             method: 'POST',
