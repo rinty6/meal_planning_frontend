@@ -42,6 +42,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import type { BarcodeReportForm } from '../../api/barcode/barcodeApi.types';
 import PipBird from '../pip/PipBird';
+import { useSheetBottomPadding } from './sheetLayout';
 
 type Props = {
   form: BarcodeReportForm;
@@ -96,7 +97,10 @@ const BarcodeEditForm = ({
   onBack,
   disabled = false,
   isPristine,
-}: Props) => (
+}: Props) => {
+  const paddingBottom = useSheetBottomPadding();
+
+  return (
   <View style={StyleSheet.absoluteFill}>
     <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)' }]} />
 
@@ -104,7 +108,7 @@ const BarcodeEditForm = ({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1, justifyContent: 'flex-end' }}
     >
-      <View className="rounded-t-3xl px-4 pt-2.5 pb-5" style={{ backgroundColor: '#FFFFFF', maxHeight: '92%' }}>
+      <View className="rounded-t-3xl px-4 pt-2.5" style={{ backgroundColor: '#FFFFFF', maxHeight: '92%', paddingBottom }}>
         <View className="self-center rounded-full mb-2" style={{ width: 40, height: 5, backgroundColor: '#E3E8EF' }} />
 
         <View className="flex-row items-center mb-1.5">
@@ -195,6 +199,7 @@ const BarcodeEditForm = ({
       </View>
     </KeyboardAvoidingView>
   </View>
-);
+  );
+};
 
 export default BarcodeEditForm;

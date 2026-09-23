@@ -23,6 +23,7 @@ import { formatGrams } from '../../api/addFood/addFoodApi.mappers';
 import type { BarcodeSource } from '../../api/barcode/barcodeApi.types';
 import { formatEnergy } from '../../utils/energy';
 import PipBird from '../pip/PipBird';
+import { useSheetBottomPadding } from './sheetLayout';
 
 type Props = {
   vm: FoodCardVM;
@@ -38,6 +39,7 @@ type Props = {
 
 const BarcodeFoundSheet = ({ vm, barcode, source, onAdd, onEdit, onScanAgain, onClose, disabled }: Props) => {
   const brand = vm.tag.kind === 'brand' ? vm.tag.name : null;
+  const paddingBottom = useSheetBottomPadding();
 
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -49,7 +51,7 @@ const BarcodeFoundSheet = ({ vm, barcode, source, onAdd, onEdit, onScanAgain, on
         accessibilityLabel="Close the scanner"
       />
 
-      <View className="absolute left-0 right-0 bottom-0 rounded-t-3xl px-4 pt-2.5 pb-5" style={{ backgroundColor: '#FFFFFF' }}>
+      <View className="absolute left-0 right-0 bottom-0 rounded-t-3xl px-4 pt-2.5" style={{ backgroundColor: '#FFFFFF', paddingBottom }}>
         <View className="self-center rounded-full mb-2.5" style={{ width: 40, height: 5, backgroundColor: '#E3E8EF' }} />
 
         <View className="flex-row items-center mb-1.5">
