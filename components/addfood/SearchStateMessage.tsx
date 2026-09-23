@@ -18,7 +18,12 @@ type Props = {
   disabled: boolean;
 };
 
-const COPY: Record<ApiFailure['kind'], { icon: React.ComponentProps<typeof Ionicons>['name']; title: string; body: string; retry: boolean }> = {
+/**
+ * One set of words per kind of trouble. Exported because the barcode scanner
+ * shows the same failures on a different surface, and two copies of this table
+ * would drift (checklist b5-07).
+ */
+export const FAILURE_COPY: Record<ApiFailure['kind'], { icon: React.ComponentProps<typeof Ionicons>['name']; title: string; body: string; retry: boolean }> = {
   throttled: { icon: 'hourglass-outline', title: 'You are searching a bit fast', body: 'Give it a moment and try again.', retry: true },
   offline: { icon: 'cloud-offline-outline', title: "Can't reach GoodHealthMate", body: 'Check your connection and try again.', retry: true },
   timeout: { icon: 'time-outline', title: 'That took too long', body: 'The server did not answer in time. Try again.', retry: true },
@@ -40,7 +45,7 @@ const SearchStateMessage = ({ state, onRetry, disabled }: Props) => {
           body: 'Try a simpler word, for example chicken or beer.',
           retry: false,
         }
-      : COPY[state.failure.kind];
+      : FAILURE_COPY[state.failure.kind];
 
   return (
     <View className="items-center mt-10 px-6">

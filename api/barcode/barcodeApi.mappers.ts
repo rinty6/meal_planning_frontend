@@ -195,6 +195,65 @@ const optionalNumber = (text: string): number | null => {
   return value === null || Number.isNaN(value) ? null : value;
 };
 
+/**
+ * The one serving a reported food has: the size and energy the user typed.
+ *
+ * Built as a real BarcodeServing so MealServingPicker needs no branch for this
+ * path. The numbers are per serving, as printed, which is exactly what the
+ * picker multiplies.
+ */
+export const reportServing = (form: BarcodeReportForm): BarcodeServing => {
+  const grams = optionalNumber(form.servingSize);
+  const energyKj = optionalNumber(form.energyKj);
+  const unit = form.servingUnit === "ml" ? "ml" : "g";
+
+  return {
+    id: null,
+    source_record_id: "report:label",
+    description: grams === null ? "1 serving" : `${grams} ${unit}`,
+    grams_equivalent: unit === "g" ? grams : null,
+    metric_amount: grams,
+    metric_unit: unit,
+    is_default: true,
+    nutrition: {
+      energy_kj: energyKj,
+      calories_kcal: energyKj === null ? null : round4(kjToKcal(energyKj)),
+      protein_g: optionalNumber(form.proteinG),
+      fat_g: optionalNumber(form.fatG),
+      carbohydrate_g: optionalNumber(form.carbohydrateG),
+      fiber_g: null,
+      sugar_g: null,
+      sodium_mg: null,
+      vitamin_a_mcg: null,
+      vitamin_a_convention: null,
+    },
+  };
+};
+
+/**
+ * How many failed reports are kept waiting for the next send. Small on purpose:
+ * this is a courtesy retry, not an outbox. A report is OURS to lose, not the
+ * user's, so it is never persisted and never mentioned to them (checklist
+ * b5-05).
+ */
+export const MAX_QUEUED_REPORTS = 10;
+
+/**
+ * Add a report to the retry queue.
+ *
+ * A second report for the same barcode REPLACES the first: the server upserts
+ * on (barcode, reporter) anyway, so keeping both would mean sending the stale
+ * one after the fresh one. Over the cap, the oldest goes.
+ */
+export const queueReport = (
+  queue: BarcodeReportPayload[],
+  payload: BarcodeReportPayload,
+): BarcodeReportPayload[] => {
+  const kept = queue.filter((item) => item.barcode !== payload.barcode);
+  kept.push(payload);
+  return kept.slice(-MAX_QUEUED_REPORTS);
+};
+
 export const buildReportPayload = (
   form: BarcodeReportForm,
   context: { barcode: string; barcodeType?: string | null; appVersion?: string | null },

@@ -20,6 +20,8 @@ import {
   isReportSendable,
   missingReportFields,
   normaliseQuantity,
+  queueReport,
+  reportServing,
   servingChipLabel,
   servingKey,
   toLoggableReportedFood,
@@ -258,4 +260,59 @@ test("a millilitre serving stores no gram weight", () => {
   const ml = toLoggableReportedFood(form({ servingUnit: "ml", servingSize: "250" }), { barcode: "1" });
   assert.equal(ml.servingDescription, "250 ml");
   assert.equal(ml.nutrients.serving_grams, null, "250 ml is not 250 g");
+});
+
+/* ---------------------------------------------------------------------------
+ * The report's own serving (Phase 5)
+ * ------------------------------------------------------------------------- */
+
+test("a reported label becomes the one serving the picker offers", () => {
+  const serving = reportServing(form());
+  assert.equal(serving.description, "30 g");
+  assert.equal(serving.grams_equivalent, 30);
+  assert.equal(serving.nutrition.energy_kj, 470);
+  assert.equal(serving.is_default, true);
+  assert.equal(energyKjFor(serving, 2), 940, "the stepper multiplies the user's own number");
+});
+
+test("millilitres are not grams on the reported serving either", () => {
+  const serving = reportServing(form({ servingUnit: "ml", servingSize: "250" }));
+  assert.equal(serving.description, "250 ml");
+  assert.equal(serving.grams_equivalent, null);
+  assert.equal(serving.metric_amount, 250);
+});
+
+test("a half-typed label still produces a usable serving", () => {
+  const serving = reportServing(emptyReportForm());
+  assert.equal(serving.description, "1 serving");
+  assert.equal(serving.nutrition.energy_kj, null);
+  assert.equal(energyKjFor(serving, 1), null, "no energy typed means no energy claimed");
+});
+
+/* ---------------------------------------------------------------------------
+ * The report retry queue (Phase 5, checklist b5-05)
+ * ------------------------------------------------------------------------- */
+
+const payload = (barcode: string, productName = "Rice Crackers") =>
+  buildReportPayload(form({ productName }), { barcode });
+
+test("a failed report waits for the next send", () => {
+  const queued = queueReport([], payload("111"));
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].barcode, "111");
+});
+
+test("re-reporting the same pack replaces the older attempt", () => {
+  const first = queueReport([], payload("111", "Rice Crackers"));
+  const second = queueReport(first, payload("111", "Rice Crackers Original"));
+  assert.equal(second.length, 1, "the server upserts on barcode; two would send the stale one last");
+  assert.equal(second[0].productName, "Rice Crackers Original");
+});
+
+test("the queue is capped and drops the oldest", () => {
+  let queue: ReturnType<typeof payload>[] = [];
+  for (let i = 0; i < 14; i += 1) queue = queueReport(queue, payload(String(i)));
+  assert.equal(queue.length, 10);
+  assert.equal(queue[0].barcode, "4", "the first four fell off the front");
+  assert.equal(queue[9].barcode, "13");
 });

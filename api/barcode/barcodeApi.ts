@@ -6,6 +6,8 @@
  *              Food Facts fallback on our side)
  *         POST /api/catalog/barcode/reports      (what the user typed off a pack
  *              we do not hold)
+ *         POST /api/favorites/upload-image       (the photo of the nutrition
+ *              panel, into the barcode-reports folder the backend allows)
  *         Both in backend/src/routes/catalog.js. Replaces the direct
  *         openfoodfacts.org call in the frozen services/barcodeAPI.tsx.
  * Caches: lookups in memory for 10 minutes, 30 entries, keyed by the
@@ -44,6 +46,8 @@ import {
   isReportSendable,
   missingReportFields,
   normaliseQuantity,
+  queueReport,
+  reportServing,
   servingChipLabel,
   servingKey,
   toLoggableReportedFood,
@@ -66,6 +70,8 @@ export {
   isReportSendable,
   missingReportFields,
   normaliseQuantity,
+  queueReport,
+  reportServing,
   servingChipLabel,
   servingKey,
   toLoggableReportedFood,
@@ -150,6 +156,75 @@ export const submitBarcodeReport = async (
     // honest thing honest.
     retryOnThrottle: false,
   });
+
+/**
+ * Upload the photo of a nutrition panel and return its hosted URL.
+ *
+ * Goes through the same endpoint as recipe photos, with the folder the backend
+ * allowlist maps to goodhealthmate/barcode-reports, so a panel snapshot never
+ * lands among users' recipe images.
+ *
+ * The photo is optional evidence. A failure here is reported to the caller so
+ * it can say the attachment did not stick, and it must never block Send.
+ */
+export const uploadReportPhoto = async (
+  dataUri: string,
+  options: BarcodeRequestOptions = {},
+): Promise<ApiResult<{ url: string }>> =>
+  requestJson<{ url: string }>("/api/favorites/upload-image", {
+    method: "POST",
+    body: { imageBase64: dataUri, folder: "barcode-reports" },
+    getToken: options.getToken,
+    clerkId: options.clerkId,
+    signal: options.signal,
+    // A photo is bigger than a JSON body and rides a slower path.
+    timeoutMs: 30_000,
+    retryOnThrottle: false,
+  });
+
+/**
+ * Reports whose send failed, waiting for the next one to carry them along.
+ *
+ * In memory only, and that is the decision, not an omission: a report is our
+ * catalogue's gain, not the user's data, so losing one on a cold start costs
+ * us a product and costs them nothing. Persisting it would mean an outbox to
+ * maintain and a user-visible failure to explain for something they were never
+ * told about (checklist b5-05).
+ */
+let pendingReports: BarcodeReportPayload[] = [];
+
+/** Test hook and diagnostics. Never rendered. */
+export const pendingReportCount = () => pendingReports.length;
+export const clearReportQueue = () => {
+  pendingReports = [];
+};
+
+/**
+ * Send a report, carrying any earlier failures with it.
+ *
+ * Resolves with the result of THIS report only. The caller ignores it: the
+ * user's meal log is what the card reports on, and a report that did not land
+ * is never surfaced (checklist b5-05).
+ */
+export const submitBarcodeReportQueued = async (
+  payload: BarcodeReportPayload,
+  options: BarcodeRequestOptions = {},
+): Promise<ApiResult<BarcodeReportResponse>> => {
+  // Drain first, so the retry rides the connection we already know is up.
+  const waiting = pendingReports;
+  pendingReports = [];
+  for (const queued of waiting) {
+    const retried = await submitBarcodeReport(queued, options);
+    if (retried.ok === false) pendingReports = queueReport(pendingReports, queued);
+  }
+
+  const result = await submitBarcodeReport(payload, options);
+  // `bad_request` is the server refusing these numbers; retrying cannot fix it.
+  if (result.ok === false && result.kind !== "bad_request" && result.kind !== "aborted") {
+    pendingReports = queueReport(pendingReports, payload);
+  }
+  return result;
+};
 
 /**
  * Test hook. Deliberately NOT called when the scanner closes: the whole point

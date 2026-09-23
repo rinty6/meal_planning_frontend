@@ -89,6 +89,13 @@ export const PIP_ACTION_READY_BEAT_MS = 400;
 export type PipActionRunOptions = {
   loading: { title: string; message: string };
   context: MealLogContext;
+  /**
+   * One extra line under the message, shown only when the action SUCCEEDS.
+   * The barcode report's thank-you uses it: the report is a side effect of the
+   * save, so it gets a line on the same card rather than a card of its own
+   * (checklist b5-06).
+   */
+  successNote?: string;
   /** The whole commit: lookup, save, cache invalidation. Resolves with the outcome. */
   task: () => Promise<MealLogOutcome>;
   /** Called when the user taps the action on the finished card. */
@@ -105,6 +112,7 @@ export type PipActionStatusController = {
   cardProps: {
     status: PipActionStatus;
     onConfirm: () => void;
+    note?: string;
   };
 };
 
@@ -120,6 +128,7 @@ export function usePipActionStatus(): PipActionStatusController {
   const operationRef = useRef(0);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const dismissRef = useRef<PipActionRunOptions['onDismiss']>(undefined);
+  const [note, setNote] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     statusRef.current = status;
@@ -147,6 +156,7 @@ export function usePipActionStatus(): PipActionStatusController {
       const operationId = ++operationRef.current;
       const isCurrent = () => operationRef.current === operationId;
       dismissRef.current = options.onDismiss;
+      setNote(options.successNote);
 
       const next: PipActionStatus = { phase: 'loading', operationId, ...options.loading };
       statusRef.current = next;
@@ -206,7 +216,7 @@ export function usePipActionStatus(): PipActionStatusController {
     status,
     isBusy: status.phase !== 'idle',
     run,
-    cardProps: { status, onConfirm },
+    cardProps: { status, onConfirm, note },
   };
 }
 
@@ -234,7 +244,7 @@ const PAL = {
 /** SuccessModal's Pip size (sucessmodal.tsx). */
 const PIP_SIZE = 104;
 
-export function PipActionStatusCard({ status, onConfirm, style }: PipActionStatusCardProps) {
+export function PipActionStatusCard({ status, onConfirm, note, style }: PipActionStatusCardProps) {
   const visible = status.phase !== 'idle';
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const copyOpacity = useRef(new Animated.Value(1)).current;
@@ -328,6 +338,12 @@ export function PipActionStatusCard({ status, onConfirm, style }: PipActionStatu
         <Animated.View style={[styles.copy, { opacity: copyOpacity }]} accessibilityLiveRegion="polite">
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
+          {/* Success only. A note under a failure would read as consolation. */}
+          {note && status.phase !== 'loading' && status.result.kind === 'success' ? (
+            <View style={styles.note}>
+              <Text style={styles.noteText}>{note}</Text>
+            </View>
+          ) : null}
         </Animated.View>
 
         <TouchableOpacity
@@ -399,6 +415,22 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   message: confirmationType.message,
+  // The success-only note (b5-06). A quiet strip: it is information the user
+  // did not ask for, under the sentence they did.
+  note: {
+    marginTop: 12,
+    alignSelf: 'stretch',
+    borderRadius: 12,
+    backgroundColor: '#F1F7F3',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  noteText: {
+    fontSize: 12.5,
+    lineHeight: 17,
+    textAlign: 'center',
+    color: '#3F7D55',
+  },
   buttonTouch: {
     alignSelf: 'stretch',
   },

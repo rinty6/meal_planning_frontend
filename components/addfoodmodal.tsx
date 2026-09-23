@@ -6,8 +6,8 @@
  *   'manual'      — image, name, macros, save button
  *   'barcode'     — camera scanner in its own Modal, which covers ONLY the
  *                   aiming stage. Everything after a decode (looking up,
- *                   found, edit, picker) renders over this modal's own UI
- *                   behind the usual dim scrim.
+ *                   found, edit, report, picker) renders over this modal's own
+ *                   UI behind the usual dim scrim.
  *   'recognition' — food recognition result view
  */
 
@@ -50,22 +50,31 @@ import FoodResultCard from './addfood/FoodResultCard';
 import RefineRow from './addfood/RefineRow';
 import SearchStateMessage from './addfood/SearchStateMessage';
 import {
+  buildReportPayload,
   emptyReportForm,
   findServing,
+  isReportDirty,
   lookupBarcode,
   normaliseBarcode,
+  reportServing,
   servingKey,
+  submitBarcodeReportQueued,
+  toLoggableReportedFood,
   toLoggableScannedFood,
   toScannedCardVM,
+  uploadReportPhoto,
   type BarcodeHit,
   type BarcodeReportForm,
   type BarcodeSource,
 } from '../api/barcode/barcodeApi';
 import BarcodeScanner, { type BarcodeScanResult } from './addfood/BarcodeScanner';
+import BarcodeReportSheet, { type PanelPhotoState } from './addfood/BarcodeReportSheet';
+import { barcodeFailureCopy } from './addfood/barcodeFailureCopy';
 import BarcodeLookupCard from './addfood/BarcodeLookupCard';
 import BarcodeFoundSheet from './addfood/BarcodeFoundSheet';
 import BarcodeEditForm from './addfood/BarcodeEditForm';
 import MealServingPicker, { type MealTypeLabel } from './addfood/MealServingPicker';
+import Constants from 'expo-constants';
 import { recognizeFood } from '../services/foodRecognitionAPI';
 import type { PredictionResult, FoodCandidate } from '../services/foodRecognitionAPI';
 // CustomAlert was used previously, but it relies on a top-level Modal that
@@ -95,10 +104,24 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
 
   // --- CUSTOM ALERT ---
   const [alertVisible, setAlertVisible] = useState(false);
-  const [alertConfig, setAlertConfig] = useState({ title: '', message: '' });
+  // One alert surface for this modal. `confirm` turns it into a two-button
+  // question (Phase 5 needs one: discarding a typed report). Still no second
+  // native Modal (ERROR_LOG 019, 055).
+  const [alertConfig, setAlertConfig] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    onConfirm?: () => void;
+  }>({ title: '', message: '' });
 
   const showCustomAlert = (title: string, message: string) => {
     setAlertConfig({ title, message });
+    setAlertVisible(true);
+  };
+
+  /** Two buttons: the destructive one is named, Cancel is the safe default. */
+  const showCustomConfirm = (title: string, message: string, confirmLabel: string, onConfirm: () => void) => {
+    setAlertConfig({ title, message, confirmLabel, onConfirm });
     setAlertVisible(true);
   };
 
@@ -151,10 +174,21 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
    * passes the one chosen in the picker, and the food object carries it too,
    * because the PARENT is what actually writes mealType onto the log row.
    */
-  const commitFood = (label: string, lookup: () => Promise<any>, targetMeal: string = mealType) =>
+  const commitFood = (
+    label: string,
+    lookup: () => Promise<any>,
+    targetMeal: string = mealType,
+    extras: {
+      /** Runs beside the save, never awaited: its failure must not reach the card. */
+      alongside?: () => void;
+      /** One extra line on the success state only. */
+      successNote?: string;
+    } = {},
+  ) =>
     pipStatus.run({
       loading: { title: `Adding ${label}…`, message: `Saving to ${targetMeal}` },
       context: { itemLabel: label, mealType: targetMeal },
+      successNote: extras.successNote,
       task: async () => {
         const food = await lookup();
         if (!food) {
@@ -162,6 +196,10 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
           // error = "Nothing was saved" copy, not the ambiguous one).
           throw new MealLogRequestError('Could not load this food', 0);
         }
+        // Started here, before the save, so the two are genuinely in flight
+        // together. Deliberately not awaited and never inspected: the card
+        // reports on the user's meal log, not on our catalogue (b5-05).
+        extras.alongside?.();
         return onAddFood(food);
       },
       onDismiss: (result) => {
@@ -173,6 +211,12 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   // Stages of one scan:
   //
   //   scanning → looking → found → (edit) → picker → the shared Pip card
+  //   scanning → looking → report → picker → the shared Pip card
+  //
+  // The second row is a MISS, which is a successful answer: neither our
+  // catalogue nor Open Food Facts holds the pack, so the user tells us what is
+  // on the label and logs it at the same time. A failure never reaches either
+  // row; it stays on the camera with its reason (ERROR_LOG 063/065).
   //
   // Only `scanning` needs the camera, and only `scanning` gets the nested
   // Modal. The first draft kept the camera mounted under every stage so
@@ -182,8 +226,6 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   // Everything after a decode now renders over this modal's own content
   // behind the same scrim the alert and the save card use, which is also what
   // the rest of the app does.
-  //
-  // `report` is Phase 5; the stage exists here so the type is complete.
   type BarcodeStage = 'scanning' | 'looking' | 'found' | 'edit' | 'picker' | 'report';
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [barcodeScanning, setBarcodeScanning] = useState(false);
@@ -202,9 +244,14 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   // screen that opened it stays mounted underneath and Cancel goes back to it.
   // Without this, "Add to Meal Plan" on the edit form unmounted the form and
   // read as the app throwing the edit away (feedback 2026-09-23).
-  const [pickerOrigin, setPickerOrigin] = useState<'found' | 'edit'>('found');
-  // The edit form, prefilled from the label so "Reset to label" has something
-  // to go back to.
+  const [pickerOrigin, setPickerOrigin] = useState<'found' | 'edit' | 'report'>('found');
+  // The optional photo of the nutrition panel. Uploaded as soon as it is
+  // taken, so Send never waits on a network round trip the user did not ask
+  // for; `form.photoUrl` holds the hosted URL once it lands.
+  const [panelPhoto, setPanelPhoto] = useState<PanelPhotoState>({ status: 'idle' });
+  // ONE form, used by both sheets: prefilled from the label on the found path
+  // (where labelForm is what "Reset to label values" goes back to) and empty on
+  // the report path, where the user is typing the label themselves.
   const [editForm, setEditForm] = useState<BarcodeReportForm>(emptyReportForm());
   const [labelForm, setLabelForm] = useState<BarcodeReportForm>(emptyReportForm());
   const isProcessingRef = useRef(false);
@@ -247,6 +294,9 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
   // The lookup never flashes past: PIP_ACTION_MIN_LOADING_MS is the same floor
   // the save card uses, so the two steps of one scan feel like one rhythm.
   const MIN_LOOKUP_DISPLAY_MS = PIP_ACTION_MIN_LOADING_MS;
+  // Stamped on every report: when a label turns out to be wrong, knowing which
+  // build collected it is the difference between a bug and a mystery.
+  const APP_VERSION = Constants.expoConfig?.version ?? null;
 
   const holdFor = async (startedAt: number, ms: number) => {
     const remaining = ms - (Date.now() - startedAt);
@@ -283,6 +333,7 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setChosenServingKey(null);
     setChosenQuantity(1);
     setPickerOrigin('found');
+    setPanelPhoto({ status: 'idle' });
     setEditForm(emptyReportForm());
     setLabelForm(emptyReportForm());
   };
@@ -329,16 +380,19 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
       return;
     }
 
+    // A miss is an ANSWER: neither our catalogue nor Open Food Facts holds this
+    // pack. The user reads the label better than any fallback could, so we ask.
     if (!lookup.data.found || !lookup.data.item) {
-      // Phase 5 puts the label-report form here. Until then, say so honestly
-      // rather than dropping the user back at a live camera with no feedback.
       setScannedCode(lookup.data.barcode);
-      setBarcodeStage('scanning');
+      setScannedHit(null);
+      const blank = emptyReportForm();
+      setLabelForm(blank);
+      setEditForm(blank);
+      setPanelPhoto({ status: 'idle' });
+      setChosenQuantity(1);
+      setChosenServingKey(null);
+      setBarcodeStage('report');
       isProcessingRef.current = false;
-      showCustomAlert(
-        'Not in our catalogue yet',
-        `We could not find barcode ${lookup.data.barcode}. Add it with "Add Food Manually" for now.`,
-      );
       return;
     }
 
@@ -359,14 +413,87 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setScannedHit(null);
     setScannedCode('');
     setScanFailure(null);
+    setPanelPhoto({ status: 'idle' });
+    setEditForm(emptyReportForm());
+    setLabelForm(emptyReportForm());
     setBarcodeStage('scanning');
     isProcessingRef.current = false;
     setBarcodeScanning(true);
   };
 
-  /** Found → picker, or edit → picker. Same destination, same label, and the
-   *  origin stays on screen behind the dialog. */
-  const openServingPicker = (origin: 'found' | 'edit') => {
+  /**
+   * Scan again from the report sheet. Typing a label is real work, so it is
+   * never thrown away silently; an untouched form goes straight back to the
+   * camera (checklist b5-04).
+   */
+  const handleReportScanAgain = () => {
+    if (!isReportDirty(editForm)) {
+      handleScanAgain();
+      return;
+    }
+    showCustomConfirm(
+      'Discard what you typed?',
+      'Scanning another pack clears this label. Your notes are not saved anywhere yet.',
+      'Discard and scan',
+      handleScanAgain,
+    );
+  };
+
+  /**
+   * The nutrition panel photo. Optional evidence: every failure below leaves
+   * the form intact and Send enabled, because a report we cannot verify still
+   * beats no report at all.
+   */
+  const attachPanelPhoto = async (from: 'camera' | 'library') => {
+    const permission =
+      from === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      showCustomAlert(
+        from === 'camera' ? 'Camera Access Required' : 'Permission Required',
+        from === 'camera'
+          ? 'Enable camera permissions to photograph the nutrition panel.'
+          : 'Enable photo library access to attach a photo of the nutrition panel.',
+      );
+      return;
+    }
+
+    const picked =
+      from === 'camera'
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.5, base64: true })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.5, base64: true });
+    if (picked.canceled || !picked.assets?.length) return;
+
+    const asset = picked.assets[0];
+    if (!asset.base64) {
+      setPanelPhoto({ status: 'failed' });
+      return;
+    }
+
+    setPanelPhoto({ status: 'uploading', localUri: asset.uri });
+    const upload = await uploadReportPhoto(`data:image/jpeg;base64,${asset.base64}`, {
+      getToken,
+      clerkId: userId,
+    });
+    if (upload.ok === false) {
+      // Said on the slot itself, not in an alert: it is a setback, not a stop.
+      setPanelPhoto({ status: 'failed' });
+      setEditForm((current) => ({ ...current, photoUrl: null }));
+      return;
+    }
+    setPanelPhoto({ status: 'ready', localUri: asset.uri });
+    setEditForm((current) => ({ ...current, photoUrl: upload.data.url }));
+  };
+
+  const removePanelPhoto = () => {
+    setPanelPhoto({ status: 'idle' });
+    setEditForm((current) => ({ ...current, photoUrl: null }));
+  };
+
+  /** Found → picker, edit → picker, report → picker. Same destination, same
+   *  label, and the origin stays on screen behind the dialog. */
+  const openServingPicker = (origin: 'found' | 'edit' | 'report') => {
     // The edit form can still have the keyboard up, and the keyboard is an OS
     // layer above every view (ERROR_LOG 075): it would cover the picker's
     // confirm button rather than sit behind the dialog.
@@ -375,18 +502,23 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     setBarcodeStage('picker');
   };
 
+  /** True when this pack was just logged, and says so once before relenting. */
+  const isDuplicateScan = () => {
+    const previous = lastLoggedScanRef.current;
+    if (!previous || previous.barcode !== scannedCode) return false;
+    if (Date.now() - previous.at >= DUPLICATE_SCAN_WINDOW_MS) return false;
+    showCustomAlert(
+      'Already added',
+      'You logged this same pack less than a minute ago. Scan it again to add another serving.',
+    );
+    lastLoggedScanRef.current = null; // the next tap goes through
+    return true;
+  };
+
   const commitScannedFood = () => {
     if (!scannedHit) return;
+    if (isDuplicateScan()) return;
     const now = Date.now();
-    const previous = lastLoggedScanRef.current;
-    if (previous && previous.barcode === scannedCode && now - previous.at < DUPLICATE_SCAN_WINDOW_MS) {
-      showCustomAlert(
-        'Already added',
-        'You logged this same pack less than a minute ago. Scan it again to add another serving.',
-      );
-      lastLoggedScanRef.current = null; // the next tap goes through
-      return;
-    }
 
     const serving = findServing(scannedHit, chosenServingKey);
     const meal = String(chosenMeal || mealType).toLowerCase();
@@ -402,6 +534,37 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
     };
     lastLoggedScanRef.current = { barcode: scannedCode, at: now };
     commitFood(food.title, async () => food, meal);
+  };
+
+  /**
+   * The report path's commit. Two things happen at once: the food the user
+   * described goes into THEIR log, and the label goes to us.
+   *
+   * The card reports on the log alone. A report that did not land is queued
+   * and never mentioned, because the user did not ask to send us anything and
+   * cannot fix our end of it (checklist b5-05).
+   */
+  const commitReportedFood = () => {
+    if (isDuplicateScan()) return;
+    const now = Date.now();
+    const meal = String(chosenMeal || mealType).toLowerCase();
+    const food = {
+      ...toLoggableReportedFood(editForm, { barcode: scannedCode, quantity: chosenQuantity }),
+      mealType: meal,
+    };
+    const payload = buildReportPayload(editForm, { barcode: scannedCode, appVersion: APP_VERSION });
+
+    lastLoggedScanRef.current = { barcode: scannedCode, at: now };
+    commitFood(food.title, async () => food, meal, {
+      alongside: () => {
+        void submitBarcodeReportQueued(payload, { getToken, clerkId: userId }).then((result) => {
+          if (__DEV__ && result.ok === false) {
+            console.log('[barcode] report queued after failure:', result.kind, result.message);
+          }
+        });
+      },
+      successNote: 'Thanks. We’ll check this barcode and add it to the catalogue.',
+    });
   };
 
   // --- FOOD RECOGNITION ---
@@ -945,16 +1108,10 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                     <View className="absolute left-0 right-0 bottom-0 px-4 pb-10">
                       <View className="rounded-2xl px-4 py-3" style={{ backgroundColor: 'rgba(15,23,42,0.92)' }}>
                         <Text className="text-white font-bold text-[14px]">
-                          {scanFailure.kind === 'offline'
-                            ? "Can't reach GoodHealthMate"
-                            : scanFailure.kind === 'throttled'
-                              ? 'You are scanning a bit fast'
-                              : scanFailure.kind === 'timeout'
-                                ? 'That took too long'
-                                : 'That scan did not work'}
+                          {barcodeFailureCopy(scanFailure).title}
                         </Text>
                         <Text className="text-[12.5px] mt-1" style={{ color: '#CBD5E1' }}>
-                          {scanFailure.message} Point the camera at the barcode to try again.
+                          {barcodeFailureCopy(scanFailure).body} Point the camera at the barcode to try again.
                         </Text>
                       </View>
                     </View>
@@ -1009,17 +1166,39 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
           </View>
         )}
 
-        {!barcodeScanning && barcodeStage === 'picker' && scannedHit && !isSavingFood && (
+        {!barcodeScanning
+          && (barcodeStage === 'report' || (barcodeStage === 'picker' && pickerOrigin === 'report')) && (
+          <View style={styles.barcodeOverlay} pointerEvents={barcodeStage === 'picker' ? 'none' : 'auto'}>
+            <BarcodeReportSheet
+              form={editForm}
+              barcode={scannedCode}
+              photo={panelPhoto}
+              onChange={(patch) => setEditForm((current) => ({ ...current, ...patch }))}
+              onTakePhoto={() => void attachPanelPhoto('camera')}
+              onPickPhoto={() => void attachPanelPhoto('library')}
+              onRemovePhoto={removePanelPhoto}
+              onSend={() => openServingPicker('report')}
+              onScanAgain={handleReportScanAgain}
+              onCancel={closeScanner}
+              disabled={isSavingFood}
+            />
+          </View>
+        )}
+
+        {!barcodeScanning && barcodeStage === 'picker' && !isSavingFood && (scannedHit || pickerOrigin === 'report') && (
           <View style={styles.barcodeOverlay}>
             <MealServingPicker
-              servings={scannedHit.servings}
+              /* The report path has no catalogue serving to offer, so its one
+                 chip IS the label the user typed. Built as a real serving so
+                 the picker needs no branch for it. */
+              servings={scannedHit ? scannedHit.servings : [reportServing(editForm)]}
               selectedServingKey={chosenServingKey}
               quantity={chosenQuantity}
               selectedMeal={chosenMeal}
               onChangeServing={setChosenServingKey}
               onChangeQuantity={setChosenQuantity}
               onChangeMeal={(meal: MealTypeLabel) => setChosenMeal(meal)}
-              onConfirm={commitScannedFood}
+              onConfirm={pickerOrigin === 'report' ? commitReportedFood : commitScannedFood}
               onCancel={() => setBarcodeStage(pickerOrigin)}
             />
           </View>
@@ -1035,7 +1214,10 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
                   failure, so the sad bird is unconditional here. Matches what
                   CustomAlert derives for the same kind of message elsewhere. */}
               <View className="items-center justify-end mb-2" style={{ height: 96 }}>
-                {alertVisible && <PipBird size={96} state="sad" />}
+                {/* A question is not a failure: the sad rig is for the things
+                    that went wrong, `care` for the ones the user can still
+                    decide. */}
+                {alertVisible && <PipBird size={96} state={alertConfig.onConfirm ? 'care' : 'sad'} />}
               </View>
               {/* Shared confirmation type scale — see confirmationTypography.ts */}
               <Text style={confirmationType.title} className="mb-2">
@@ -1044,12 +1226,36 @@ const AddFoodModal = ({ visible, onClose, mealType, onAddFood }: AddFoodModalPro
               <Text style={confirmationType.message} className="mb-6">
                 {alertConfig.message}
               </Text>
-              <TouchableOpacity
-                onPress={() => setAlertVisible(false)}
-                className="bg-primary py-3 rounded-xl items-center w-full"
-              >
-                <Text className="text-white font-bold">Close</Text>
-              </TouchableOpacity>
+              {alertConfig.onConfirm ? (
+                <>
+                  <TouchableOpacity
+                    onPress={() => {
+                      const confirm = alertConfig.onConfirm;
+                      setAlertVisible(false);
+                      confirm?.();
+                    }}
+                    accessibilityRole="button"
+                    className="bg-primary py-3 rounded-xl items-center w-full"
+                  >
+                    <Text className="text-white font-bold">{alertConfig.confirmLabel}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setAlertVisible(false)}
+                    accessibilityRole="button"
+                    className="py-3 items-center w-full"
+                  >
+                    <Text className="font-bold" style={{ color: '#9AA3B2' }}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => setAlertVisible(false)}
+                  accessibilityRole="button"
+                  className="bg-primary py-3 rounded-xl items-center w-full"
+                >
+                  <Text className="text-white font-bold">Close</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}
