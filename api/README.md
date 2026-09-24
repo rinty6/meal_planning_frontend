@@ -88,9 +88,9 @@ Update this table in the same commit as each migration (checklist Phase 7).
 
 | Consumer | Old imports | Target | Status |
 |---|---|---|---|
-| `components/addfoodmodal.tsx` | ~~`mealAPI: searchFoodItems, getFoodById`~~ (migrated 2026-09-18) · `barcodeAPI: fetchBarcodeData` | `api/addFood/` · `api/barcode/` | search DONE; barcode layer built 2026-09-23, the modal still calls `barcodeAPI` until Phase 4 rewires it |
+| `components/addfoodmodal.tsx` | ~~`mealAPI: searchFoodItems, getFoodById`~~ · ~~`barcodeAPI: fetchBarcodeData`~~ | `api/addFood/` · `api/barcode/` | **DONE.** Search 2026-09-18, barcode 2026-09-23. This file imports no frozen module at all and came off the ESLint allowlist on 2026-09-25. |
 | `components/VoiceSearchModal.tsx` | `mealAPI: searchFoodItems, searchRecipes` | `api/addFood/` (foods) · `api/recipes/` (recipes) | not started |
-| `services/barcodeAPI.tsx` (live Open Food Facts) | — | `api/barcode/` via `GET /api/catalog/foods/barcode/:code` | replacement BUILT (lookup + label report). Delete the file at zero importers, after Phase 4/5 (checklist b7-01, b7-02) |
+| ~~`services/barcodeAPI.tsx`~~ (live Open Food Facts) | — | `api/barcode/` via `GET /api/catalog/foods/barcode/:code` | **DELETED 2026-09-25** at zero importers (checklist b7-01, b7-02). The live OFF call did not disappear, it moved server-side as a fallback: `backend/src/services/offLive.js`. |
 | `app/(tabs)/meal/recipe/index.tsx` | `mealAPI: searchRecipes` | `api/recipes/` | not started (own design pass first) |
 | `app/(tabs)/meal/recipedetail.tsx` | `mealAPI: getRecipeDetails` · `themealdbAPI` | `api/recipes/` | not started |
 | `app/(tabs)/meal/explore.tsx` | `themealdbAPI: getCuisines, getDishesByCuisine` | `api/recipes/` (catalog categories) | not started |
@@ -98,7 +98,9 @@ Update this table in the same commit as each migration (checklist Phase 7).
 | `services/recommendation.ts` + `mealAPI.combos.ts` | `mealAPI: resolveFoodImageFromFatSecret, searchFoodItems, getFoodById` | `api/recommendations/` | not started (last; backend engine is its own workstream) |
 
 Frozen files (header comment + ESLint `no-restricted-imports` allowlist, see checklist p7-01/p7-02):
-`services/mealAPI.tsx`, `services/recommendation.ts`, `services/barcodeAPI.tsx`, `services/mealAPI.combos.ts`.
+`services/mealAPI.tsx`, `services/recommendation.ts`, `services/mealAPI.combos.ts`.
+One down: `services/barcodeAPI.tsx` was deleted on 2026-09-25, and its ESLint pattern went with it.
+A guard over a file that no longer exists is noise, and the thing it guarded against is now impossible.
 Not frozen, still the right foundation: `services/authedFetch.ts`, `services/*Store.ts`,
 `services/recipeNutrition.ts`, `services/mealLogOutcome.ts`.
 

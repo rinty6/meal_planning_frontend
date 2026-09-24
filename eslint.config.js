@@ -7,16 +7,16 @@ const expoConfig = require('eslint-config-expo/flat');
 // "Migration map"). Nobody new may import them. The allowlist below is exactly
 // the set of importers that existed at the freeze; shrink it in the same
 // commit as each migration, and when it is empty delete the file it guards.
+// barcodeAPI left this list on 2026-09-25 with the file: a pattern guarding
+// nothing is noise, and the thing it guarded against is now impossible.
 const FROZEN_MODULE_PATTERNS = [
   '**/services/mealAPI',
   '**/services/mealAPI.combos',
   '**/services/recommendation',
-  '**/services/barcodeAPI',
   // Same modules when imported from inside services/ itself.
   './mealAPI',
   './mealAPI.combos',
   './recommendation',
-  './barcodeAPI',
 ];
 
 const FROZEN_MESSAGE =
@@ -24,8 +24,10 @@ const FROZEN_MESSAGE =
   '(api/README.md, "Migration map"). If you are migrating an existing consumer, ' +
   'remove it from FROZEN_IMPORT_ALLOWLIST in eslint.config.js in the same commit.';
 
+// addfoodmodal.tsx came off on 2026-09-25: after the search migration and the
+// barcode one it imports no frozen module at all. An allowlist that is not
+// exactly the set of remaining importers stops being a measure of progress.
 const FROZEN_IMPORT_ALLOWLIST = [
-  'components/addfoodmodal.tsx',
   'components/VoiceSearchModal.tsx',
   'app/(tabs)/meal/recipe/index.tsx',
   'app/(tabs)/meal/recipedetail.tsx',
@@ -34,7 +36,6 @@ const FROZEN_IMPORT_ALLOWLIST = [
   'services/mealAPI.tsx',
   'services/recommendation.ts',
   'services/mealAPI.combos.ts',
-  'services/barcodeAPI.tsx',
 ];
 
 module.exports = defineConfig([

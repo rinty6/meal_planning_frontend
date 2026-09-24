@@ -35,7 +35,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useCameraPermissions } from 'expo-camera';
 // Search reads the self-owned catalogue through api/addFood, barcode through
 // api/barcode (checklist Phase 3/4). Nothing here imports the frozen
-// services/mealAPI.tsx or services/barcodeAPI.tsx any more.
+// services/mealAPI.tsx, and services/barcodeAPI.tsx no longer exists.
 import {
   searchCatalogFoods,
   toFoodCards,

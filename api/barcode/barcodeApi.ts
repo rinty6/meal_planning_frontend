@@ -9,7 +9,9 @@
  *         POST /api/favorites/upload-image       (the photo of the nutrition
  *              panel, into the barcode-reports folder the backend allows)
  *         Both in backend/src/routes/catalog.js. Replaces the direct
- *         openfoodfacts.org call in the frozen services/barcodeAPI.tsx.
+ *         openfoodfacts.org call that services/barcodeAPI.tsx made from the
+ *         phone; that file was deleted 2026-09-25 and the live OFF call now
+ *         runs server-side as a fallback.
  * Caches: lookups in memory for 10 minutes, 30 entries, keyed by the
  *         normalised digits. A miss is cached like a hit — a shelf of unknown
  *         packs should not be a shelf of requests — but a failure never is.

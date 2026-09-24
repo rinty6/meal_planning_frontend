@@ -96,8 +96,8 @@ meal_app/app/
 | `services/planning.network.ts` | Meal-plan preferences, recommendation events, and meal logging calls. |
 | `services/foodRecognitionAPI.ts` | Converts a local image URI to base64 and calls `/api/food-recognition/predict`. |
 | `services/feedbackAPI.ts` | Sends app feedback and food-recognition correction feedback. |
-| `services/mealAPI.tsx` | FatSecret-backed food search and nutrition helper logic. |
-| `services/barcodeAPI.tsx` | Barcode lookup support. |
+| `services/mealAPI.tsx` | FatSecret-backed food search and nutrition helper logic. Frozen; being retired per consumer into `api/`. |
+| `api/barcode/` | Barcode lookup and label reports against the self-owned catalogue. Replaced `services/barcodeAPI.tsx`, which called Open Food Facts from the phone and was deleted 2026-09-25. |
 | `services/*Store.ts` | Local feature state helpers for home, favourites, meal summaries, notifications, and profile flows. |
 
 ## Main Backend Calls
