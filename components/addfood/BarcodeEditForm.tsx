@@ -20,7 +20,9 @@
  *
  * Chrome: the back arrow and nothing else. The ✕ went with the found sheet's,
  * because backing out of an edit means going back to the product, not leaving
- * the flow from a screen full of half-typed numbers.
+ * the flow from a screen full of half-typed numbers. The arrow sits on the
+ * grabber's line rather than in the header proper, so the header row is
+ * identical to the found sheet's (SheetHeader owns both).
  *
  * Keyboard: the form scrolls inside a KeyboardAvoidingView. The keyboard is an
  * OS layer above everything, so this is handled here rather than with zIndex
@@ -38,10 +40,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 
 import type { BarcodeReportForm } from '../../api/barcode/barcodeApi.types';
-import PipBird from '../pip/PipBird';
+import SheetHeader from './SheetHeader';
 import { useSheetBottomPadding } from './sheetLayout';
 
 type Props = {
@@ -109,41 +110,20 @@ const BarcodeEditForm = ({
       style={{ flex: 1, justifyContent: 'flex-end' }}
     >
       <View className="rounded-t-3xl px-4 pt-2.5" style={{ backgroundColor: '#FFFFFF', maxHeight: '92%', paddingBottom }}>
-        <View className="self-center rounded-full mb-2" style={{ width: 40, height: 5, backgroundColor: '#E3E8EF' }} />
-
-        <View className="flex-row items-center mb-1.5">
-          <TouchableOpacity
-            onPress={onBack}
-            disabled={disabled}
-            accessibilityRole="button"
-            accessibilityLabel="Back to the scanned product"
-            className="rounded-full items-center justify-center"
-            style={{ width: 32, height: 32, backgroundColor: '#EEF2F6' }}
-          >
-            <Ionicons name="arrow-back" size={17} color="#374151" />
-          </TouchableOpacity>
-
-          <Text className="flex-1 text-base font-extrabold text-center" style={{ color: '#0B2149' }}>
-            Edit food details
-          </Text>
-
-          {/* Balances the arrow so the title sits centred. */}
-          <View style={{ width: 32, height: 32 }} />
-        </View>
+        <SheetHeader
+          title="Edit food details"
+          subtitle="Scanned from the label"
+          barcode={barcode}
+          pip="happy"
+          onBack={onBack}
+          disabled={disabled}
+        />
 
         <ScrollView
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingBottom: 4 }}
           showsVerticalScrollIndicator={false}
         >
-          <View className="flex-row items-center mb-2">
-            <PipBird state="happy" size={48} />
-            <View className="flex-1 ml-2">
-              <Text className="text-[14.5px] font-extrabold" style={{ color: '#0B2149' }}>Scanned from the label</Text>
-              <Text className="text-[11.5px]" style={{ color: '#6B7280' }}>Barcode {barcode}</Text>
-            </View>
-          </View>
-
           <View className="rounded-2xl p-3" style={{ borderWidth: 1, borderColor: '#E3E8EF' }}>
             <View className="mb-1.5">
               <Field label="Food name" value={form.productName} editable={!disabled} onChangeText={(t) => onChange({ productName: t })} />

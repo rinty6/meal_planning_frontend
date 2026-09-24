@@ -6,9 +6,15 @@
  * and the tone is an invitation rather than an apology: the user is about to
  * do us a favour and log their own food at the same time.
  *
- * Same shape as BarcodeEditForm on the found path, with the sad rig instead of
- * the happy one, so the two read as one family. The difference is meaning: the
- * numbers typed here go to us as well as into their log.
+ * Same shape as BarcodeEditForm on the found path, down to the shared
+ * SheetHeader, with the sad rig instead of the happy one, so the three sheets
+ * read as one family. The difference is meaning: the numbers typed here go to
+ * us as well as into their log.
+ *
+ * Pip is smaller here than on the other two. This header sits outside the
+ * scroll view, above a seven-field form and three buttons, so every pixel it
+ * takes is a pixel the form loses when the keyboard is up. The barcode chip
+ * and the layout are the same; only the bird is.
  *
  * Three exits, in the order asked for on 2026-09-22: send and log, scan a
  * different pack, leave. No ✕, because Cancel already is one.
@@ -35,7 +41,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import type { BarcodeReportForm } from '../../api/barcode/barcodeApi.types';
 import { missingReportFields } from '../../api/barcode/barcodeApi.mappers';
-import PipBird from '../pip/PipBird';
+import SheetHeader from './SheetHeader';
 import { useSheetBottomPadding } from './sheetLayout';
 
 /** Where the optional panel photo has got to. `failed` never blocks Send. */
@@ -246,17 +252,7 @@ const BarcodeReportSheet = ({
         style={{ flex: 1, justifyContent: 'flex-end' }}
       >
         <View className="rounded-t-3xl px-4 pt-2.5" style={{ backgroundColor: '#FFFFFF', maxHeight: '94%', paddingBottom }}>
-          <View className="self-center rounded-full mb-2" style={{ width: 40, height: 5, backgroundColor: '#E3E8EF' }} />
-
-          <View className="flex-row items-center mb-1.5">
-            <PipBird state="sad" size={52} />
-            <View className="flex-1 ml-2">
-              <Text className="text-[16px] font-extrabold" style={{ color: '#0B2149' }}>
-                We don’t know this one yet
-              </Text>
-              <Text className="text-[11.5px]" style={{ color: '#6B7280' }}>Barcode {barcode}</Text>
-            </View>
-          </View>
+          <SheetHeader title="We don’t know this one yet" barcode={barcode} pip="sad" pipSize={60} />
 
           <Text className="text-[12.5px] mb-2.5" style={{ color: '#475569' }}>
             Tell us what’s on the label. We’ll check it and add the product to the catalogue for everyone.

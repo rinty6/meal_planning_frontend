@@ -4,13 +4,14 @@
  * searched food are the same object to the user.
  *
  * Laid out as BarcodeEditForm, deliberately (device feedback 2026-09-24): the
- * same title bar, the same Pip strip with the barcode under it, the same
- * bordered card, and the numbers in the same two-column grid and the same
- * order as the fields that edit them. Tapping "Edit details" should feel like
- * these numbers became editable in place, not like a different screen opened.
- * The first build merged the title into the Pip row and put four nutrition
- * tiles on one line, which left the sheet both shorter than the design and
- * cramped on a phone.
+ * shared SheetHeader, the same bordered card, and the numbers in the same
+ * two-column grid and the same order as the fields that edit them. Tapping
+ * "Edit details" should feel like these numbers became editable in place, not
+ * like a different screen opened. The first build merged the title into the
+ * Pip row and put four nutrition tiles on one line, which left the sheet both
+ * shorter than the design and cramped on a phone; the fix for that then put
+ * the title on a bar of its own ABOVE Pip, which is why the header is a shared
+ * component now rather than something each sheet lays out again.
  *
  * Three actions and no more: add it, correct it, scan the next one. There is
  * no ✕ on the sheet (feedback 2026-09-23): "Scan again" goes back to the
@@ -31,7 +32,7 @@ import type { FoodCardVM } from '../../api/addFood/addFoodApi.types';
 import { formatGrams } from '../../api/addFood/addFoodApi.mappers';
 import type { BarcodeSource } from '../../api/barcode/barcodeApi.types';
 import { formatEnergy } from '../../utils/energy';
-import PipBird from '../pip/PipBird';
+import SheetHeader from './SheetHeader';
 import { useSheetBottomPadding } from './sheetLayout';
 
 type Props = {
@@ -77,25 +78,7 @@ const BarcodeFoundSheet = ({ vm, barcode, source, onAdd, onEdit, onScanAgain, on
         className="absolute left-0 right-0 bottom-0 rounded-t-3xl px-4 pt-2.5"
         style={{ backgroundColor: '#FFFFFF', paddingBottom }}
       >
-        <View className="self-center rounded-full mb-2" style={{ width: 40, height: 5, backgroundColor: '#E3E8EF' }} />
-
-        {/* Title bar. No buttons in it: the spacers hold the title on the line
-            it occupies in the edit sheet, where the back arrow lives. */}
-        <View className="flex-row items-center mb-1.5">
-          <View style={{ width: 32, height: 32 }} />
-          <Text className="flex-1 text-base font-extrabold text-center" style={{ color: '#0B2149' }}>
-            Found it!
-          </Text>
-          <View style={{ width: 32, height: 32 }} />
-        </View>
-
-        <View className="flex-row items-center mb-2">
-          <PipBird state="happy" size={48} />
-          <View className="flex-1 ml-2">
-            <Text className="text-[14.5px] font-extrabold" style={{ color: '#0B2149' }}>Scanned from the label</Text>
-            <Text className="text-[11.5px]" style={{ color: '#6B7280' }}>Barcode {barcode}</Text>
-          </View>
-        </View>
+        <SheetHeader title="Found it!" subtitle="Scanned from the label" barcode={barcode} pip="happy" />
 
         <View className="rounded-2xl p-3" style={{ borderWidth: 1, borderColor: '#E3E8EF' }}>
           <Text className="text-[15px] font-extrabold" style={{ color: '#0B2149' }} numberOfLines={2}>
