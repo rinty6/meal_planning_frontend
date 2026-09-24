@@ -22,6 +22,7 @@
 
 import type { PipState } from '../components/pip/PipBird';
 import { zoneFromPayload } from './calorieBand';
+import { dayProgressFromPayload, type DayProgress } from '../utils/dayProgress';
 
 export type MealLogSuccessPip = Extract<PipState, 'eating' | 'happy' | 'confident'>;
 
@@ -31,6 +32,14 @@ export type MealLogOutcome = {
   message: string;
   pip: MealLogSuccessPip;
   actionLabel: string;
+  /**
+   * Where the day stands after this save, for the strip under the message.
+   * Null when the numbers are not all there: no goal, an older backend, or a
+   * payload that never arrived. Attached HERE rather than at the call sites so
+   * every screen that logs a meal shows it without opting in (checklist
+   * b6-04).
+   */
+  day: DayProgress | null;
 };
 
 export type MealLogFailure = {
@@ -97,6 +106,10 @@ export const resolveMealLogOutcome = (payload: unknown, context: MealLogContext)
   const body = payload as { reachedTarget?: unknown } | null;
   const zone = zoneFromPayload(payload);
 
+  // `over` is the band's verdict, the same one the copy below uses, so the bar
+  // and the words on one card can never disagree (ERROR 074).
+  const day = dayProgressFromPayload(payload, context.mealType, { over: zone === 'over' });
+
   if (zone === 'over') {
     return {
       kind: 'success',
@@ -104,6 +117,7 @@ export const resolveMealLogOutcome = (payload: unknown, context: MealLogContext)
       message: 'Food added. Tomorrow is a clean slate.',
       pip: 'confident',
       actionLabel: 'Confirm',
+      day,
     };
   }
 
@@ -114,6 +128,7 @@ export const resolveMealLogOutcome = (payload: unknown, context: MealLogContext)
       message: "Great job! You're on target for today.",
       pip: 'happy',
       actionLabel: 'Confirm',
+      day,
     };
   }
 
@@ -124,6 +139,7 @@ export const resolveMealLogOutcome = (payload: unknown, context: MealLogContext)
     message: `${context.itemLabel} ${verb} in your ${mealLabel(context.mealType)}.`,
     pip: 'eating',
     actionLabel: 'Confirm',
+    day,
   };
 };
 

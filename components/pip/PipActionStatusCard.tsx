@@ -51,6 +51,7 @@ import {
 } from 'react-native';
 import PipBird, { type PipState } from './PipBird';
 import { confirmationType } from '../confirmationTypography';
+import { dayProgressView } from '../../utils/dayProgress';
 import {
   resolveMealLogFailure,
   type MealLogContext,
@@ -239,6 +240,9 @@ const PAL = {
   // Tailwind blue-300: the disabled primary pill AddFoodModal already uses on a
   // busy Add button (`bg-blue-300` + small white ActivityIndicator).
   primaryDisabled: '#93C5FD',
+  // The app's secondary. Past the top of the tolerance band, not past the
+  // number: see utils/dayProgress.ts.
+  over: '#FF9500',
 };
 
 /** SuccessModal's Pip size (sucessmodal.tsx). */
@@ -314,6 +318,12 @@ export function PipActionStatusCard({ status, onConfirm, note, style }: PipActio
   const title = status.phase === 'loading' ? status.title : status.result.title;
   const message = status.phase === 'loading' ? status.message : status.result.message;
   const buttonLabel = status.phase === 'loading' ? 'Saving…' : status.result.actionLabel;
+  // The strip belongs to the outcome, so it appears with the copy swap and is
+  // absent while saving: there is nothing true to say about the day yet.
+  const day =
+    status.phase !== 'loading' && status.result.kind === 'success' && status.result.day
+      ? dayProgressView(status.result.day)
+      : null;
   const buttonEnabled = status.phase === 'ready';
   const buttonBackground = wake.interpolate({
     inputRange: [0, 1],
@@ -342,6 +352,30 @@ export function PipActionStatusCard({ status, onConfirm, note, style }: PipActio
           {note && status.phase !== 'loading' && status.result.kind === 'success' ? (
             <View style={styles.note}>
               <Text style={styles.noteText}>{note}</Text>
+            </View>
+          ) : null}
+
+          {/* Where the day stands, when the numbers are all there. Absent for a
+              user with no goal rather than drawn against a guess. */}
+          {day ? (
+            <View style={styles.day}>
+              <View style={styles.dayTrack}>
+                <View
+                  style={[
+                    styles.dayFill,
+                    { width: `${day.fillPercent}%`, backgroundColor: day.over ? PAL.over : PAL.primary },
+                  ]}
+                />
+              </View>
+              <View style={styles.dayLabels}>
+                <Text style={styles.dayLabel} numberOfLines={1}>{day.left}</Text>
+                <Text
+                  style={[styles.dayLabel, day.over ? styles.dayLabelOver : null]}
+                  numberOfLines={1}
+                >
+                  {day.right}
+                </Text>
+              </View>
             </View>
           ) : null}
         </Animated.View>
@@ -430,6 +464,37 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     textAlign: 'center',
     color: '#3F7D55',
+  },
+  // The day strip (barcode checklist Phase 6). A measurement, so it is quiet:
+  // a 6px track and two small labels, no heading and no icon.
+  day: {
+    marginTop: 14,
+    alignSelf: 'stretch',
+  },
+  dayTrack: {
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: '#EEF2F6',
+    overflow: 'hidden',
+  },
+  dayFill: {
+    height: 6,
+    borderRadius: 999,
+  },
+  dayLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+    gap: 10,
+  },
+  dayLabel: {
+    fontSize: 11.5,
+    color: '#6B7280',
+    flexShrink: 1,
+  },
+  dayLabelOver: {
+    color: '#B45309',
+    fontWeight: '700',
   },
   buttonTouch: {
     alignSelf: 'stretch',
