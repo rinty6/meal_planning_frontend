@@ -1,7 +1,16 @@
 /**
- * "Found it!" (Design C, screen 3). A white sheet over the frozen camera
- * carrying the same card the search results use, so a scanned food and a
+ * "Found it!" (Design C, screen 3). A white sheet over the dimmed Add Food
+ * sheet carrying the same card the search results use, so a scanned food and a
  * searched food are the same object to the user.
+ *
+ * Laid out as BarcodeEditForm, deliberately (device feedback 2026-09-24): the
+ * same title bar, the same Pip strip with the barcode under it, the same
+ * bordered card, and the numbers in the same two-column grid and the same
+ * order as the fields that edit them. Tapping "Edit details" should feel like
+ * these numbers became editable in place, not like a different screen opened.
+ * The first build merged the title into the Pip row and put four nutrition
+ * tiles on one line, which left the sheet both shorter than the design and
+ * cramped on a phone.
  *
  * Three actions and no more: add it, correct it, scan the next one. There is
  * no ✕ on the sheet (feedback 2026-09-23): "Scan again" goes back to the
@@ -37,6 +46,19 @@ type Props = {
   disabled: boolean;
 };
 
+/** One number, shaped like the field that edits it on the next screen. */
+const Stat = ({ label, value, unit }: { label: string; value: string; unit?: string }) => (
+  <View style={{ flex: 1 }}>
+    <Text className="text-[10.5px] font-bold mb-1" style={{ color: '#6B7280' }}>{label}</Text>
+    <View className="flex-row items-center rounded-xl px-3" style={{ backgroundColor: '#EEF2F6', minHeight: 38 }}>
+      <Text className="flex-1 text-[13px] font-bold" style={{ color: '#0B2149' }} numberOfLines={1}>
+        {value}
+      </Text>
+      {unit ? <Text className="text-[11px] ml-1" style={{ color: '#9AA3B2' }}>{unit}</Text> : null}
+    </View>
+  </View>
+);
+
 const BarcodeFoundSheet = ({ vm, barcode, source, onAdd, onEdit, onScanAgain, onClose, disabled }: Props) => {
   const brand = vm.tag.kind === 'brand' ? vm.tag.name : null;
   const paddingBottom = useSheetBottomPadding();
@@ -51,20 +73,32 @@ const BarcodeFoundSheet = ({ vm, barcode, source, onAdd, onEdit, onScanAgain, on
         accessibilityLabel="Close the scanner"
       />
 
-      <View className="absolute left-0 right-0 bottom-0 rounded-t-3xl px-4 pt-2.5" style={{ backgroundColor: '#FFFFFF', paddingBottom }}>
-        <View className="self-center rounded-full mb-2.5" style={{ width: 40, height: 5, backgroundColor: '#E3E8EF' }} />
+      <View
+        className="absolute left-0 right-0 bottom-0 rounded-t-3xl px-4 pt-2.5"
+        style={{ backgroundColor: '#FFFFFF', paddingBottom }}
+      >
+        <View className="self-center rounded-full mb-2" style={{ width: 40, height: 5, backgroundColor: '#E3E8EF' }} />
 
+        {/* Title bar. No buttons in it: the spacers hold the title on the line
+            it occupies in the edit sheet, where the back arrow lives. */}
         <View className="flex-row items-center mb-1.5">
-          <PipBird state="happy" size={54} />
+          <View style={{ width: 32, height: 32 }} />
+          <Text className="flex-1 text-base font-extrabold text-center" style={{ color: '#0B2149' }}>
+            Found it!
+          </Text>
+          <View style={{ width: 32, height: 32 }} />
+        </View>
+
+        <View className="flex-row items-center mb-2">
+          <PipBird state="happy" size={48} />
           <View className="flex-1 ml-2">
-            <Text className="text-lg font-extrabold" style={{ color: '#0B2149' }}>Found it!</Text>
+            <Text className="text-[14.5px] font-extrabold" style={{ color: '#0B2149' }}>Scanned from the label</Text>
             <Text className="text-[11.5px]" style={{ color: '#6B7280' }}>Barcode {barcode}</Text>
           </View>
         </View>
 
-        {/* The Design 3 card, laid out for a sheet rather than a list row. */}
-        <View className="rounded-2xl p-3 mb-2" style={{ backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DAE2EC' }}>
-          <Text className="text-base font-extrabold" style={{ color: '#0B2149' }} numberOfLines={2}>
+        <View className="rounded-2xl p-3" style={{ borderWidth: 1, borderColor: '#E3E8EF' }}>
+          <Text className="text-[15px] font-extrabold" style={{ color: '#0B2149' }} numberOfLines={2}>
             {vm.title}
           </Text>
 
@@ -79,28 +113,25 @@ const BarcodeFoundSheet = ({ vm, barcode, source, onAdd, onEdit, onScanAgain, on
             </View>
           </View>
 
-          <View className="flex-row items-center mt-1.5">
+          <View className="flex-row items-center mt-1.5 mb-2">
             <Ionicons name="scale-outline" size={13} color="#6B7280" />
             <Text className="text-xs ml-1" style={{ color: '#6B7280' }} numberOfLines={1}>
               Per {vm.servingLabel}
             </Text>
           </View>
 
-          <View className="flex-row mt-2.5" style={{ gap: 6 }}>
-            {[
-              { value: formatEnergy(vm.energyKcal, { withUnit: false }), label: 'kJ' },
-              { value: formatGrams(vm.proteinG), label: 'Protein' },
-              { value: formatGrams(vm.fatG), label: 'Fat' },
-              { value: formatGrams(vm.carbG), label: 'Carbs' },
-            ].map((tile) => (
-              <View key={tile.label} className="flex-1 rounded-xl py-2 items-center" style={{ backgroundColor: '#EEF2F6' }}>
-                <Text className="text-sm font-bold" style={{ color: '#0B2149' }} numberOfLines={1}>{tile.value}</Text>
-                <Text className="text-[10.5px]" style={{ color: '#6B7280' }}>{tile.label}</Text>
-              </View>
-            ))}
+          {/* Two columns, in the order the edit form asks for them, so one
+              number sits in the same place on both screens. */}
+          <View className="flex-row mb-1.5" style={{ gap: 8 }}>
+            <Stat label="Energy" value={formatEnergy(vm.energyKcal, { withUnit: false })} unit="kJ" />
+            <Stat label="Protein" value={formatGrams(vm.proteinG)} />
+          </View>
+          <View className="flex-row" style={{ gap: 8 }}>
+            <Stat label="Carbs" value={formatGrams(vm.carbG)} />
+            <Stat label="Fat" value={formatGrams(vm.fatG)} />
           </View>
 
-          <Text className="text-[11px] mt-2" style={{ color: source === 'catalog' ? '#10B981' : '#D97706' }}>
+          <Text className="text-[11px] mt-2.5" style={{ color: source === 'catalog' ? '#10B981' : '#D97706' }}>
             {source === 'catalog'
               ? `✓ From our catalogue${brand ? ` · ${brand} label` : ''}`
               : 'Unverified · straight from Open Food Facts'}
@@ -111,7 +142,7 @@ const BarcodeFoundSheet = ({ vm, barcode, source, onAdd, onEdit, onScanAgain, on
           onPress={onAdd}
           disabled={disabled}
           accessibilityRole="button"
-          className="rounded-2xl py-3 items-center mt-1"
+          className="rounded-2xl py-3 items-center mt-3"
           style={{ backgroundColor: disabled ? '#BFDBFE' : '#007BFF' }}
         >
           <Text className="text-white font-bold text-base">Add to Meal Plan</Text>
