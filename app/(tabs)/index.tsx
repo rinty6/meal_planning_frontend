@@ -295,6 +295,14 @@ const HomeScreen = () => {
                 source: foodItem.source || foodItem.type || '',
                 servingId: foodItem.servingId || foodItem.serving_id || '',
                 servingDescription: foodItem.servingDescription || foodItem.serving_description || '',
+                // meal_logs stores the TOTAL in calories/macros and the multiplier
+                // in servings; per-serving is derived as total/servings (Error 061).
+                // Home sent the scaled total and no multiplier, so a 2-serving scan
+                // was stored as one serving of a double-sized food: the summary read
+                // "1", and its +/- stepper would have rescaled from the wrong base.
+                // Never mattered until the barcode picker, because search always
+                // logs exactly one serving (device pass, 2026-09-25).
+                servings: foodItem.servings || undefined,
                 nutrients: foodItem.nutrients || {},
             }),
         });
