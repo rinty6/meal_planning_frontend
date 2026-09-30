@@ -46,6 +46,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
 import { searchFoodItems, searchRecipes } from '../services/mealAPI';
+import { buildAddMealBody, scaleToTotals } from '../api/mealLog/addMealPayload';
 import { authedFetch } from '../services/authedFetch';
 import { markMealsSummaryDirty } from '../services/mealsSummaryStore';
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../services/mealLogOutcome';
@@ -434,24 +435,24 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
           // multiplier; meal summary derives per-serving as total / servings, so the
           // macros must be scaled here (ERROR_LOG Error 061).
           const servingText = String(item?.serving_description ?? '').trim();
-          const payload = {
+          const payload = buildAddMealBody({
             clerkId: userId,
             date,
             mealType,
-            foodName: item?.title || 'Unknown item',
-            calories: toNumber(item?.calories) * servings,
-            protein: toNumber(item?.protein) * servings,
-            carbs: toNumber(item?.carbs ?? item?.carbohydrate) * servings,
-            fats: toNumber(item?.fats ?? item?.fat) * servings,
-            image: item?.image || '',
+            foodName: item?.title,
+            ...scaleToTotals({
+              calories: item?.calories,
+              protein: item?.protein,
+              carbs: item?.carbs ?? item?.carbohydrate,
+              fats: item?.fats ?? item?.fat,
+            }, servings),
+            image: item?.image,
             externalId: itemId,
             source: mode === 'food' ? 'fatsecret_food' : 'fatsecret_recipe',
-            servingId: String(item?.serving_id ?? ''),
-            servings,
+            servingId: item?.serving_id,
             servingDescription:
               servings === 1 ? servingText || '1 serving' : `${formatServings(servings)} servings`,
-            nutrients: {},
-          };
+          });
 
           const response = await authedFetch('/api/meals/add', {
             method: 'POST',

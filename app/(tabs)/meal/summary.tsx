@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
+import { buildAddMealBody } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from '../../../services/authedFetch';
 import { formatEnergy } from '../../../utils/energy';
 import AddFoodModal from '../../../components/addfoodmodal';
@@ -265,7 +266,11 @@ export default function SummaryScreen() {
     if (!userId) throw new MealLogRequestError('You must be logged in to save meals.', 401);
     const formattedDate = formatLocalYYYYMMDD(selectedDate);
 
-    const payload = {
+    // Catalogue rows (api/addFood toLoggableFood) carry their identity and
+    // the serving they were logged at; manual/recognition items leave those
+    // blank and the builder turns blank into undefined, which the backend
+    // stores as NULL exactly as before.
+    const payload = buildAddMealBody({
       clerkId: userId,
       date: formattedDate,
       // A food may name the meal it belongs to (the barcode scanner's picker
@@ -277,17 +282,14 @@ export default function SummaryScreen() {
       protein: foodItem.protein,
       carbs: foodItem.carbs,
       fats: foodItem.fats,
-      image: foodItem.image || "",
-      // Catalogue rows (api/addFood toLoggableFood) carry their identity and
-      // the serving they were logged at; manual/recognition items leave these
-      // undefined and the backend stores null, exactly as before.
-      externalId: foodItem.externalId || undefined,
-      source: foodItem.source || undefined,
-      servingId: foodItem.servingId || undefined,
-      servingDescription: foodItem.servingDescription || undefined,
-      servings: foodItem.servings || undefined,
-      nutrients: foodItem.nutrients || undefined,
-    };
+      servings: foodItem.servings,
+      image: foodItem.image,
+      externalId: foodItem.externalId,
+      source: foodItem.source,
+      servingId: foodItem.servingId,
+      servingDescription: foodItem.servingDescription,
+      nutrients: foodItem.nutrients,
+    });
 
     const response = await authedFetch(`/api/meals/add`, {
         method: 'POST',

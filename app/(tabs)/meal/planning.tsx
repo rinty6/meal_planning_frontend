@@ -47,6 +47,7 @@ import { PipActionStatusCard, usePipActionStatus } from "../../../components/pip
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from "../../../services/mealLogOutcome";
 import { getCachedHomeSnapshot } from "../../../services/homeStore";
 import { markFavoritesDirty } from "../../../services/favoritesStore";
+import { buildAddMealBody } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from "../../../services/authedFetch";
 import { energyValue, formatEnergy, parseEnergyInput } from "../../../utils/energy";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
@@ -1072,7 +1073,7 @@ const PlanningScreen = () => {
         method: "POST",
         getToken,
         clerkId: userId,
-        body: JSON.stringify({
+        body: JSON.stringify(buildAddMealBody({
           clerkId: userId,
           date,
           // The barcode scanner's picker can name the meal; everything else
@@ -1083,16 +1084,16 @@ const PlanningScreen = () => {
           protein: foodItem.protein,
           carbs: foodItem.carbs,
           fats: foodItem.fats,
-          image: foodItem.image || "",
+          servings: foodItem.servings,
+          image: foodItem.image,
           externalId: getExternalId(foodItem),
-          source: foodItem.source || foodItem.type || "",
-          servingId: foodItem.servingId || foodItem.serving_id || "",
-          servingDescription: foodItem.servingDescription || foodItem.serving_description || "",
-          servings: foodItem.servings || undefined,
+          source: foodItem.source || foodItem.type,
+          servingId: foodItem.servingId || foodItem.serving_id,
+          servingDescription: foodItem.servingDescription || foodItem.serving_description,
           // Catalogue rows (api/addFood toLoggableFood) bring the full
           // nutrition_profiles row; keep the legacy snapshot keys alongside it.
           nutrients: { ...buildNutrientsSnapshot(foodItem), ...(foodItem.nutrients || {}) },
-        }),
+        })),
       });
 
       const payload = await response.json().catch(() => ({}));

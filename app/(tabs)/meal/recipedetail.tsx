@@ -8,6 +8,7 @@ import { getRecipeDetails } from '../../../services/mealAPI';
 import { getThemealdbRecipe, type ThemealdbRecipe } from '../../../services/themealdbAPI';
 import { markFavoritesDirty } from '../../../services/favoritesStore';
 import { useAuth } from '@clerk/clerk-expo';
+import { buildAddMealBody, scaleToTotals } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from '../../../services/authedFetch';
 import { uploadRecipeImage } from '../../../services/recipeImages';
 import IngredientIcon from '../../../components/IngredientIcon';
@@ -521,7 +522,7 @@ const RecipeDetailScreen = () => {
             method: 'POST',
             getToken,
             clerkId: userId,
-            body: JSON.stringify({
+            body: JSON.stringify(buildAddMealBody({
               clerkId: userId,
               date,
               mealType,
@@ -529,21 +530,23 @@ const RecipeDetailScreen = () => {
               // recipeCalories/macros are per-serving for FatSecret, but a WHOLE-RECIPE
               // total for TheMealDB/custom. Divide by the recipe's servings count first
               // so "log 1" always means one true serving — not the entire dish — then
-              // scale by how many the user picked. TheMealDB uses its estimated servings
-              // (ERROR_LOG Error 061 follow-up); custom uses whatever the user typed in
-              // the servings pill; falls back to 1 (whole dish) when no count is known.
-              calories: (caloriesFromInput(recipeCalories) / logUnitDivisor) * logServings,
-              protein: (macroFromInput(recipeProtein) / logUnitDivisor) * logServings,
-              carbs: (macroFromInput(recipeCarbs) / logUnitDivisor) * logServings,
-              fats: (macroFromInput(recipeFats) / logUnitDivisor) * logServings,
-              servings: logServings,
+              // hand the per-serving figures to scaleToTotals with the number the user
+              // picked. TheMealDB uses its estimated servings (ERROR_LOG Error 061
+              // follow-up); custom uses whatever the user typed in the servings pill;
+              // falls back to 1 (whole dish) when no count is known.
+              ...scaleToTotals({
+                calories: caloriesFromInput(recipeCalories) / logUnitDivisor,
+                protein: macroFromInput(recipeProtein) / logUnitDivisor,
+                carbs: macroFromInput(recipeCarbs) / logUnitDivisor,
+                fats: macroFromInput(recipeFats) / logUnitDivisor,
+              }, logServings),
               servingDescription: `${logServings} serving${logServings === 1 ? "" : "s"}`,
-              image: baseRecipeInfo?.image || (previewImage as string) || "",
+              image: baseRecipeInfo?.image || (previewImage as string),
               externalId: baseRecipeInfo?.id || savedRecipeId || id || recipeName,
               source: savedRecipeId || isCreating === "true"
                 ? "custom_recipe"
                 : isThemealdb ? "themealdb_recipe" : "fatsecret_recipe",
-            }),
+            })),
           });
 
           const payload = await response.json().catch(() => ({}));

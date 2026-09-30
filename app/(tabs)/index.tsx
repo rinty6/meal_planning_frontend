@@ -24,6 +24,7 @@ import {
 import PipReminderCard from '../../components/pip/PipReminderCard';
 import { extractLoggedMealTypes, resolvePipCard } from '../../components/pip/pipHomeState';
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../../services/mealLogOutcome';
+import { buildAddMealBody } from '../../api/mealLog/addMealPayload';
 import { authedFetch } from '../../services/authedFetch';
 import { energyValue, formatEnergy } from '../../utils/energy';
 import {
@@ -281,30 +282,27 @@ const HomeScreen = () => {
             method: 'POST',
             getToken: getTokenRef.current,
             clerkId: userId,
-            body: JSON.stringify({
+            // One tested builder, shared with every other screen that logs a
+            // meal. Home is why it exists: it dropped mealType once and
+            // servings once, each time by a field missing from a literal
+            // (api/mealLog/addMealPayload.ts).
+            body: JSON.stringify(buildAddMealBody({
                 clerkId: userId,
                 date: getTodayFormatted(),
                 mealType,
-                foodName: foodItem.title || foodItem.food_name || 'Unknown Item',
-                calories: toNumber(foodItem.calories),
-                protein: toNumber(foodItem.protein),
-                carbs: toNumber(foodItem.carbs),
+                foodName: foodItem.title || foodItem.food_name,
+                calories: foodItem.calories,
+                protein: foodItem.protein,
+                carbs: foodItem.carbs,
                 fats: firstNumber(foodItem.fats, foodItem.fat),
-                image: foodItem.image || '',
+                servings: foodItem.servings,
+                image: foodItem.image,
                 externalId: getFoodExternalId(foodItem),
-                source: foodItem.source || foodItem.type || '',
-                servingId: foodItem.servingId || foodItem.serving_id || '',
-                servingDescription: foodItem.servingDescription || foodItem.serving_description || '',
-                // meal_logs stores the TOTAL in calories/macros and the multiplier
-                // in servings; per-serving is derived as total/servings (Error 061).
-                // Home sent the scaled total and no multiplier, so a 2-serving scan
-                // was stored as one serving of a double-sized food: the summary read
-                // "1", and its +/- stepper would have rescaled from the wrong base.
-                // Never mattered until the barcode picker, because search always
-                // logs exactly one serving (device pass, 2026-09-25).
-                servings: foodItem.servings || undefined,
-                nutrients: foodItem.nutrients || {},
-            }),
+                source: foodItem.source || foodItem.type,
+                servingId: foodItem.servingId || foodItem.serving_id,
+                servingDescription: foodItem.servingDescription || foodItem.serving_description,
+                nutrients: foodItem.nutrients,
+            })),
         });
 
         const payload = await response.json().catch(() => ({}));

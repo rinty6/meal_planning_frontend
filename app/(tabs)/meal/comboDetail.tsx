@@ -21,6 +21,7 @@ import { getServingsCount, formatGrams } from "../../../services/recipeNutrition
 import { formatEnergy } from "../../../utils/energy";
 import { peekCachedRecommendations } from "../../../services/recommendation";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
+import { buildAddMealBody, scaleToTotals } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from "../../../services/authedFetch";
 
 type ComboDetailItem = Record<string, any>;
@@ -413,26 +414,23 @@ const FoodDetailScreen = () => {
         let reachedTarget = false;
         try {
           for (const comboItem of itemsToSave) {
-            const payload = {
+            const payload = buildAddMealBody({
               clerkId: userId,
               date: dateStr,
               mealType,
-              foodName: comboItem.title || "Unknown Item",
-              // comboItem macros are per serving; scale by the chosen servings quantity.
-              calories: (parseFloat(comboItem.calories) || 0) * logServings,
-              protein: (parseFloat(comboItem.protein) || 0) * logServings,
-              carbs: (parseFloat(comboItem.carbs) || 0) * logServings,
-              fats: (parseFloat(comboItem.fats) || 0) * logServings,
-              image: comboItem.image || "",
+              foodName: comboItem.title,
+              // comboItem macros are per serving; scaleToTotals multiplies and
+              // rounds them the same way every other screen does.
+              ...scaleToTotals(comboItem, logServings),
+              image: comboItem.image,
               externalId: cleanId(comboItem.externalId || comboItem.external_id || comboItem.recipe_id || comboItem.fatsecret_food_id || comboItem.food_id || comboItem.id),
               source: cleanId(comboItem.source) || (isRecipeLikeItem(comboItem) ? "fatsecret_recipe" : "fatsecret_food"),
               servingId: cleanId(comboItem.servingId || comboItem.serving_id),
-              servings: logServings,
               servingDescription: logServings === 1
                 ? (cleanId(comboItem.servingDescription || comboItem.serving_description) || "1 serving")
                 : `${logServings} servings`,
-              nutrients: comboItem.nutrients && typeof comboItem.nutrients === "object" ? comboItem.nutrients : {},
-            };
+              nutrients: comboItem.nutrients,
+            });
 
             const res = await authedFetch(`/api/meals/add`, {
               method: "POST",
