@@ -14,6 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 import Button from '../../components/Button';
 import CustomAlert from '../../components/customAlert';
+// Who sees step 8. Shared with profile edit so the two cannot disagree.
+import { asksAboutPregnancy } from '../../utils/pregnancyQuestion';
 
 type OnboardingData = {
   favorites: string[];
@@ -30,6 +32,10 @@ type OnboardingData = {
     | 'super_active'
     | '';
   goal: 'lose_weight' | 'gain_muscle' | 'maintain' | '';
+  // Step 8, the two checkboxes. Plain booleans here; turned into the three
+  // stored states (true / false / null) only at submit, in buildPayload.
+  isPregnant: boolean;
+  isBreastfeeding: boolean;
 };
 
 const activities = [
@@ -119,7 +125,18 @@ const OnboardingScreen = () => {
     heightUnit: 'cm',
     activityLevel: '',
     goal: '',
+    isPregnant: false,
+    isBreastfeeding: false,
   });
+
+  // The step count is not fixed any more. It is 7 until step 3 is answered,
+  // then 8 for Female or Other, so the counter on steps 3-7 reads "of 8" for
+  // them. Before step 3 nothing is known, so "of 7" is the honest default.
+  const showPregnancyStep = asksAboutPregnancy(data.gender);
+  const totalSteps = showPregnancyStep ? 8 : 7;
+  const pregnancyAnswered = data.isPregnant || data.isBreastfeeding;
+  // On step 8 with nothing ticked, the primary button IS the skip.
+  const isSkipButton = step === 8 && !pregnancyAnswered;
 
   const showAlert = (message: string) => {
     setAlertMessage(message);
@@ -208,12 +225,27 @@ const OnboardingScreen = () => {
       return;
     }
 
-    if (step < 7) {
+    if (step < totalSteps) {
       setStep((prev) => prev + 1);
       return;
     }
 
     await submitData();
+  };
+
+  // The request body. The pregnancy answers become one of three states:
+  //   step not shown (male)          -> null, null   ("not stated")
+  //   shown, nothing ticked (skipped) -> null, null   ("not stated")
+  //   shown, at least one ticked      -> true/false for each box
+  // The server applies the same rule again (services/demographicsRules.js),
+  // so a male user can never be stored as pregnant even if this is bypassed.
+  const buildPayload = () => {
+    const answered = showPregnancyStep && pregnancyAnswered;
+    return {
+      ...data,
+      isPregnant: answered ? data.isPregnant : null,
+      isBreastfeeding: answered ? data.isBreastfeeding : null,
+    };
   };
 
   const handleBack = () => {
@@ -247,7 +279,7 @@ const OnboardingScreen = () => {
       const response = await fetch(`${apiURL}/api/demographics/save`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(data),
+        body: JSON.stringify(buildPayload()),
       });
 
       if (!response.ok) {
@@ -385,12 +417,20 @@ const OnboardingScreen = () => {
       {['Male', 'Female', 'Other'].map((genderOption) => (
         <TouchableOpacity
           key={genderOption}
-          onPress={() =>
-            updateData(
-              'gender',
-              genderOption.toLowerCase() as OnboardingData['gender']
-            )
-          }
+          onPress={() => {
+            const gender = genderOption.toLowerCase() as OnboardingData['gender'];
+            // The back-navigation edge case from the design: someone answers
+            // step 8, goes back here and picks Male. Step 8 then disappears,
+            // but its answers would still be sitting in state and be sent.
+            // Clear them the moment step 8 stops applying.
+            setData((prev) => ({
+              ...prev,
+              gender,
+              ...(asksAboutPregnancy(gender)
+                ? {}
+                : { isPregnant: false, isBreastfeeding: false }),
+            }));
+          }}
           className={`p-6 mb-4 rounded-2xl border flex-row justify-between items-center ${
             data.gender === genderOption.toLowerCase()
               ? 'bg-blue-50 border-primary'
@@ -526,6 +566,58 @@ const OnboardingScreen = () => {
     </View>
   );
 
+  // Step 8. Copy and behaviour come from the approved design; the cards reuse
+  // the gender step's look, including its right-aligned blue tick.
+  const pregnancyOptions = [
+    { key: 'isPregnant', label: "I'm pregnant", desc: 'More grains and protein.' },
+    { key: 'isBreastfeeding', label: "I'm breastfeeding", desc: 'More grains and vegetables.' },
+  ] as const;
+
+  const renderStep8 = () => (
+    <View>
+      <Text className="text-2xl font-bold text-center mb-3">
+        ARE YOU PREGNANT OR BREASTFEEDING?
+      </Text>
+      <Text className="text-textSecondary text-sm text-center mb-8 px-4">
+        This changes how much of each food group we suggest, and removes
+        alcohol from your plan.
+      </Text>
+      {pregnancyOptions.map((option) => {
+        const checked = data[option.key];
+        return (
+          <TouchableOpacity
+            key={option.key}
+            onPress={() => updateData(option.key, !checked)}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked }}
+            className={`p-5 mb-4 rounded-2xl border flex-row justify-between items-center ${
+              checked ? 'bg-blue-50 border-primary' : 'bg-white border-gray-200'
+            }`}
+          >
+            <View className="flex-1 pr-3">
+              <Text className="text-lg font-semibold">{option.label}</Text>
+              {checked ? (
+                <Text className="text-gray-500 text-sm mt-1">{option.desc}</Text>
+              ) : null}
+            </View>
+            {checked ? (
+              <Ionicons name="checkmark-circle" size={24} color="#007BFF" />
+            ) : null}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
+  const buttonTitle =
+    step < totalSteps
+      ? 'Next Steps'
+      : loading
+        ? 'Finishing...'
+        : isSkipButton
+          ? 'Skip This Step'
+          : 'Finish Steps';
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -545,7 +637,7 @@ const OnboardingScreen = () => {
             <View className="w-7" />
           )}
 
-          <Text className="text-primary font-bold">Step {step} of 7</Text>
+          <Text className="text-primary font-bold">Step {step} of {totalSteps}</Text>
           <View className="w-7" />
         </View>
 
@@ -557,11 +649,19 @@ const OnboardingScreen = () => {
           {step === 5 && renderStep5()}
           {step === 6 && renderStep6()}
           {step === 7 && renderStep7()}
+          {step === 8 && showPregnancyStep && renderStep8()}
         </View>
 
         <View className="mb-10 mt-6">
+          {step === 8 ? (
+            // Read BEFORE the decision, so it sits above the button.
+            <Text className="text-gray-500 text-xs text-center mb-3 px-6">
+              Answer only if you want to. You can change it any time in your profile.
+            </Text>
+          ) : null}
           <Button
-            title={step === 7 ? (loading ? 'Finishing...' : 'Finish Steps') : 'Next Steps'}
+            title={buttonTitle}
+            variant={isSkipButton ? 'outline' : 'primary'}
             onPress={handleNext}
             disabled={loading}
           />
