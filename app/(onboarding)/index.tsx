@@ -26,6 +26,7 @@ type OnboardingData = {
   height: string;
   heightUnit: 'cm' | 'ft';
   activityLevel:
+    | 'sedentary'
     | 'lightly_active'
     | 'moderately_active'
     | 'very_active'
@@ -47,7 +48,17 @@ const activities = [
   { name: 'Gym', icon: 'barbell' },
 ];
 
+// Sedentary was missing here while the backend, the database enum and the
+// profile edit screen all had it (checklist m4-02). Without it the lowest
+// choice was Lightly active (x1.375), so anyone who mostly sits got about 15%
+// more calories than their estimate. The Australian Dietary Guidelines' serve
+// table is built for "sedentary to moderate" activity, so it must be offered.
 const fitnessLevels = [
+  {
+    label: 'Sedentary',
+    desc: 'Little or no exercise, mostly sitting',
+    val: 'sedentary',
+  },
   {
     label: 'Lightly active',
     desc: 'Light exercise 1-3 days/week',
