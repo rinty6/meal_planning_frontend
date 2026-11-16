@@ -136,6 +136,9 @@ export const toLoggableScannedFood = (
       sodium_mg: scale(nutrition.sodium_mg, quantity),
       vitamin_a_mcg: scale(nutrition.vitamin_a_mcg, quantity),
       vitamin_a_convention: nutrition.vitamin_a_convention ?? null,
+      // Unknown stays null, never 0 (m4-10). Open Food Facts live hits have no
+      // alcohol_g key, so they land here as null too.
+      alcohol_g: scale(nutrition.alcohol_g ?? null, quantity),
       serving_grams: serving.grams_equivalent ?? null,
     },
   };
@@ -312,6 +315,7 @@ export const toLoggableReportedFood = (
       sodium_mg: null,
       vitamin_a_mcg: null,
       vitamin_a_convention: null,
+      alcohol_g: null, // the report form asks for no alcohol figure: unknown
       serving_grams: form.servingUnit === "g" ? grams : null,
     },
   };

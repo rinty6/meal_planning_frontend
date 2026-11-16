@@ -316,3 +316,26 @@ test("the queue is capped and drops the oldest", () => {
   assert.equal(queue[0].barcode, "4", "the first four fell off the front");
   assert.equal(queue[9].barcode, "13");
 });
+
+/* ---------------------------------------------------------------------------
+ * Alcohol grams (m4-10): 0 is known none, null is unknown, never mixed up
+ * ------------------------------------------------------------------------- */
+
+test("a catalogue hit keeps its alcohol grams, scaled by the quantity", () => {
+  const can: BarcodeServing = { ...pack, nutrition: { ...pack.nutrition, alcohol_g: 11.94 } };
+  const beer = hit({ serving: can, servings: [can], nutrition: can.nutrition });
+  assert.equal(toLoggableScannedFood(beer, "catalog", { quantity: 1 }).nutrients.alcohol_g, 11.94);
+  assert.equal(toLoggableScannedFood(beer, "catalog", { quantity: 2 }).nutrients.alcohol_g, 23.88);
+});
+
+test("a known zero stays 0, and a hit without the key stays unknown", () => {
+  const water: BarcodeServing = { ...pack, nutrition: { ...pack.nutrition, alcohol_g: 0 } };
+  assert.equal(toLoggableScannedFood(hit({ serving: water, servings: [water] }), "catalog").nutrients.alcohol_g, 0);
+  // Open Food Facts live answers carry no alcohol_g at all.
+  assert.equal(toLoggableScannedFood(hit(), "openfoodfacts_live").nutrients.alcohol_g, null);
+});
+
+test("a user-entered food logs alcohol as unknown", () => {
+  const logged = toLoggableReportedFood(form(), { barcode: "1", quantity: 2 });
+  assert.equal(logged.nutrients.alcohol_g, null);
+});

@@ -113,3 +113,13 @@ test("toLoggableFood maps 1:1 onto meal_logs columns, folds the brand into the n
   assert.equal(branded.title, "Tim Tam (Arnott's)");
   assert.equal(branded.calories, 0, "unknown energy logs as 0, never NaN");
 });
+
+test("toLoggableFood carries alcohol grams through the nutrition spread (m4-10)", () => {
+  const beer = toLoggableFood(toFoodCardVM(hit({ nutrition: { alcohol_g: 11.94 } })));
+  assert.equal(beer.nutrients.alcohol_g, 11.94);
+  const water = toLoggableFood(toFoodCardVM(hit({ nutrition: { alcohol_g: 0 } })));
+  assert.equal(water.nutrients.alcohol_g, 0);
+  // An older backend sends no key: it must stay unknown, not become 0.
+  const older = toLoggableFood(toFoodCardVM(hit({})));
+  assert.equal(older.nutrients.alcohol_g ?? null, null);
+});

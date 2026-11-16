@@ -39,6 +39,12 @@ export type CatalogFoodHit = {
     vitamin_a_mcg: number | null;
     /** 're' | 'rae' | null. Never compare vitamin A across conventions. */
     vitamin_a_convention: string | null;
+    /**
+     * Grams of alcohol in this serving (m4-10). 0 is a known none; null or a
+     * missing key is unknown and must never be read as 0. Optional because an
+     * older backend and Open Food Facts live hits do not send it.
+     */
+    alcohol_g?: number | null;
   };
 };
 
