@@ -3,7 +3,15 @@
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ["./app/**/*.{js,jsx,ts,tsx}", "./components/**/*.{js,jsx,ts,tsx}"],
+  // Every folder that writes a class name must be listed, or NativeWind never
+  // generates that class. constants/ was missing when constants/mealTypes.ts
+  // added "bg-snack", which would have rendered the Snack header white on
+  // white (m4-09). tsc and lint cannot catch a missing class.
+  content: [
+    "./app/**/*.{js,jsx,ts,tsx}",
+    "./components/**/*.{js,jsx,ts,tsx}",
+    "./constants/**/*.{js,jsx,ts,tsx}",
+  ],
   presets: [require("nativewind/preset")],
   theme: {
     extend: {
