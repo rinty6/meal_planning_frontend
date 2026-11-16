@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, startTransition } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback, useWindowDimensions } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -23,6 +23,7 @@ import { peekCachedRecommendations } from "../../../services/recommendation";
 import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
 import { buildAddMealBody, scaleToTotals } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from "../../../services/authedFetch";
+import { MEAL_TYPE_ENTRIES, type MealType } from "../../../constants/mealTypes";
 
 type ComboDetailItem = Record<string, any>;
 type ComboDetailPayload = ComboDetailItem & { items?: ComboDetailItem[] };
@@ -153,6 +154,9 @@ const FoodDetailScreen = () => {
   const { userId, getToken } = useAuth();
 
   const [showMealSelector, setShowMealSelector] = useState(false);
+  // Sheet B is capped at 90% of the window and scrolls past that, so a small
+  // phone or large text never cuts the fourth row off (m4-09).
+  const { height: windowHeight } = useWindowDimensions();
   // The one Pip status card for "Add to Meal Plan": blocks the screen from the
   // meal choice until the outcome is acknowledged, then goes back (the
   // screen's existing post-success behaviour).
@@ -381,12 +385,12 @@ const FoodDetailScreen = () => {
     setShowMealSelector(true);
   };
 
-  const handleSelectMeal = (type: string) => {
+  const handleSelectMeal = (type: MealType) => {
     setShowMealSelector(false);
     saveItemsToDB(type);
   };
 
-  const saveItemsToDB = async (mealType: string) => {
+  const saveItemsToDB = async (mealType: MealType) => {
     if (!userId) return;
     const dateStr = dateFromPlanning || formatLocalYYYYMMDD(new Date());
     const itemsToSave =
@@ -619,43 +623,52 @@ const FoodDetailScreen = () => {
         <TouchableWithoutFeedback onPress={() => setShowMealSelector(false)}>
           <View className="flex-1 bg-black/50 justify-center items-center px-4">
             <TouchableWithoutFeedback>
-              <View className="bg-white w-full max-w-xs p-6 rounded-3xl items-center shadow-xl">
-                <Text className="text-xl font-bold text-gray-900 mb-1">Add to meal log</Text>
+              <View className="bg-white w-full max-w-xs p-6 rounded-3xl items-center shadow-xl" style={{ maxHeight: windowHeight * 0.9 }}>
+                <ScrollView
+                  style={{ width: "100%" }}
+                  contentContainerStyle={{ alignItems: "center" }}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <Text className="text-xl font-bold text-gray-900 mb-1">Add to meal log</Text>
 
-                {/* SERVINGS STEPPER */}
-                <Text className="text-gray-400 text-center text-sm mb-3">How many servings?</Text>
-                <View className="flex-row items-center justify-center mb-1" style={{ gap: 22 }}>
-                  <TouchableOpacity
-                    onPress={() => setLogServings((s) => Math.max(0.5, Math.round((s - 0.5) * 2) / 2))}
-                    className="w-11 h-11 rounded-full bg-gray-100 items-center justify-center"
-                  >
-                    <Ionicons name="remove" size={22} color="#111827" />
-                  </TouchableOpacity>
-                  <Text className="font-bold text-gray-900" style={{ fontSize: 22, minWidth: 46, textAlign: "center" }}>{logServings}</Text>
-                  <TouchableOpacity
-                    onPress={() => setLogServings((s) => Math.round((s + 0.5) * 2) / 2)}
-                    className="w-11 h-11 rounded-full bg-primary items-center justify-center"
-                  >
-                    <Ionicons name="add" size={22} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-                <Text className="text-gray-400 text-center text-xs mb-6">
-                  = {formatEnergy(Number(totalCalories) * logServings)}
-                </Text>
+                  {/* SERVINGS STEPPER */}
+                  <Text className="text-gray-400 text-center text-sm mb-3">How many servings?</Text>
+                  <View className="flex-row items-center justify-center mb-1" style={{ gap: 22 }}>
+                    <TouchableOpacity
+                      onPress={() => setLogServings((s) => Math.max(0.5, Math.round((s - 0.5) * 2) / 2))}
+                      className="w-11 h-11 rounded-full bg-gray-100 items-center justify-center"
+                    >
+                      <Ionicons name="remove" size={22} color="#111827" />
+                    </TouchableOpacity>
+                    <Text className="font-bold text-gray-900" style={{ fontSize: 22, minWidth: 46, textAlign: "center" }}>{logServings}</Text>
+                    <TouchableOpacity
+                      onPress={() => setLogServings((s) => Math.round((s + 0.5) * 2) / 2)}
+                      className="w-11 h-11 rounded-full bg-primary items-center justify-center"
+                    >
+                      <Ionicons name="add" size={22} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                  <Text className="text-gray-400 text-center text-xs mb-6">
+                    = {formatEnergy(Number(totalCalories) * logServings)}
+                  </Text>
 
-                <Text className="text-gray-400 text-center text-sm mb-4">When are you eating this?</Text>
-                <TouchableOpacity onPress={() => handleSelectMeal("breakfast")} className="w-full bg-white py-4 rounded-2xl mb-3 border border-gray-100 px-4">
-                  <Text className="font-bold text-gray-700 text-base">Breakfast</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleSelectMeal("lunch")} className="w-full bg-white py-4 rounded-2xl mb-3 border border-gray-100 px-4">
-                  <Text className="font-bold text-gray-700 text-base">Lunch</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleSelectMeal("dinner")} className="w-full bg-white py-4 rounded-2xl mb-6 border border-gray-100 px-4">
-                  <Text className="font-bold text-gray-700 text-base">Dinner</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setShowMealSelector(false)}>
-                  <Text className="text-gray-400 font-bold">Cancel</Text>
-                </TouchableOpacity>
+                  <Text className="text-gray-400 text-center text-sm mb-4">When are you eating this?</Text>
+                  {/* Rows come from the shared list. The bigger gap above Cancel belongs to
+                      whichever row is LAST, not to Dinner by name (m4-09). */}
+                  {MEAL_TYPE_ENTRIES.map((entry, index) => (
+                    <TouchableOpacity
+                      key={entry.type}
+                      onPress={() => handleSelectMeal(entry.type)}
+                      className={`w-full bg-white py-4 rounded-2xl border border-gray-100 px-4 ${index === MEAL_TYPE_ENTRIES.length - 1 ? "mb-6" : "mb-3"}`}
+                    >
+                      <Text className="font-bold text-gray-700 text-base">{entry.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity onPress={() => setShowMealSelector(false)}>
+                    <Text className="text-gray-400 font-bold">Cancel</Text>
+                  </TouchableOpacity>
+                </ScrollView>
               </View>
             </TouchableWithoutFeedback>
           </View>

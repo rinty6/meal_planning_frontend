@@ -53,10 +53,10 @@ import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from 
 import { formatEnergy } from '../utils/energy';
 import { PipActionStatusCard, usePipActionStatus } from './pip/PipActionStatusCard';
 import PipBird from './pip/PipBird';
+import { MEAL_TYPES, mealTypeLabel, type MealType } from '../constants/mealTypes';
 
 type VoiceSearchMode = 'food' | 'recipe';
 type VoiceSearchScreen = 'chooser' | 'listening' | 'searching' | 'results' | 'notfound';
-type MealType = 'breakfast' | 'lunch' | 'dinner';
 
 interface VoiceSearchModalProps {
   visible: boolean;
@@ -65,7 +65,8 @@ interface VoiceSearchModalProps {
 
 // Recognition can return a whole sentence; cap it before it ever reaches a search call.
 const MAX_TRANSCRIPT_LENGTH = 80;
-const MEAL_TYPES: MealType[] = ['breakfast', 'lunch', 'dinner'];
+// MealType and MEAL_TYPES come from constants/mealTypes.ts, so Snack is the
+// fourth row here like everywhere else (m4-09).
 
 // Design 1a "Classic" palette — keep in sync with VoicePhone.dc.html's classicPal.
 const PAL = {
@@ -764,7 +765,7 @@ const VoiceSearchModal = ({ visible, onClose }: VoiceSearchModalProps) => {
                       void addToMealLog(item, meal, servings);
                     }}
                   >
-                    <Text style={styles.pickerOptionText}>{meal[0].toUpperCase() + meal.slice(1)}</Text>
+                    <Text style={styles.pickerOptionText}>{mealTypeLabel(meal)}</Text>
                   </TouchableOpacity>
                 ))}
                 <TouchableOpacity style={styles.cancelButton} onPress={() => setPendingItem(null)}>

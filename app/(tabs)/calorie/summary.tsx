@@ -587,7 +587,7 @@ const CalorieSummaryScreen = () => {
               const mealPatternFooter =
                 insights?.mealPattern?.peakMealType
                   ? `Peak slot: ${formatMealTypeLabel(insights.mealPattern.peakMealType.mealType)}`
-                  : 'Meal-slot trends use breakfast, lunch, and dinner totals.';
+                  : 'Meal-slot trends use breakfast, lunch, dinner and snack totals.';
               const coverageSummary =
                 insights?.coverage?.summary || `Insights use your recent ${INSIGHTS_WINDOW_DAYS}-day meal history when enough logs are available.`;
 
@@ -697,7 +697,7 @@ const CalorieSummaryScreen = () => {
                     <InsightCard
                       title="Meal Slot Pattern"
                       summary={insights?.mealPattern?.summary || 'Meal-slot trends will appear once breakfast, lunch, or dinner logging is more consistent.'}
-                      detail={insights?.mealPattern?.detail || 'This phase compares breakfast, lunch, and dinner totals instead of clock times.'}
+                      detail={insights?.mealPattern?.detail || 'This phase compares breakfast, lunch, dinner and snack totals instead of clock times.'}
                       confidence={insights?.mealPattern?.confidence || 'low'}
                       tone={insights?.mealPattern?.trend || 'neutral'}
                       footer={mealPatternFooter}

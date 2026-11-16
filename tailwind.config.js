@@ -21,6 +21,7 @@ module.exports = {
         error: '#EF4444', // Red for alerts (e.g., delete goal)
         success: '#10B981', // Green if needed for success states
         dinner: '#555555', // Dark gray for dinner section
+        snack: '#15803D', // Green for snack section (m4-09, white text is 5:1)
         macroTrack: '#D1D5DB',
         primarySoft: '#E7F1FF',
         secondarySoft: '#FFF2E0',

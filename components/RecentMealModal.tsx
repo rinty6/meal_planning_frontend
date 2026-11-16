@@ -7,6 +7,12 @@ import { useAuth } from '@clerk/clerk-expo';
 import IngredientIcon from './IngredientIcon';
 import { authedFetch } from '../services/authedFetch';
 import { formatEnergy } from '../utils/energy';
+import { MEAL_TYPE_ENTRIES, MEAL_TYPES, type MealType } from '../constants/mealTypes';
+
+// One bucket per shared meal type (m4-09). A backend that predates the snack
+// bucket simply leaves it missing, so every read falls back to [].
+type RecentByMeal = Partial<Record<MealType, any[]>>;
+const emptyRecent = (): RecentByMeal => Object.fromEntries(MEAL_TYPES.map((type) => [type, []]));
 
 interface RecentMealsModalProps {
   visible: boolean;
@@ -17,7 +23,7 @@ interface RecentMealsModalProps {
 const RecentMealsModal = ({ visible, onClose, onAddSelected }: RecentMealsModalProps) => {
   const { userId, getToken } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [recentMeals, setRecentMeals] = useState<any>({ breakfast: [], lunch: [], dinner: [] });
+  const [recentMeals, setRecentMeals] = useState<RecentByMeal>(emptyRecent);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // Load data & reset selection when the modal opens
@@ -55,7 +61,7 @@ const RecentMealsModal = ({ visible, onClose, onAddSelected }: RecentMealsModalP
   };
 
   const handleAdd = () => {
-    const allMeals = [...recentMeals.breakfast, ...recentMeals.lunch, ...recentMeals.dinner];
+    const allMeals = MEAL_TYPES.flatMap((type) => recentMeals[type] || []);
     const selectedMeals = allMeals.filter(m => selectedIds.has(m.id));
     onAddSelected(selectedMeals);
   };
@@ -122,11 +128,11 @@ const RecentMealsModal = ({ visible, onClose, onAddSelected }: RecentMealsModalP
             </View>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false} className="flex-1">
-              {renderSection('Breakfast', recentMeals.breakfast)}
-              {renderSection('Lunch', recentMeals.lunch)}
-              {renderSection('Dinner', recentMeals.dinner)}
+              {MEAL_TYPE_ENTRIES.map((entry) => (
+                <React.Fragment key={entry.type}>{renderSection(entry.label, recentMeals[entry.type] || [])}</React.Fragment>
+              ))}
 
-              {recentMeals.breakfast.length === 0 && recentMeals.lunch.length === 0 && recentMeals.dinner.length === 0 && (
+              {MEAL_TYPES.every((type) => (recentMeals[type] || []).length === 0) && (
                 <Text className="text-center text-gray-400 mt-10 text-base">No recent meals found.</Text>
               )}
             </ScrollView>

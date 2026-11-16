@@ -8,6 +8,7 @@ import { buildAddMealBody } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from '../../../services/authedFetch';
 import { formatEnergy } from '../../../utils/energy';
 import AddFoodModal from '../../../components/addfoodmodal';
+import { MEAL_TYPE_ENTRIES } from '../../../constants/mealTypes';
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../../../services/mealLogOutcome';
 import {
   fetchMealsSummaryWithCache,
@@ -39,7 +40,7 @@ const round1 = (v: any) => Math.round((Number(v) || 0) * 10) / 10;
 // ---------------------------------------------------------
 // 3. HELPER: MealSection Component
 // ---------------------------------------------------------
-const MealSection = ({ title, items, colorClass, icon, onChangeServings, onDelete, onOpenAddModal }: any) => {
+const MealSection = ({ title, items, colorClass, icon, emptyText, onChangeServings, onDelete, onOpenAddModal }: any) => {
   const totalKcal = items ? items.reduce((sum: number, item: any) => sum + (Number(item.calories) || 0), 0) : 0;
 
   return (
@@ -62,7 +63,7 @@ const MealSection = ({ title, items, colorClass, icon, onChangeServings, onDelet
 
       {/* ITEMS LIST */}
       {(!items || items.length === 0) ? (
-        <Text className="text-gray-400 text-center italic py-4">No food logged yet.</Text>
+        <Text className="text-gray-400 text-center italic py-4">{emptyText}</Text>
       ) : (
         items.map((item: any) => {
           const servings = getServings(item);
@@ -314,9 +315,12 @@ export default function SummaryScreen() {
   };
 
   // --- FILTERING (each row is its own line; servings live on the row) ---
-  const breakfastItems = meals.filter(m => m.mealType === 'breakfast');
-  const lunchItems = meals.filter(m => m.mealType === 'lunch');
-  const dinnerItems = meals.filter(m => m.mealType === 'dinner');
+  // One section per shared meal type (m4-09). Before this, a snack log raised
+  // the day total but appeared in no section and could not be deleted.
+  const sections = MEAL_TYPE_ENTRIES.map((entry) => ({
+    entry,
+    items: meals.filter((m) => m.mealType === entry.type),
+  }));
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
@@ -382,14 +386,19 @@ export default function SummaryScreen() {
           <ActivityIndicator size="large" color="#007BFF" className="mt-10" />
         ) : (
           <>
-            <MealSection title="Breakfast" items={breakfastItems} colorClass="bg-primary" icon="partly-sunny"
-              onChangeServings={handleChangeServings} onDelete={handleRemoveOne} onOpenAddModal={() => handleOpenAddModal('breakfast')} />
-
-            <MealSection title="Lunch" items={lunchItems} colorClass="bg-secondary" icon="sunny"
-              onChangeServings={handleChangeServings} onDelete={handleRemoveOne} onOpenAddModal={() => handleOpenAddModal('lunch')} />
-
-            <MealSection title="Dinner" items={dinnerItems} colorClass="bg-dinner" icon="moon"
-              onChangeServings={handleChangeServings} onDelete={handleRemoveOne} onOpenAddModal={() => handleOpenAddModal('dinner')} />
+            {sections.map(({ entry, items }) => (
+              <MealSection
+                key={entry.type}
+                title={entry.label}
+                items={items}
+                colorClass={entry.colorClass}
+                icon={entry.icon}
+                emptyText={entry.emptyText}
+                onChangeServings={handleChangeServings}
+                onDelete={handleRemoveOne}
+                onOpenAddModal={() => handleOpenAddModal(entry.type)}
+              />
+            ))}
 
             <View className="h-20" />
           </>

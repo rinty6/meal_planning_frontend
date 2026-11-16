@@ -37,7 +37,7 @@ const guideSections = [
     color: '#10B981',
     backgroundClass: 'bg-successSoft',
     steps: [
-      'Open Meal Summary to see foods grouped by breakfast, lunch, and dinner.',
+      'Open Meal Summary to see foods grouped by breakfast, lunch, dinner and snack.',
       'Use the plus button in a meal section to add more food to that meal.',
       'Tap plus or minus beside a logged food to adjust the quantity.',
       'Switch dates with the calendar strip at the top.',

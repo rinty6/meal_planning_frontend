@@ -23,9 +23,12 @@ import { Ionicons } from '@expo/vector-icons';
 
 import type { BarcodeServing } from '../../api/barcode/barcodeApi.types';
 import { energyKjFor, servingChipLabel, servingKey } from '../../api/barcode/barcodeApi.mappers';
+import { MEAL_TYPE_ENTRIES, type MealType } from '../../constants/mealTypes';
 
-export const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner'] as const;
-export type MealTypeLabel = (typeof MEAL_TYPES)[number];
+// Labels come from the shared list (constants/mealTypes.ts), so Snack is the
+// fourth row and the button reads "Add to Snack" with no per-screen copy.
+export const MEAL_TYPES = MEAL_TYPE_ENTRIES.map((entry) => entry.label) as readonly MealTypeLabel[];
+export type MealTypeLabel = Capitalize<MealType>;
 
 type Props = {
   servings: BarcodeServing[];
