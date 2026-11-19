@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Drinks on plates</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme:light; --surface-1:#fcfcfb; --surface-2:#f3f3f0; --border:#dcdcd5;
+    --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#82817b; --good:#1baf7a; --good-bg:#eaf7f1;
+    --warn-bg:#fff7e6; --warn-border:#eccb8a; --warn-ink:#6b4d0c; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme:dark; --surface-1:#1a1a19; --surface-2:#232322;
+    --border:#3b3b38; --text-primary:#fff; --text-secondary:#c3c2b7; --text-muted:#94938a; --good:#199e70; --good-bg:#16281f;
+    --warn-bg:#2d2413; --warn-border:#5d4a1d; --warn-ink:#e8cf9a; } }
+  :root[data-theme="dark"] { color-scheme:dark; --surface-1:#1a1a19; --surface-2:#232322; --border:#3b3b38; --text-primary:#fff;
+    --text-secondary:#c3c2b7; --text-muted:#94938a; --good:#199e70; --good-bg:#16281f; --warn-bg:#2d2413; --warn-border:#5d4a1d; --warn-ink:#e8cf9a; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:0 16px 80px; background:var(--surface-1); color:var(--text-primary); font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:980px; margin:0 auto; }
+  header { padding:40px 0 4px; } h1 { font-size:26px; line-height:1.2; margin:0 0 8px; }
+  .sub { color:var(--text-secondary); margin:0; }
+  h2 { font-size:19px; margin:40px 0 6px; padding-top:20px; border-top:1px solid var(--border); }
+  .callout { border-radius:10px; padding:13px 15px; margin:16px 0; font-size:14.5px; }
+  .ok { background:var(--good-bg); border:1px solid var(--good); }
+  .warn { background:var(--warn-bg); border:1px solid var(--warn-border); color:var(--warn-ink); }
+  .tbl { overflow-x:auto; } table { border-collapse:collapse; width:100%; margin:12px 0; font-size:13.5px; }
+  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); }
+  .phones { display:flex; gap:20px; flex-wrap:wrap; margin:20px 0; align-items:flex-start; }
+  .phone { width:300px; max-width:100%; } .cap { font-size:12.5px; font-weight:800; text-align:center; margin-bottom:8px; color:var(--text-muted); }
+  .screen { background:#fff; color:#000; border:1px solid var(--border); border-radius:26px; padding:14px; box-shadow:0 2px 14px rgba(0,0,0,.08); }
+  .card { border:1px solid #EEF2F7; border-radius:20px; overflow:hidden; }
+  .dc-top { background:linear-gradient(#F0F6FF,#FFFFFF); padding:14px 12px 10px; display:flex; gap:10px; align-items:center; }
+  .dc-l { flex:1; min-width:0; }
+  .dc-src { display:inline-block; background:#0B2149; color:#fff; font-size:9px; font-weight:700; letter-spacing:.4px; padding:3px 9px; border-radius:999px; margin-bottom:6px; }
+  .dc-t { font-size:15.5px; font-weight:800; color:#0B2149; line-height:1.2; margin-bottom:5px; }
+  .dc-e b { color:#FF9500; font-size:19px; font-weight:800; margin-right:5px; } .dc-e span { color:#6B7280; font-size:11px; font-weight:600; }
+  .dc-ph { width:72px; height:72px; border-radius:50%; overflow:hidden; border:3px solid #fff; box-shadow:0 8px 12px rgba(11,33,73,.2); flex:none; }
+  .dc-ph img { width:100%; height:100%; object-fit:cover; }
+  .dc-foods { font-size:11px; color:#374151; font-weight:600; padding:7px 12px; background:#F8FAFC; border-top:1px solid #EEF2F7; }
+  .drink { display:flex; align-items:center; gap:8px; padding:8px 12px; border-top:1px solid #EEF2F7; border-bottom:1px solid #EEF2F7; font-size:11.5px; }
+  .drink .cup { width:26px; height:26px; border-radius:50%; background:#EFF6FF; display:flex; align-items:center; justify-content:center; font-size:13px; flex:none; }
+  .drink .t { flex:1; min-width:0; color:#374151; } .drink .t b { color:#0B2149; } .drink .t small { color:#9CA3AF; }
+  .tog { font-size:11px; font-weight:800; border-radius:999px; padding:4px 10px; border:1.5px solid #BFDBFE; color:#007BFF; background:#fff; white-space:nowrap; }
+  .tog.on { background:#007BFF; color:#fff; border-color:#007BFF; }
+  .dc-act { margin:0 12px; padding:9px 0 11px; display:flex; justify-content:space-between; align-items:center; }
+  .ic { display:inline-flex; width:32px; height:32px; border-radius:50%; align-items:center; justify-content:center; margin-right:5px; color:#A0AEC0; font-size:13px; }
+  .ic.h { background:#FFF2F2; } .ic.x { background:#F5F8FB; }
+  .pick { background:#FF9500; color:#fff; font-weight:700; font-size:12.5px; border-radius:999px; padding:7px 15px; }
+  .sec { font-size:13px; font-weight:800; color:#111827; margin:12px 0 6px; display:flex; justify-content:space-between; }
+  .sec small { color:#9CA3AF; font-weight:600; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chips span { font-size:11.5px; font-weight:800; border:1.5px solid #E5E7EB; color:#4B5563; border-radius:999px; padding:5px 10px; background:#fff; }
+  .chips span.on { background:#007BFF; color:#fff; border-color:#007BFF; }
+  .dl { font-size:11.5px; color:#6B7280; margin-top:6px; }
+  .btn { background:#007BFF; color:#fff; text-align:center; font-weight:800; border-radius:14px; padding:10px; font-size:14px; margin-top:12px; }
+  footer { margin-top:44px; padding-top:16px; border-top:1px solid var(--border); color:var(--text-muted); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Drinks on plates</h1>
+  <p class="sub">The user's decision of 2026-11-20: keep drinks, juice included ("not every time we just drink coffee or
+  tea"). Every plate and snack card can carry one optional drink. It is never logged unless the user turns it on.</p>
+</header>
+
+<div class="phones">
+  <div class="phone">
+    <div class="cap">Card · drink off (the default)</div>
+    <div class="screen">
+      <div class="card">
+        <div class="dc-top"><div class="dc-l"><span class="dc-src">DISH</span>
+          <div class="dc-t">Chicken &amp; salad roll</div>
+          <div class="dc-e"><b>1,980</b><span>kJ · whole plate</span></div></div>
+          <div class="dc-ph"><img src="https://pub-9433cb877620409ca9a0ea9cda98e328.r2.dev/foods/food_ausnut_13504011-8c3ae0e1.webp" alt=""></div></div>
+        <div class="dc-foods">Chicken &amp; salad roll · 1 roll</div>
+        <div class="drink"><span class="cup">☕</span><span class="t"><b>Flat white</b> · 1 cup <small>· 490 kJ</small></span><span class="tog">+ Add</span></div>
+        <div class="dc-act"><div><span class="ic h">♡</span><span class="ic x">✕</span></div><span class="pick">＋ Pick</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="phone">
+    <div class="cap">Card · drink on</div>
+    <div class="screen">
+      <div class="card">
+        <div class="dc-top"><div class="dc-l"><span class="dc-src">DISH</span>
+          <div class="dc-t">Chicken &amp; salad roll</div>
+          <div class="dc-e"><b>2,470</b><span>kJ · with drink</span></div></div>
+          <div class="dc-ph"><img src="https://pub-9433cb877620409ca9a0ea9cda98e328.r2.dev/foods/food_ausnut_13504011-8c3ae0e1.webp" alt=""></div></div>
+        <div class="dc-foods">Chicken &amp; salad roll · 1 roll</div>
+        <div class="drink"><span class="cup">☕</span><span class="t"><b>Flat white</b> · 1 cup <small>· 490 kJ</small></span><span class="tog on">✓ Added</span></div>
+        <div class="dc-act"><div><span class="ic h">♡</span><span class="ic x">✕</span></div><span class="pick">＋ Pick</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="phone">
+    <div class="cap">Plate detail · choose the drink</div>
+    <div class="screen">
+      <div class="sec">Drink <small>optional</small></div>
+      <div class="chips"><span>None</span><span class="on">Flat white</span><span>Orange juice</span><span>Water</span></div>
+      <div class="dl">1 cup (250 ml) · 490 kJ · counts toward your water</div>
+      <div class="btn">Add to Lunch</div>
+    </div>
+  </div>
+</div>
+
+<div class="callout ok"><b>How it behaves</b>
+<ul style="margin:4px 0 0">
+  <li>The drink row sits under the foods line on every plate and snack card. It shows the plate's first drink suggestion.</li>
+  <li><b>+ Add</b> turns it on, and the headline energy then includes the drink ("with drink"). Tapping again turns it off.</li>
+  <li>On the plate detail page there are chips: <b>None</b> plus up to 3 drink options from the server. The default is
+    None unless the card's toggle was on.</li>
+  <li>Picking the plate logs one extra row for the drink, in the same meal and with source "catalog", only when the drink is on.</li>
+  <li>The plate's foods are built without the drink. A drink with energy is offered only when the plate leaves room for it (see the rules).</li>
+  <li>A whole dish on its own is labelled <b>DISH</b> instead of "PLATE · 1 FOOD".</li>
+</ul></div>
+
+<h2>Which drinks, when</h2>
+<div class="tbl"><table>
+  <tr><th>Meal</th><th>Offered</th></tr>
+  <tr><td>Breakfast</td><td>Flat white or cappuccino (cow's or soy milk), black or green tea, 100% orange or apple juice (one small bottle, 250 ml), milk, water</td></tr>
+  <tr><td>Lunch</td><td>Water, sparkling or mineral water, 100% juice (250 ml), flat white, long black, tea</td></tr>
+  <tr><td>Dinner</td><td>Water, sparkling or mineral water, herbal tea. No coffee in the evening.</td></tr>
+  <tr><td>Snack</td><td>Tea, flat white, water, milk</td></tr>
+</table></div>
+<div class="callout warn"><b>Rules</b>
+<ul style="margin:4px 0 0">
+  <li><b>Never suggested:</b> soft drinks, cordial, fruit drinks, sports and energy drinks, flavoured milk, mocha,
+    juice with added sugar, smoothies, dry tea leaves, lemon or lime juice, and alcohol (m0-07).</li>
+  <li><b>Juice:</b> 100% juice only, at most 250 ml, and on at most one of the five cards per meal. The ADG counts 125 ml as
+    a fruit serve, "only occasionally".</li>
+  <li><b>Energy:</b> a drink over 40 kcal is offered only on a plate at or below 95% of its energy target. Other plates get water, tea or a black coffee.</li>
+  <li><b>Caffeine:</b> no coffee for users under 18. During pregnancy or breastfeeding, coffee is offered at breakfast only, and decaf elsewhere.</li>
+  <li>Allergen and diet filters apply to drinks exactly as to food (milk in a flat white).</li>
+</ul></div>
+<footer>Design for the Pi build brief, 2026-11-20. Energy figures are illustrative (a 250 ml flat white with regular milk is about 118 kcal, or 490 kJ).</footer>
+</div>
+</body>
+</html>

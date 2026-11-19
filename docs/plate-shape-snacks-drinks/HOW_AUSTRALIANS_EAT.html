@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How Australians eat</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:#fcfcfb; --surface-2:#f3f3f0; --surface-3:#e8e8e3; --border:#dcdcd5;
+    --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#82817b;
+    --accent:#2a78d6; --good:#1baf7a; --good-bg:#eaf7f1;
+    --warn-bg:#fff7e6; --warn-border:#eccb8a; --warn-ink:#6b4d0c;
+    --stop-bg:#fdecec; --stop-border:#efb4b4; --stop-ink:#7d2222;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-1:#1a1a19; --surface-2:#232322; --surface-3:#2e2e2c; --border:#3b3b38;
+      --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#94938a;
+      --accent:#3987e5; --good:#199e70; --good-bg:#16281f;
+      --warn-bg:#2d2413; --warn-border:#5d4a1d; --warn-ink:#e8cf9a;
+      --stop-bg:#2e1a1a; --stop-border:#5e2f2f; --stop-ink:#f0b8b8;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:#1a1a19; --surface-2:#232322; --surface-3:#2e2e2c; --border:#3b3b38;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#94938a;
+    --accent:#3987e5; --good:#199e70; --good-bg:#16281f;
+    --warn-bg:#2d2413; --warn-border:#5d4a1d; --warn-ink:#e8cf9a;
+    --stop-bg:#2e1a1a; --stop-border:#5e2f2f; --stop-ink:#f0b8b8;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:0 16px 80px; background:var(--surface-1); color:var(--text-primary);
+         font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:960px; margin:0 auto; }
+  header { padding:44px 0 6px; }
+  h1 { font-size:28px; line-height:1.2; margin:0 0 8px; letter-spacing:-.02em; }
+  .sub { color:var(--text-secondary); margin:0; }
+  .meta { color:var(--text-muted); font-size:13px; margin-top:12px; }
+  h2 { font-size:20px; margin:44px 0 6px; padding-top:22px; border-top:1px solid var(--border); }
+  h2 .n { color:var(--text-muted); font-weight:600; margin-right:8px; }
+  h3 { font-size:15.5px; margin:20px 0 6px; }
+  p { margin:8px 0; } ul { padding-left:20px; } li { margin:3px 0; }
+  .callout { border-radius:10px; padding:13px 15px; margin:16px 0; font-size:14.5px; }
+  .callout > b:first-child { display:block; margin-bottom:3px; }
+  .ok { background:var(--good-bg); border:1px solid var(--good); }
+  .warn { background:var(--warn-bg); border:1px solid var(--warn-border); color:var(--warn-ink); }
+  .stop { background:var(--stop-bg); border:1px solid var(--stop-border); color:var(--stop-ink); }
+  .tbl { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:13.5px; }
+  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .meals { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; margin:16px 0; }
+  .meal { border:1px solid var(--border); border-radius:12px; padding:14px 16px; background:var(--surface-2); }
+  .meal h3 { margin:0 0 6px; }
+  .meal ul { margin:0; font-size:14px; }
+  .src { color:var(--text-muted); font-size:12px; margin-top:8px; }
+  .bad { color:var(--stop-ink); }
+  .q { border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin:14px 0; background:var(--surface-2); }
+  .q .h { font-weight:800; margin-bottom:4px; }
+  .q .r { color:var(--good); font-weight:800; }
+  footer { margin-top:50px; padding-top:18px; border-top:1px solid var(--border); color:var(--text-muted); font-size:13px; }
+  footer a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>How Australians actually eat, and where the planner differs</h1>
+  <p class="sub">Your questions from 2026-11-19, after the m5-04 snack design: does a snack tab repeat what the
+  meals already do with fruit, and what is the planner missing compared with what people really eat?</p>
+  <p class="meta">Research from the ABS national nutrition surveys (2011–12 and 2023), compared with 300 live
+  plates from our planner and a search of the 3,741-food catalogue · 2026-11-19</p>
+</header>
+
+<div class="callout warn"><b>The short answer</b>
+The foods are mostly there. What's wrong is <b>the shape of the plate</b>. Our catalogue already has
+burgers, sandwiches, wraps, kebabs, pizza, sushi, curries and stir-fries. They already make up 40% of the lunch
+and dinner plates. But the planner treats a burger like a plain chicken breast that still needs two sides, and
+it picks those sides by food group alone. That gives you "Hamburger + frozen strawberries + protein yoghurt" and
+"Pizza + bamboo shoots + frozen banana". Nobody eats that. In real life a burger comes with a coffee.</div>
+
+<h2><span class="n">1</span>What Australians eat at each meal</h2>
+
+<div class="meals">
+  <div class="meal"><h3>Breakfast · the smallest meal</h3>
+    <ul>
+      <li><b>Cereal with milk</b> is about half of all adult breakfasts.</li>
+      <li><b>Bread or toast with a spread</b> is about 40%.</li>
+      <li><b>A cooked breakfast</b> (eggs, bacon) is only about 11%. Bacon, egg and toast is the most common one, eaten by 3.5% of adults.</li>
+      <li>Meat appears in fewer than 10% of breakfasts.</li>
+      <li><b>Tea or coffee</b> is the most popular breakfast drink.</li>
+    </ul>
+    <div class="src">NNPAS 2011–12 (Deakin, Leech et al.; Sui et al. 2017)</div></div>
+  <div class="meal"><h3>Lunch · the middle meal</h3>
+    <ul>
+      <li><b>Sandwiches, rolls and wraps</b> with chicken, beef, ham or canned fish are the most popular lunches with meat.</li>
+      <li><b>Hot meat meals are uncommon</b> at lunch.</li>
+      <li>Ham is the most common processed meat.</li>
+      <li>Lunch is mostly grains, salad vegetables and a drink, which is often a soft drink.</li>
+    </ul>
+    <div class="src">NNPAS 2011–12 (Sui, Raubenheimer &amp; Rangan 2017)</div></div>
+  <div class="meal"><h3>Dinner · the largest meal</h3>
+    <ul>
+      <li><b>Chicken or steak with starchy and green vegetables</b> is the most common dinner (meat and three veg).</li>
+      <li><b>Pasta with meat</b>, such as spaghetti bolognese, is also common.</li>
+      <li>Dinner holds about two-thirds of the day's meat.</li>
+      <li>Alcohol is common with dinner for adults.</li>
+    </ul>
+    <div class="src">NNPAS 2011–12 (Sui, Raubenheimer &amp; Rangan 2017)</div></div>
+</div>
+
+<h3>What people ate on the day, in the newest survey (2023)</h3>
+<div class="tbl"><table>
+  <tr><th>Food or drink</th><th class="num">% of people, on the day</th></tr>
+  <tr><td>Water</td><td class="num">90.4%</td></tr>
+  <tr><td><b>Coffee</b></td><td class="num"><b>49.7%</b></td></tr>
+  <tr><td>Cereal-based mixed dishes (all of the next four, and more)</td><td class="num">52.0%</td></tr>
+  <tr><td>&nbsp;&nbsp;Sandwiches and filled rolls</td><td class="num">23.8%</td></tr>
+  <tr><td>&nbsp;&nbsp;Pasta and noodle dishes</td><td class="num">13.0%</td></tr>
+  <tr><td>&nbsp;&nbsp;Burgers</td><td class="num">8.3%</td></tr>
+  <tr><td>&nbsp;&nbsp;Pizza</td><td class="num">6.8%</td></tr>
+  <tr><td>Tea</td><td class="num">32.4%</td></tr>
+  <tr><td>Potatoes</td><td class="num">26.7%</td></tr>
+  <tr><td>Soft drinks</td><td class="num">22.9%</td></tr>
+  <tr><td>Tropical fruit (banana, mango, pineapple)</td><td class="num">21.3%</td></tr>
+</table></div>
+<p>Your observation from the shop matches the data. On any given day, one Australian in four eats a sandwich or
+roll and one in two drinks coffee. The ABS release has foods only, not meals. The meal-by-meal picture above comes
+from the 2011–12 survey, which is the newest one analysed meal by meal.</p>
+
+<h2><span class="n">2</span>Are the foods in our catalogue?</h2>
+<p>Our catalogue is AUSNUT 2023, the food list built to code exactly these survey answers, so almost everything
+people reported eating is in it. I searched the 3,741 generic foods:</p>
+<div class="tbl"><table>
+  <tr><th>Everyday meal</th><th>In the catalogue</th><th>Planner can suggest it</th></tr>
+  <tr><td>Sandwiches and rolls (chicken &amp; salad, ham &amp; salad, roast meat, egg, steak)</td><td>yes</td><td>18</td></tr>
+  <tr><td>Burgers (beef, chicken, crumbed chicken, fast-food chain and homemade)</td><td>yes, 35</td><td>29</td></tr>
+  <tr><td>Wraps and kebab wraps</td><td>yes</td><td>yes, 11 kebabs</td></tr>
+  <tr><td>Pizza</td><td>yes, 34</td><td>26</td></tr>
+  <tr><td>Sushi, poke bowl, burrito bowl, rice paper rolls</td><td>yes</td><td>yes</td></tr>
+  <tr><td>Curries, stir-fries, laksa, fried rice, lasagne, schnitzel, dumplings</td><td>yes</td><td>yes</td></tr>
+  <tr><td>Cereal (wheat biscuits, muesli, porridge), toast, scrambled eggs</td><td>yes</td><td>yes</td></tr>
+  <tr><td>Flat white, cappuccino, latte, tea</td><td>yes</td><td><b>no</b> (drinks are never suggested)</td></tr>
+  <tr><td>Meat pie, sausage roll, croissant</td><td>yes</td><td>no: discretionary, by your rule (D3)</td></tr>
+  <tr><td>Fish and chips</td><td>as two foods (battered fish, chips)</td><td>could be a plate</td></tr>
+  <tr><td>Avocado on toast, roast dinner</td><td>as parts (toast, avocado; roast meat, vegetables)</td><td>could be a plate</td></tr>
+  <tr class="bad"><td><b>Bánh mì</b></td><td><b>missing</b></td><td>no</td></tr>
+  <tr class="bad"><td><b>Phở</b></td><td><b>missing</b> (only "Soup, broth with meat &amp; noodles")</td><td>no</td></tr>
+</table></div>
+<p>So only a few cultural dishes are missing. They can be added the same way as the 472 recipes: build them from
+AUSNUT ingredients and a standard recipe, and mark the result as an estimate (question 3).</p>
+
+<h2><span class="n">3</span>What the planner does today (300 live plates)</h2>
+<div class="tbl"><table>
+  <tr><th>Meal</th><th>Real plates from the planner</th><th>What's wrong</th></tr>
+  <tr><td>Breakfast</td><td>Muesli + passionfruit + <b>evaporated milk</b><br>Panettone + flavoured yoghurt + seed beverage</td><td>Mostly right in shape: cereal and bread plates make up 71%. A few wrong foods.</td></tr>
+  <tr><td>Lunch</td><td>Hamburger + frozen strawberries + protein yoghurt<br>Sandwich, chicken &amp; salad + strawberries + feta<br>Pizza + bamboo shoots + frozen banana<br>Eggs benedict + grapefruit + haloumi</td><td class="bad">The main is right, but the sides are fruit and cheese chosen to fill serve targets, so lunch looks like a snack platter.</td></tr>
+  <tr><td>Dinner</td><td>Hamburger + bamboo shoots + Thai beef salad<br>Pizza + cooked celery + waldorf salad<br><b>Lentil, green, dry</b> + buckwheat + chicken caesar</td><td class="bad">Two mains on one plate (a burger and a beef salad). Sides that don't go together. An uncooked food again.</td></tr>
+</table></div>
+
+<div class="callout stop"><b>Why this happens</b>
+<ul style="margin:4px 0 0">
+  <li><b>Every main gets 1–2 sides.</b> The rule was written for meat-and-three-veg dinners. A sandwich, burger,
+    pizza or curry with rice is already a whole meal: it has the grain, the protein and some vegetables.</li>
+  <li><b>Sides are chosen by food group only.</b> Since m5-03 they lean toward fruit and dairy at lunch. There's
+    no rule that pizza goes with salad and not with bamboo shoots.</li>
+  <li><b>Lunch carries 35% of the day's fruit.</b> Real Australians eat their fruit at breakfast or as a snack.
+    The snack slot (m5-04) is where it belongs.</li>
+</ul></div>
+
+<h2><span class="n">4</span>Your first question: does a Snack tab repeat the fruit in meals?</h2>
+<p>Partly, today. Fruit is already a side on most breakfast plates and many lunch plates, because the m5-03
+pattern asks breakfast for 40% of the day's fruit and lunch for 35%. The snack would use the same plate engine
+with its own rules, so it's the same machinery, not new.</p>
+<p>The fix is to <b>move lunch's fruit and dairy share to the snack</b>. Breakfast keeps its fruit, as on cereal.
+Lunch becomes a sandwich or a wrap, and the apple and cheese become the 3 pm snack. That matches the survey, and it
+also stops lunch looking like a snack platter. So the snack slot and the plate-shape fix belong together.</p>
+
+<h2><span class="n">5</span>What I'd change</h2>
+<ol>
+  <li><b>Whole dishes stand alone.</b> Each sub-group in the meal table gets a shape:
+    <ul>
+      <li><b>whole dish</b>: sandwiches, rolls, wraps, burgers, pizza, sushi, poke bowls, pasta dishes, curries
+        and stir-fries with rice, soups, lasagne. Served alone, or with at most one side from a short "goes with"
+        list (a side salad with pizza, a piece of fruit with a sandwich at breakfast).</li>
+      <li><b>needs sides</b>: plain meat, fish, eggs, tofu, cereal. These keep 1–2 sides, with dinner shaped as
+        protein + starchy vegetable or grain + green vegetable (the survey's most common dinner).</li>
+    </ul></li>
+  <li><b>Sides "go with" the main</b>, like the snack pairs: dinner sides come from vegetable and starch groups
+    that suit the main, not from whatever fills a serve gap.</li>
+  <li><b>Fruit and dairy move from lunch to the snack</b>, as above.</li>
+  <li><b>Fix the wrong foods found here:</b> dry lentils, infant pasta, evaporated milk as a drink, panettone and
+    sweet buns as breakfast or side foods.</li>
+  <li><b>Coffee and tea</b>: your call (question 2).</li>
+  <li><b>Missing dishes</b> (bánh mì, phở): your call (question 3).</li>
+</ol>
+
+<h2><span class="n">6</span>Questions</h2>
+<div class="q"><div class="h">Q1 · Whole dishes</div>
+  Should a burger, sandwich, pizza or curry with rice be suggested on its own, or with at most one fitting side?
+  <span class="r">Recommended: yes.</span> It changes the m5-01 plate rules for lunch and dinner, so I'd do it
+  before the snack build, and build both on the same "goes with" lists.</div>
+<div class="q"><div class="h">Q2 · Coffee and tea</div>
+  Half of Australians drink coffee on any given day. Options:
+  <ul style="margin:4px 0 0">
+    <li>(a) Keep drinks out of suggestions, as in the snack design (D3).</li>
+    <li>(b) Offer an optional "+ flat white" or "+ tea" on breakfast cards only, which logs with the plate if
+      ticked. The milk in a flat white also counts toward dairy. It would be hidden during pregnancy, for
+      caffeine.</li>
+    <li>(c) Treat coffee as a full suggestion on every meal.</li>
+  </ul>
+  <span class="r">Recommended: (b), but only after the plate shape is right.</span></div>
+<div class="q"><div class="h">Q3 · Missing dishes</div>
+  Bánh mì and phở aren't in AUSNUT. To add them from a qualified source, we would build each from AUSNUT
+  ingredients (roll, pork, pâté, pickled vegetables, herbs; or broth, rice noodles, beef, herbs) and label the
+  nutrition as an estimate. <span class="r">Recommended: yes, but as a small separate task</span>, starting from a
+  list of dishes you see at work. You know that list better than any survey does.</div>
+
+<footer>
+<b>Sources</b>
+<ul>
+  <li><a href="https://www.abs.gov.au/statistics/health/food-and-nutrition/food-and-nutrients/latest-release">ABS, Food and nutrients, 2023</a> (National Nutrition and Physical Activity Survey 2023: foods eaten on the day)</li>
+  <li><a href="https://www.abs.gov.au/statistics/health/food-and-nutrition/national-nutrition-and-physical-activity-survey/latest-release">ABS, National Nutrition and Physical Activity Survey, 2023</a></li>
+  <li><a href="https://www.cambridge.org/core/journals/public-health-nutrition/article/exploratory-analysis-of-meal-composition-in-australia-meat-and-accompanying-foods/B160C06EB0B2404C2C3C0FE7C19216D5">Sui, Raubenheimer &amp; Rangan (2017), Exploratory analysis of meal composition in Australia: meat and accompanying foods, Public Health Nutrition</a> (NNPAS 2011–12, 12,153 people)</li>
+  <li><a href="https://www.cambridge.org/core/journals/public-health-nutrition/article/food-group-intake-at-selfreported-eating-occasions-across-the-day-secondary-analysis-of-the-australian-national-nutrition-survey-20112012/175204A2154F21E2FD525CC95000377B">Food group intake at self-reported eating occasions across the day (NNPAS 2011–12), Public Health Nutrition</a></li>
+  <li><a href="https://ipan.deakin.edu.au/2021/04/what-type-of-breakfast-person-are-you/">Deakin IPAN (2021), What type of breakfast person are you?</a> (summary of Leech et al., IJBNPA 2021, NNPAS 2011–12)</li>
+  <li><a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5219683/">Leech et al. (2017), Temporal eating patterns: a latent class analysis approach, IJBNPA</a></li>
+</ul>
+Planner figures: 20 seeds × 5 plates × 3 meals plus catalogue searches, run read-only against the live pool on 2026-11-19.
+</footer>
+</div>
+</body>
+</html>

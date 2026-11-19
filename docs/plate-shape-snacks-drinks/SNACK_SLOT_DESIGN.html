@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Snack and drink slots</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:#fcfcfb; --surface-2:#f3f3f0; --surface-3:#e8e8e3; --border:#dcdcd5;
+    --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#82817b;
+    --accent:#2a78d6; --good:#1baf7a; --good-bg:#eaf7f1;
+    --warn-bg:#fff7e6; --warn-border:#eccb8a; --warn-ink:#6b4d0c;
+    --stop-bg:#fdecec; --stop-border:#efb4b4; --stop-ink:#7d2222;
+    --lane-you:#eef5ff; --lane-app:#f2f8ee; --lane-srv:#fbf3ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-1:#1a1a19; --surface-2:#232322; --surface-3:#2e2e2c; --border:#3b3b38;
+      --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#94938a;
+      --accent:#3987e5; --good:#199e70; --good-bg:#16281f;
+      --warn-bg:#2d2413; --warn-border:#5d4a1d; --warn-ink:#e8cf9a;
+      --stop-bg:#2e1a1a; --stop-border:#5e2f2f; --stop-ink:#f0b8b8;
+      --lane-you:#1a2535; --lane-app:#1c271c; --lane-srv:#2c2419;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:#1a1a19; --surface-2:#232322; --surface-3:#2e2e2c; --border:#3b3b38;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#94938a;
+    --accent:#3987e5; --good:#199e70; --good-bg:#16281f;
+    --warn-bg:#2d2413; --warn-border:#5d4a1d; --warn-ink:#e8cf9a;
+    --stop-bg:#2e1a1a; --stop-border:#5e2f2f; --stop-ink:#f0b8b8;
+    --lane-you:#1a2535; --lane-app:#1c271c; --lane-srv:#2c2419;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:0 16px 80px; background:var(--surface-1); color:var(--text-primary);
+         font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; }
+  header { padding:44px 0 6px; }
+  h1 { font-size:28px; line-height:1.2; margin:0 0 8px; letter-spacing:-.02em; }
+  .sub { color:var(--text-secondary); margin:0; }
+  .meta { color:var(--text-muted); font-size:13px; margin-top:12px; }
+  h2 { font-size:20px; margin:46px 0 6px; padding-top:22px; border-top:1px solid var(--border); }
+  h2 .n { color:var(--text-muted); font-weight:600; margin-right:8px; }
+  h3 { font-size:15.5px; margin:22px 0 8px; }
+  p { margin:8px 0; }
+  ul { padding-left:20px; }
+  code { font:12.5px ui-monospace,Menlo,Consolas,monospace; background:var(--surface-3); padding:1px 5px; border-radius:4px; }
+  .callout { border-radius:10px; padding:13px 15px; margin:16px 0; font-size:14.5px; }
+  .callout > b:first-child { display:block; margin-bottom:3px; }
+  .ok { background:var(--good-bg); border:1px solid var(--good); }
+  .warn { background:var(--warn-bg); border:1px solid var(--warn-border); color:var(--warn-ink); }
+  .stop { background:var(--stop-bg); border:1px solid var(--stop-border); color:var(--stop-ink); }
+  .tbl { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:13.5px; }
+  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .tag { display:inline-block; font-size:11px; font-weight:800; padding:1px 7px; border-radius:5px; white-space:nowrap; }
+  .tag.keep { background:var(--good-bg); color:var(--good); border:1px solid var(--good); }
+  .tag.add { background:var(--lane-you); color:var(--accent); border:1px solid var(--accent); }
+  .tag.drop { background:var(--stop-bg); color:var(--stop-ink); border:1px solid var(--stop-border); }
+
+  .phones { display:flex; gap:20px; flex-wrap:wrap; margin:20px 0; align-items:flex-start; }
+  .phone { width:300px; max-width:100%; }
+  .cap { font-size:12.5px; font-weight:800; text-align:center; margin-bottom:8px; color:var(--text-muted); }
+  .cap.good { color:var(--good); }
+  .screen { background:#fff; color:#000; border:1px solid var(--border); border-radius:26px; padding:14px;
+            box-shadow:0 2px 14px rgba(0,0,0,.08); }
+  /* planning.tsx tab row: px-5 screen, flex-1 tabs */
+  .rec { display:flex; justify-content:space-between; align-items:center; margin:2px 0 10px; }
+  .rec b { font-size:17px; }
+  .tabs { display:flex; gap:6px; margin-bottom:12px; }
+  .tabs div { flex:1; min-width:0; background:#F9FAFB; border-radius:11px; padding:8px 0; text-align:center; }
+  .tabs b { display:block; font-size:12.5px; color:#111827; }
+  .tabs small { display:block; font-size:9.5px; color:#9CA3AF; margin-top:2px; }
+  .tabs div.on { background:#FF9500; } .tabs div.on b, .tabs div.on small { color:#fff; }
+  .mh { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+  .mh b { font-size:15px; }
+  .shuf { font-size:11.5px; font-weight:800; color:#007BFF; background:#EFF6FF; border:1px solid #BFDBFE; border-radius:999px; padding:4px 10px; }
+  .hint { font-size:11px; color:#6B7280; margin:0 0 10px; display:flex; gap:5px; align-items:center; }
+  .hint i { font-style:normal; display:inline-flex; width:14px; height:14px; border-radius:50%; background:#E5E7EB; font-size:9px; align-items:center; justify-content:center; font-weight:800; color:#4B5563; }
+  /* DishCard (planning.tsx) */
+  .card { border:1px solid #EEF2F7; border-radius:20px; overflow:hidden; margin-bottom:12px; box-shadow:0 4px 10px rgba(11,33,73,.06); }
+  .dc-top { background:linear-gradient(#F0F6FF,#FFFFFF); padding:14px 12px 10px; display:flex; gap:10px; align-items:center; }
+  .dc-l { flex:1; min-width:0; }
+  .dc-src { display:inline-block; background:#0B2149; color:#fff; font-size:9px; font-weight:700; letter-spacing:.4px; padding:3px 9px; border-radius:999px; margin-bottom:6px; }
+  .dc-src.snk { background:#15803D; }
+  .dc-t { font-size:15.5px; font-weight:800; color:#0B2149; line-height:1.2; margin-bottom:5px; }
+  .dc-e b { color:#FF9500; font-size:19px; font-weight:800; margin-right:5px; }
+  .dc-e span { color:#6B7280; font-size:11px; font-weight:600; }
+  .dc-ph { width:72px; height:72px; border-radius:50%; overflow:hidden; border:3px solid #fff; box-shadow:0 8px 12px rgba(11,33,73,.2); flex:none; }
+  .dc-ph img { width:100%; height:100%; object-fit:cover; }
+  .dc-two { position:relative; width:80px; height:74px; flex:none; }
+  .dc-two img { position:absolute; width:52px; height:52px; border-radius:50%; object-fit:cover; border:3px solid #fff; box-shadow:0 6px 10px rgba(11,33,73,.2); }
+  .dc-two img:nth-child(1) { left:0; top:0; z-index:2; }
+  .dc-two img:nth-child(2) { right:0; bottom:0; z-index:1; }
+  .dc-foods { font-size:11px; color:#374151; font-weight:600; padding:7px 12px; background:#F8FAFC; border-top:1px solid #EEF2F7; border-bottom:1px solid #EEF2F7; }
+  .dc-act { margin:0 12px; padding:9px 0 11px; display:flex; justify-content:space-between; align-items:center; }
+  .ic { display:inline-flex; width:32px; height:32px; border-radius:50%; align-items:center; justify-content:center; margin-right:5px; color:#A0AEC0; font-size:13px; }
+  .ic.h { background:#FFF2F2; } .ic.x { background:#F5F8FB; }
+  .pick { background:#FF9500; color:#fff; font-weight:700; font-size:12.5px; border-radius:999px; padding:7px 15px; }
+
+  .flow { display:grid; grid-template-columns:120px 1fr; border:1px solid var(--border); border-radius:12px; overflow:hidden; margin:16px 0; }
+  .step { display:contents; }
+  .step .who { padding:10px 12px; font-weight:800; font-size:13px; border-top:1px solid var(--border); }
+  .step .what { padding:10px 12px; font-size:14px; border-top:1px solid var(--border); }
+  .step:first-child .who, .step:first-child .what { border-top:0; }
+  .you { background:var(--lane-you); } .app { background:var(--lane-app); } .srv { background:var(--lane-srv); }
+  .what .k { color:var(--text-muted); font-size:12.5px; display:block; margin-top:2px; }
+  .q { border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin:16px 0; background:var(--surface-2); }
+  .q .h { font-weight:800; margin-bottom:6px; }
+  .q ol { margin:6px 0 0; padding-left:22px; }
+  .q li { margin:4px 0; }
+  .q .r { color:var(--good); font-weight:800; }
+  footer { margin-top:50px; padding-top:18px; border-top:1px solid var(--border); color:var(--text-muted); font-size:13px; }
+  @media (max-width:640px){ h1{font-size:23px} .flow{grid-template-columns:84px 1fr} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Snack and drink slots, and planning around today</h1>
+  <p class="sub">Checklist m5-04. This is design only. Nothing in the app or the backend has changed yet.
+  There are four decisions, each with a recommendation, and they're collected at the end.</p>
+  <p class="meta">2026-11-19 · Measured on the live catalogue pool (1,845 plate foods, 443 of them allowed at snack time today)</p>
+</header>
+
+<div class="callout ok"><b>What m5-04 adds, in one paragraph</b>
+The planning screen gets a fourth tab, <b>Snack</b>, with five snack ideas a day. A snack is one or two foods from
+the five food groups (your rule from 2026-11-16), never a cake or chips. Snacks take the 10% of the day they already
+have in the meal split, and they carry a quarter of the day's fruit and dairy. That is the piece m5-03 could not
+reach with plates alone. Then the planner starts reacting to what you've already logged today: if breakfast had no
+dairy, lunch, dinner and the snack lean toward dairy.</div>
+
+<h2><span class="n">1</span>What it looks like</h2>
+
+<div class="phones">
+  <div class="phone">
+    <div class="cap good">Planning screen · Snack tab</div>
+    <div class="screen">
+      <div class="rec"><b>Recommended</b></div>
+      <div class="tabs">
+        <div><b>Breakfast</b><small>5 ideas</small></div>
+        <div><b>Lunch</b><small>5 ideas</small></div>
+        <div><b>Dinner</b><small>5 ideas</small></div>
+        <div class="on"><b>Snack</b><small>5 ideas</small></div>
+      </div>
+      <div class="mh"><b>Snack</b><span class="shuf">Shuffle</span></div>
+      <p class="hint"><i>i</i>Planned around what you've logged today</p>
+
+      <div class="card">
+        <div class="dc-top">
+          <div class="dc-l"><span class="dc-src snk">SNACK · 2 FOODS</span>
+            <div class="dc-t">Apple &amp; cheddar</div>
+            <div class="dc-e"><b>721</b><span>kJ · whole snack</span></div></div>
+          <div class="dc-two"><img src="https://pub-9433cb877620409ca9a0ea9cda98e328.r2.dev/foods/food_ausnut_16101002-6ada20f6.webp" alt=""><img src="https://pub-9433cb877620409ca9a0ea9cda98e328.r2.dev/foods/food_ausnut_19401003-cbb98e3a.webp" alt=""></div>
+        </div>
+        <div class="dc-foods">Fuji apple · 150 g &nbsp;|&nbsp; Cheddar cheese · 1 slice (21 g)</div>
+        <div class="dc-act"><div><span class="ic h">♡</span><span class="ic x">✕</span></div><span class="pick">＋ Pick</span></div>
+      </div>
+
+      <div class="card">
+        <div class="dc-top">
+          <div class="dc-l"><span class="dc-src snk">SNACK · 2 FOODS</span>
+            <div class="dc-t">Carrot &amp; hummus</div>
+            <div class="dc-e"><b>810</b><span>kJ · whole snack</span></div></div>
+          <div class="dc-two"><img src="https://pub-9433cb877620409ca9a0ea9cda98e328.r2.dev/foods/food_ausnut_24301001-ab33092f.webp" alt=""><img src="https://pub-9433cb877620409ca9a0ea9cda98e328.r2.dev/foods/food_ausnut_23503001-7ad5331d.webp" alt=""></div>
+        </div>
+        <div class="dc-foods">Carrot · 1 carrot (129 g) &nbsp;|&nbsp; Hummus · 1 tub (60 g)</div>
+        <div class="dc-act"><div><span class="ic h">♡</span><span class="ic x">✕</span></div><span class="pick">＋ Pick</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="phone">
+    <div class="cap good">Further down the same tab</div>
+    <div class="screen">
+      <div class="card">
+        <div class="dc-top">
+          <div class="dc-l"><span class="dc-src snk">SNACK · 2 FOODS</span>
+            <div class="dc-t">Greek yoghurt &amp; strawberries</div>
+            <div class="dc-e"><b>902</b><span>kJ · whole snack</span></div></div>
+          <div class="dc-two"><img src="https://pub-9433cb877620409ca9a0ea9cda98e328.r2.dev/foods/food_ausnut_19201001-a2589ed7.webp" alt=""><img src="https://pub-9433cb877620409ca9a0ea9cda98e328.r2.dev/foods/food_ausnut_16201014-59e7844f.webp" alt=""></div>
+        </div>
+        <div class="dc-foods">Greek yoghurt · 140 g &nbsp;|&nbsp; Strawberry · 100 g</div>
+        <div class="dc-act"><div><span class="ic h">♡</span><span class="ic x">✕</span></div><span class="pick">＋ Pick</span></div>
+      </div>
+      <div class="card">
+        <div class="dc-top">
+          <div class="dc-l"><span class="dc-src snk">SNACK · 2 FOODS</span>
+            <div class="dc-t">Glass of milk &amp; a banana</div>
+            <div class="dc-e"><b>800</b><span>kJ · whole snack</span></div></div>
+          <div class="dc-two"><img src="https://pub-9433cb877620409ca9a0ea9cda98e328.r2.dev/foods/food_ausnut_19102001-87197953.webp" alt=""><img src="https://pub-9433cb877620409ca9a0ea9cda98e328.r2.dev/foods/food_ausnut_16502001-2539fc0c.webp" alt=""></div>
+        </div>
+        <div class="dc-foods">Milk · 1 carton (250 ml) &nbsp;|&nbsp; Banana · 1 small (68 g)</div>
+        <div class="dc-act"><div><span class="ic h">♡</span><span class="ic x">✕</span></div><span class="pick">＋ Pick</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="phone" style="flex:1 1 260px;max-width:380px">
+    <div class="cap">What changes, and what doesn't</div>
+    <ul style="font-size:14px;margin-top:0">
+      <li><b>Four tabs instead of three.</b> They're the same tabs as today, with the label at 14 px instead of 16 px,
+        because "Breakfast" in bold at 16 px is about 80 px wide and each of four tabs gets about 76 px on a 375 px
+        phone. The count reads "5 ideas" so it fits under every label.</li>
+      <li><b>The snack card is the plate card.</b> It uses the same DishCard, the same two-photo cluster from
+        round 1 (one circle per food), the same detail page with editing, and the same one-log-row-per-food.
+        The only difference is a green <b>SNACK</b> label, using the snack green #15803D from m4-09.</li>
+      <li><b>One food or two.</b> The cards above are all pairs. A handful of almonds alone is a snack too (decision 2).</li>
+      <li><b>The grey hint line</b> appears only on a meal whose ideas were adjusted for what you've already logged
+        (section 3). It never shows serves (m0-06).</li>
+      <li>Energy figures are for a woman 19–50 on about 2,000 kcal a day, so a snack is about 200 kcal (840 kJ).
+        Plates outside the ±25% window are dropped, as for meals.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout warn"><b>Lunch and dinner get about 10% smaller</b>
+Today the three meals share the whole day, because the snack's 10% is spread over them (25/30/35 becomes
+28/33/39). Once the snack is planned, the meals go back to 25/30/35 and the snack takes its 10%. The day's total
+doesn't change. This is also when the m5-03 serve pattern stops rescaling its snack column over three meals.</div>
+
+<h2><span class="n">2</span>What can be a snack</h2>
+<p>The approved meal table already has a snack column, with 23 sub-groups allowed as the main food and dips as the
+side. Measured against your rule (only five-food-group foods), it lets in some foods it shouldn't and leaves out one
+group it should have:</p>
+
+<div class="tbl"><table>
+  <tr><th>Sub-group</th><th>Today</th><th>Proposed</th><th>Why</th></tr>
+  <tr><td>Fresh fruit (pome, berry, citrus, stone, tropical, other), fruit salad</td><td>snack</td><td><span class="tag keep">keep</span></td><td>The core of the rule. 158 foods.</td></tr>
+  <tr><td>Dried fruit</td><td>snack</td><td><span class="tag keep">keep</span></td><td>The ADG counts 30 g as a fruit serve "only occasionally", so it's capped at one card a day.</td></tr>
+  <tr><td>Milk, yoghurt, cheese</td><td>snack</td><td><span class="tag keep">keep</span></td><td>The dairy gap from m5-03 closes here.</td></tr>
+  <tr><td>Plant milks and yoghurts, unflavoured</td><td>snack</td><td><span class="tag keep">keep</span></td><td>Only calcium-fortified ones count as dairy in the serve data, so unfortified ones fail the half-serve rule below on their own.</td></tr>
+  <tr><td>Nuts and seeds</td><td>snack</td><td><span class="tag keep">keep</span></td><td>Named in your rule. Coconut flakes and a teaspoon of chia fail the half-serve rule.</td></tr>
+  <tr><td>Savoury biscuits (crackers, rice cakes)</td><td>snack</td><td><span class="tag keep">keep, paired only</span></td><td>A rice cake alone is 8 kcal. Crackers appear with cheese or a dip, never alone.</td></tr>
+  <tr><td>Dips (hummus, tzatziki)</td><td>side</td><td><span class="tag keep">keep, paired only</span></td><td>Only with vegetable sticks or crackers.</td></tr>
+  <tr><td>Raw vegetables (carrot, celery, cucumber, capsicum, cherry tomato, snow peas)</td><td>not allowed</td><td><span class="tag add">add</span></td><td>Your rule names vegetables, but the column has none. It uses the same raw-is-normal list as plate sides, so no raw onion or raw potato.</td></tr>
+  <tr><td>Cakes, muffins, scones</td><td>snack</td><td><span class="tag drop">remove</span></td><td>Only scones survive the discretionary filter today (217–301 kcal each). They're a cake, not a five-food-group snack.</td></tr>
+  <tr><td>Custards, dairy desserts</td><td>snack</td><td><span class="tag drop">remove</span></td><td>"Chocolate dairy dessert" and "Children's dairy dessert" pass today. The ADG treats sweetened dairy desserts as sometimes foods.</td></tr>
+  <tr><td>Fruit dishes (crumble, toffee apple, acai bowl)</td><td>snack</td><td><span class="tag drop">remove</span></td><td>A toffee apple passes today. A 458 kcal acai bowl is a meal, not a snack.</td></tr>
+  <tr><td>Corn snacks, fruit and nut bars</td><td>snack</td><td><span class="tag drop">remove</span></td><td>One food each, both closer to the discretionary list than to the rule.</td></tr>
+</table></div>
+
+<p><b>Plus one data rule on every snack food:</b> its portion must give at least half a serve of fruit, vegetables,
+dairy, grain or protein. That is the Eat for Health idea ("a snack from the five food groups") turned into a
+check the code can run, and it catches the odd cases the table can't: 1 tablespoon of coconut, 1 rice cake, an
+unfortified almond drink.</p>
+
+<p><b>Pairs follow a short list of combinations people actually eat</b>, rather than "any two groups". Otherwise
+you'd get cheddar with banana, or hummus with yoghurt:</p>
+<div class="tbl"><table>
+  <tr><th>First food</th><th>Goes with</th></tr>
+  <tr><td>Fruit</td><td>cheese, yoghurt, nuts</td></tr>
+  <tr><td>Yoghurt</td><td>fruit (fresh or dried), nuts and seeds</td></tr>
+  <tr><td>Cheese</td><td>fruit, crackers, vegetable sticks</td></tr>
+  <tr><td>Vegetable sticks</td><td>dip, cheese</td></tr>
+  <tr><td>Crackers</td><td>cheese, dip</td></tr>
+  <tr><td>Milk</td><td>fruit</td></tr>
+  <tr><td>Nuts</td><td>fruit, yoghurt</td></tr>
+</table></div>
+
+<h2><span class="n">3</span>Planning around what you've logged today</h2>
+<p>You chose to do this together with snacks. Today the planner ignores the log completely. Lunch ideas are the same
+whether breakfast was porridge with milk or nothing at all.</p>
+
+<div class="flow">
+  <div class="step"><div class="who you">You</div><div class="what">Log breakfast (any way: plate, barcode, search, voice), then open the planning screen.</div></div>
+  <div class="step"><div class="who app">App</div><div class="what">Asks for the plan with today's local date, which the route already accepts (<code>?date=</code>).</div></div>
+  <div class="step"><div class="who srv">Server</div><div class="what">Reads today's logs and adds up what's been eaten: <b>energy from every row</b>, and <b>serves from catalogue rows</b>.
+    <span class="k">Barcode and FatSecret rows have no food groups, so they count as energy and zero serves. This errs toward suggesting a little more of a group, which is the safe side, because serves are minimums.</span></div></div>
+  <div class="step"><div class="who srv">Server</div><div class="what">Spreads what's <b>left</b> of each food group over the meals with nothing logged yet, using the m5-03 meal pattern.</div></div>
+  <div class="step"><div class="who srv">Server</div><div class="what">Does the same for energy, but <b>gently</b>: an unlogged meal is never planned below 80% or above 120% of its usual size (decision 4).</div></div>
+  <div class="step"><div class="who app">App</div><div class="what">Shows the adjusted meals with the grey hint line. Meals you've already logged keep their usual ideas, in case you want to add more.</div></div>
+</div>
+
+<h3>Two worked examples (woman 51–70, 4 dairy serves a day)</h3>
+<div class="tbl"><table>
+  <tr><th>Breakfast logged</th><th class="num">Lunch dairy</th><th class="num">Dinner dairy</th><th class="num">Snack dairy</th></tr>
+  <tr><td>Nothing yet</td><td class="num">1.0</td><td class="num">0.6</td><td class="num">1.0</td></tr>
+  <tr><td>Porridge with milk, from a plate (1.2 dairy)</td><td class="num">1.1</td><td class="num">0.6</td><td class="num">1.1</td></tr>
+  <tr><td>Toast and jam, by barcode (dairy unknown, so 0)</td><td class="num">1.5</td><td class="num">0.9</td><td class="num">1.5</td></tr>
+</table></div>
+<div class="tbl"><table>
+  <tr><th>Energy (2,000 kcal day)</th><th class="num">Lunch</th><th class="num">Dinner</th><th class="num">Snack</th></tr>
+  <tr><td>Nothing logged yet</td><td class="num">600</td><td class="num">700</td><td class="num">200</td></tr>
+  <tr><td>Breakfast 800 kcal (target 500)</td><td class="num">480</td><td class="num">560</td><td class="num">160</td></tr>
+  <tr><td>Breakfast 1,100 kcal: the meals would need 60%, so they stop at the 80% floor</td><td class="num">480</td><td class="num">560</td><td class="num">160</td></tr>
+</table></div>
+<p>In the last row the day ends about 300 kcal over. m5-06 is where the planner says so in words. m5-04 only makes
+sure it doesn't respond by planning a 200 kcal dinner.</p>
+
+<h2><span class="n">4</span>Drinks</h2>
+<p>The checklist says drinks are first-class (m0-04), and you've had a water target since m4-06 (2.6 L for men,
+2.1 L for women). There are two different jobs here, and only one belongs to the planner:</p>
+<ul>
+  <li><b>Drinks with nutrition</b> (milk, calcium-fortified soy) are dairy. They're already in the snack pool, as in
+    the last card above, and in the pair list.</li>
+  <li><b>Water, tea and coffee</b> have no energy and no serves. Nobody needs a recommendation to drink water. What
+    they need is a running total against 2.1 L. That is a tracking screen, and it's already m6-02 ("Water needs a
+    running total against the target").</li>
+  <li><b>Juice, cordial, soft drinks, sports drinks and flavoured milk</b> are never suggested. Juice is "occasionally"
+    in the ADG. The others are discretionary. They can all still be logged.</li>
+</ul>
+
+<h2><span class="n">5</span>Decisions</h2>
+
+<div class="q"><div class="h">D1 · Snack contents</div>
+<ol>
+  <li><span class="r">Recommended:</span> the table in section 2. Keep fruit, dairy, nuts and crackers. Add raw vegetable
+    sticks. Remove cakes, dairy desserts, fruit dishes, corn snacks and bars. Add the half-serve rule. This edits the
+    approved meal table's snack column only. Breakfast, lunch and dinner are untouched.</li>
+  <li>Keep the snack column as approved and rely on the half-serve rule alone. Scones and toffee apples would still pass.</li>
+</ol></div>
+
+<div class="q"><div class="h">D2 · What a snack card holds</div>
+<ol>
+  <li><span class="r">Recommended:</span> one or two foods. One food when it reaches the snack's energy on its own at a
+    normal portion (a handful of almonds, a tub of yoghurt). Otherwise a pair from the list in section 2, with the
+    first food chosen from the group today still lacks.</li>
+  <li>Always one food. Simpler, but an apple is 90 kcal against a 200 kcal snack, so most fruit would either fail
+    the energy window or show up as "2 apples".</li>
+</ol></div>
+
+<div class="q"><div class="h">D3 · Drinks</div>
+<ol>
+  <li><span class="r">Recommended:</span> milk and fortified plant milk are suggested as dairy snacks. Nothing else is
+    suggested. The water running total stays in m6-02.</li>
+  <li>Add a drink line to every plate ("+ a glass of water"). It's always the same line, so it carries no
+    information and adds clutter to every card.</li>
+</ol></div>
+
+<div class="q"><div class="h">D4 · How hard energy reacts to what's logged</div>
+<ol>
+  <li><span class="r">Recommended:</span> food groups react fully. Energy reacts within 80–120% of each meal's usual size.</li>
+  <li>Food groups only. Energy stays fixed, so a big breakfast is followed by full-size lunch and dinner.</li>
+  <li>Both react fully. After a big breakfast, dinner could be planned at 200 kcal, and most plates would fail the
+    energy window.</li>
+</ol></div>
+
+<div class="callout ok"><b>Build order once these are decided</b>
+<ol style="margin:4px 0 0;padding-left:20px">
+  <li><b>Backend snack builder:</b> meal table edit, half-serve rule, pairs, 5 snacks in the plan payload. Tested with numbers before anything is drawn.</li>
+  <li><b>Backend "today":</b> read the logs, work out what's left, the 80–120% clamp, and a cache key that changes when you log.</li>
+  <li><b>App:</b> the fourth tab, the green SNACK label and the hint line. This brings forward m6-01 ("Four slots on the planning page"), because without it the snack can't be tested on the iPhone.</li>
+</ol>
+Each step is its own commit, as with m5-01.</div>
+
+<footer>Sources: Eat for Health, "Swap discretionary snacks for snacks from the five food groups" and the ADG serve
+sizes (eatforhealth.gov.au); NRV water Adequate Intake (m4-06). Numbers are from the live catalogue pool on
+2026-11-19. Card energies are for the portions shown.</footer>
+</div>
+</body>
+</html>
