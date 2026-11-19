@@ -7,7 +7,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { isPlate, isSnackPlate, logEntriesFor, plateFoodLine, plateLabel, platePhotos } from "./plateLog.ts";
+import {
+  drinkPortionShort,
+  isPlate,
+  isSnackPlate,
+  logEntriesFor,
+  plateDrinks,
+  plateFoodLine,
+  plateLabel,
+  platePhotos,
+} from "./plateLog.ts";
 
 const plate = {
   id: "plate_dinner_1",
@@ -106,4 +115,42 @@ test("a whole dish alone is labelled DISH; a whole dish with a side stays a plat
   const burger = { ...plate, shape: "whole", items: [plate.items[0]] };
   assert.equal(plateLabel(burger), "DISH");
   assert.equal(plateLabel({ ...plate, shape: "whole", items: plate.items.slice(0, 2) }), "PLATE · 2 FOODS");
+});
+
+// ---- A2, 2026-11-20: the optional drink -----------------------------------
+
+const flatWhite = {
+  id: "drink_fw", externalId: "drink_fw", source: "catalog", type: "drink", kind: "milk_coffee",
+  title: "Flat white", food_name: "Coffee, flat white/cappuccino/latte, single shot & regular fat cow's milk",
+  calories: 118, protein: 7.5, carbs: 10, fats: 5, grams: 250, image: "",
+  serving_description: "1 cup (250 ml)", nutrients: { energy_kj: 490, protein_g: 7.5, vitamin_d_mcg: null },
+};
+const plateWithDrinks = { ...plate, drinks: [flatWhite, { ...flatWhite, id: "drink_water", title: "Water", calories: 0 }] };
+
+test("drink off: no extra row", () => {
+  assert.equal(logEntriesFor(plateWithDrinks, legacy).length, 3);
+  assert.equal(logEntriesFor(plateWithDrinks, legacy, null).length, 3);
+});
+
+test("drink on: one more catalogue row, with the drink's grams and unknown nutrients kept as null", () => {
+  const rows = logEntriesFor(plateWithDrinks, legacy, plateDrinks(plateWithDrinks)[0]);
+  assert.equal(rows.length, 4);
+  const drinkRow = rows[3];
+  assert.equal(drinkRow.foodName, flatWhite.food_name);
+  assert.equal(drinkRow.source, "catalog");
+  assert.equal(drinkRow.externalId, "drink_fw");
+  assert.equal(drinkRow.calories, 118);
+  assert.equal(drinkRow.servingDescription, "1 cup (250 ml)");
+  assert.equal(drinkRow.nutrients.serving_grams, 250);
+  assert.equal(drinkRow.nutrients.vitamin_d_mcg, null);
+});
+
+test("no drinks on a legacy item or a plate without them; the card shows the short portion", () => {
+  assert.deepEqual(plateDrinks(plate), []);
+  assert.deepEqual(plateDrinks({ type: "food", drinks: [flatWhite] }), []);
+  assert.equal(plateDrinks(plateWithDrinks)[0].title, "Flat white");
+  assert.equal(drinkPortionShort(flatWhite), "1 cup");
+  assert.equal(drinkPortionShort({ serving_description: "1 small bottle (250 ml)" }), "1 small bottle");
+  // a non-plate never gains a drink row
+  assert.equal(logEntriesFor({ id: "x", title: "Apple", calories: 80 }, legacy, flatWhite).length, 1);
 });

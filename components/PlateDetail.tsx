@@ -26,6 +26,7 @@ import { addMealsBatch, sendMealPlanEvent } from "../services/planning.network";
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from "../services/mealLogOutcome";
 import { markMealsSummaryDirty } from "../services/mealsSummaryStore";
 import { formatEnergy } from "../utils/energy";
+import { drinkLogEntry, plateDrinks, type PlateDrink } from "../utils/plateLog";
 import {
   DI_FOOTNOTE,
   activeFoods,
@@ -59,9 +60,9 @@ const C = {
 
 const fmtQty = (q: number) => (q === 0.5 ? "½" : Number.isInteger(q) ? String(q) : `${Math.floor(q)}½`);
 
-type Props = { item: any; dateStr: string };
+type Props = { item: any; dateStr: string; initialDrinkId?: string | null };
 
-const PlateDetail = ({ item, dateStr }: Props) => {
+const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
   const router = useRouter();
   const { userId, getToken } = useAuth();
   const { height: windowHeight } = useWindowDimensions();
@@ -73,6 +74,13 @@ const PlateDetail = ({ item, dateStr }: Props) => {
   const [view, setView] = useState<string>("plate"); // "plate" or a food key
   const [showMore, setShowMore] = useState(false);
   const [showMealSheet, setShowMealSheet] = useState(false);
+  // A2, 2026-11-20: "Drink · optional" (DRINKS_UI.html). None by default, or
+  // the card's drink when it was on there.
+  const drinks = useMemo(() => plateDrinks(item), [item]);
+  const [drinkId, setDrinkId] = useState<string | null>(() =>
+    initialDrinkId && drinks.some((d) => d.id === initialDrinkId) ? initialDrinkId : null
+  );
+  const drink: PlateDrink | null = drinks.find((d) => d.id === drinkId) ?? null;
 
   const edited = isEdited(foods, original);
   const title = plateTitle(foods) || item?.title || "Plate";
@@ -103,7 +111,9 @@ const PlateDetail = ({ item, dateStr }: Props) => {
     setShowMealSheet(false);
     const apiURL = process.env.EXPO_PUBLIC_BACKEND_URL;
     if (!userId || !apiURL) return;
-    const rows = logRowsFor(foods);
+    // The drink is one more catalogue row in the same meal, only when chosen.
+    const foodRows = logRowsFor(foods);
+    const rows = drink && foodRows.length > 0 ? [...foodRows, drinkLogEntry(drink)] : foodRows;
     const itemLabel = title;
     await pipStatus.run({
       loading: { title: `Adding ${itemLabel}…`, message: `Saving to ${mealType}` },
@@ -122,7 +132,7 @@ const PlateDetail = ({ item, dateStr }: Props) => {
           getToken,
           eventType: "accepted",
           mealType,
-          item: { ...item, title, edited },
+          item: { ...item, title, edited, drink: drink ? drink.id : null },
         });
         return resolveMealLogOutcome(payload, { itemLabel, mealType });
       },
@@ -352,6 +362,35 @@ const PlateDetail = ({ item, dateStr }: Props) => {
           </Text>
         </View>
 
+        {drinks.length > 0 ? (
+          <View style={{ marginBottom: 14 }}>
+            <Text style={{ fontSize: 15, fontWeight: "800", color: C.ink, marginBottom: 8 }}>
+              Drink <Text style={{ fontSize: 12, fontWeight: "700", color: C.faint }}>optional</Text>
+            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+              {[{ id: null as string | null, title: "None" }, ...drinks.map((d) => ({ id: d.id ?? null, title: d.title || d.food_name || "Drink" }))].map((chip) => {
+                const on = drinkId === chip.id;
+                return (
+                  <TouchableOpacity
+                    key={chip.id ?? "none"}
+                    onPress={() => setDrinkId(chip.id)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    style={{ borderWidth: 1.5, borderColor: on ? C.blue : "#E5E7EB", backgroundColor: on ? C.blue : "#fff", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 }}
+                  >
+                    <Text style={{ fontSize: 12.5, fontWeight: "800", color: on ? "#fff" : "#4B5563" }}>{chip.title}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {drink ? (
+              <Text style={{ fontSize: 11.5, color: C.muted, marginTop: 6 }}>
+                {drink.serving_description} · {formatEnergy(drink.calories)} · counts toward your water
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
         <TouchableOpacity
           onPress={() => setShowMealSheet(true)}
           disabled={pipStatus.isBusy || left.length === 0}
@@ -376,8 +415,11 @@ const PlateDetail = ({ item, dateStr }: Props) => {
                   <Text style={{ fontSize: 20, fontWeight: "700", color: C.text }}>Add to meal log</Text>
                   <Text style={{ fontSize: 13, lineHeight: 18, color: C.muted, textAlign: "center", marginTop: 8 }}>
                     {title} · {left.length} food{left.length === 1 ? "" : "s"}
+                    {drink ? ` + ${drink.title || "drink"}` : ""}
                   </Text>
-                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.orange, marginTop: 8 }}>{formatEnergy(totalKcal)}</Text>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.orange, marginTop: 8 }}>
+                    {formatEnergy(totalKcal + (drink ? Number(drink.calories) || 0 : 0))}
+                  </Text>
                   <Text style={{ fontSize: 14, color: C.faint, marginTop: 18, marginBottom: 14 }}>When are you eating this?</Text>
                   {MEAL_TYPE_ENTRIES.map((entry, index) => (
                     <TouchableOpacity

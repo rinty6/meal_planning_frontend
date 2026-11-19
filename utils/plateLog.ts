@@ -10,6 +10,8 @@
  *      Meal Summary lists salmon, rice and broccolini separately and each can
  *      be resized or removed on its own.
  *   2. Anything that is not a plate saves exactly as before.
+ *   3. A2, 2026-11-20: a plate's optional drink (DRINKS_UI.html) is one more
+ *      catalogue row in the same meal, only when the user turned it on.
  *
  * Pure: no React, no network.
  */
@@ -55,6 +57,20 @@ export const isPlate = (item: any): boolean =>
 
 /** The foods on a plate, main first. Empty for anything that is not a plate. */
 export const plateFoods = (item: any): PlateFood[] => (isPlate(item) ? (item.items as PlateFood[]) : []);
+
+/**
+ * A2, 2026-11-20: a drink the server offers with a plate (backend
+ * drinkPicker.js). Shaped like a plate food, plus its kind.
+ */
+export type PlateDrink = PlateFood & { kind?: string };
+
+/** The plate's drink options, the suggestion first. Empty when there are none (legacy path). */
+export const plateDrinks = (item: any): PlateDrink[] =>
+  isPlate(item) && Array.isArray(item.drinks) ? (item.drinks as PlateDrink[]).filter((d) => !!d && typeof d === "object") : [];
+
+/** "1 cup (250 ml)" -> "1 cup": the card has room for the short form only. */
+export const drinkPortionShort = (drink: PlateDrink | null | undefined): string =>
+  String(drink?.serving_description || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
 
 /** A snack card from the planner's snack slot (P4/A1, 2026-11-20). */
 export const isSnackPlate = (item: any): boolean =>
@@ -106,10 +122,16 @@ const plateFoodEntry = (food: PlateFood): LogEntry => ({
   nutrients: { ...(food.nutrients || {}), serving_grams: food.grams ?? null },
 });
 
+/** A2, 2026-11-20: the drink's log row, built exactly like a plate food's. */
+export const drinkLogEntry = (drink: PlateDrink): LogEntry => plateFoodEntry(drink);
+
 /**
- * Log rows for one planner item. A plate gives one row per food; anything
- * else gives the single row `legacyEntry` builds (the screen's existing
- * mapping, passed in so this file never has to copy it).
+ * Log rows for one planner item. A plate gives one row per food, plus one for
+ * its drink when `drink` is given (the user turned it on); anything else gives
+ * the single row `legacyEntry` builds (the screen's existing mapping, passed
+ * in so this file never has to copy it).
  */
-export const logEntriesFor = (item: any, legacyEntry: (item: any) => LogEntry): LogEntry[] =>
-  isPlate(item) ? plateFoods(item).map(plateFoodEntry) : [legacyEntry(item)];
+export const logEntriesFor = (item: any, legacyEntry: (item: any) => LogEntry, drink?: PlateDrink | null): LogEntry[] =>
+  isPlate(item)
+    ? [...plateFoods(item).map(plateFoodEntry), ...(drink ? [drinkLogEntry(drink)] : [])]
+    : [legacyEntry(item)];

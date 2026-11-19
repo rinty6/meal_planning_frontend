@@ -51,7 +51,18 @@ import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { buildAddMealBody } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from "../../../services/authedFetch";
 import { energyValue, formatEnergy, parseEnergyInput } from "../../../utils/energy";
-import { isPlate, isSnackPlate, logEntriesFor, plateFoodLine, plateLabel, platePhotos, type LogEntry } from "../../../utils/plateLog";
+import {
+  drinkPortionShort,
+  isPlate,
+  isSnackPlate,
+  logEntriesFor,
+  plateDrinks,
+  plateFoodLine,
+  plateLabel,
+  platePhotos,
+  type LogEntry,
+  type PlateDrink,
+} from "../../../utils/plateLog";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
 
 const ALLERGEN_OPTIONS = [
@@ -189,6 +200,8 @@ const DishCard = ({
   onLove,
   isFavorite = false,
   isFavoriteLoading = false,
+  drinkOn = false,
+  onToggleDrink,
 }: {
   item: any;
   isSelected: boolean;
@@ -198,6 +211,8 @@ const DishCard = ({
   onLove: () => void;
   isFavorite?: boolean;
   isFavoriteLoading?: boolean;
+  drinkOn?: boolean;
+  onToggleDrink?: () => void;
 }) => {
   const image = typeof item?.image === "string" ? item.image.trim() : "";
   const isRecipeItem =
@@ -211,7 +226,12 @@ const DishCard = ({
   // Recipes list per-serving calories (that's what the grid filters + recommender use),
   // so we say so explicitly and show the yield separately to avoid "116 kcal for 14 servings".
   const recipeYieldText = isRecipeItem ? formatServingsLabel(item?.servings) : "";
-  const servingText = snack ? "whole snack" : plate ? "whole plate" : isRecipeItem ? "per serving" : getFoodServingText(item);
+  // A2, 2026-11-20: the card's optional drink (DRINKS_UI.html). Off by
+  // default; when on, the headline energy includes it.
+  const drink: PlateDrink | null = plateDrinks(item)[0] ?? null;
+  const withDrink = !!drink && drinkOn;
+  const headlineKcal = toNumber(item?.calories) + (withDrink ? toNumber(drink?.calories) : 0);
+  const servingText = withDrink ? "with drink" : snack ? "whole snack" : plate ? "whole plate" : isRecipeItem ? "per serving" : getFoodServingText(item);
 
   const fatGrams = toNumber(item?.fats);
   const proteinGrams = toNumber(item?.protein);
@@ -239,7 +259,7 @@ const DishCard = ({
               </Text>
               <View className="flex-row items-baseline" style={{ gap: 5 }}>
                 <Text className="text-secondary" style={{ fontSize: 24, fontWeight: "800" }}>
-                  {formatEnergy(item?.calories, { withUnit: false })}
+                  {formatEnergy(headlineKcal, { withUnit: false })}
                 </Text>
                 <Text className="text-gray-500" style={{ fontSize: 12, fontWeight: "600" }}>
                   kJ · {servingText}
@@ -289,6 +309,33 @@ const DishCard = ({
             <Text style={{ fontSize: 12, fontWeight: "600", color: "#374151" }} numberOfLines={2}>
               {plateFoodLine(item)}
             </Text>
+          </View>
+        ) : null}
+
+        {drink ? (
+          // A2, 2026-11-20: the drink row sits under the foods line.
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 9, borderBottomWidth: 1, borderColor: "#EEF2F7", gap: 8 }}>
+            <Ionicons name="cafe-outline" size={16} color="#6B7280" />
+            <Text style={{ flex: 1, fontSize: 12, fontWeight: "600", color: "#374151" }} numberOfLines={1}>
+              {drink.title || drink.food_name}
+              {drinkPortionShort(drink) ? ` · ${drinkPortionShort(drink)}` : ""} · {formatEnergy(drink.calories)}
+            </Text>
+            <TouchableOpacity
+              onPress={onToggleDrink}
+              accessibilityRole="button"
+              accessibilityState={{ selected: withDrink }}
+              accessibilityLabel={withDrink ? `Remove ${drink.title || "drink"}` : `Add ${drink.title || "drink"}`}
+              style={{
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 999,
+                borderWidth: 1.5,
+                borderColor: withDrink ? "#007BFF" : "#BFDBFE",
+                backgroundColor: withDrink ? "#007BFF" : "#fff",
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: "800", color: withDrink ? "#fff" : "#007BFF" }}>{withDrink ? "✓ Added" : "+ Add"}</Text>
+            </TouchableOpacity>
           </View>
         ) : null}
 
@@ -446,6 +493,14 @@ const PlanningScreen = () => {
   // A1, 2026-11-20: meals the server planned around today's logs (P5). The
   // hint line shows on these; the legacy payload has none.
   const [adjustedMeals, setAdjustedMeals] = useState<string[]>([]);
+  // A2, 2026-11-20: which cards have their drink turned on, by card key (like selection).
+  const [drinkOnKeys, setDrinkOnKeys] = useState<Record<string, boolean>>({});
+  const drinkFor = (item: any): PlateDrink | null =>
+    drinkOnKeys[createItemKey(item)] ? plateDrinks(item)[0] ?? null : null;
+  const toggleDrink = (item: any) => {
+    const key = createItemKey(item);
+    setDrinkOnKeys((current) => ({ ...current, [key]: !current[key] }));
+  };
 
   const [isRefineVisible, setIsRefineVisible] = useState(false);
   const [refineStep, setRefineStep] = useState(0);
@@ -967,6 +1022,8 @@ const PlanningScreen = () => {
       params: {
         itemData: JSON.stringify(item),
         selectedDate: formatLocalYYYYMMDD(selectedDate),
+        // A2, 2026-11-20: the detail page starts with the card's drink when it was on.
+        drinkId: drinkFor(item)?.id || "",
       },
     });
   };
@@ -1009,7 +1066,7 @@ const PlanningScreen = () => {
           const date = formatLocalYYYYMMDD(selectedDate);
           // A plate saves one row per food; anything else saves as it always has.
           const payload = await addMealsBatch(
-            logEntriesFor(item, legacyLogEntry).map((entry) => ({
+            logEntriesFor(item, legacyLogEntry, drinkFor(item)).map((entry) => ({
               apiURL: configuredApiURL,
               getToken,
               clerkId: userId,
@@ -1054,7 +1111,7 @@ const PlanningScreen = () => {
           const date = formatLocalYYYYMMDD(selectedDate);
           const payload = await addMealsBatch(
             selectedItems
-              .flatMap((item: any) => logEntriesFor(item, legacyLogEntry))
+              .flatMap((item: any) => logEntriesFor(item, legacyLogEntry, drinkFor(item)))
               .map((entry) => ({
                 apiURL: configuredApiURL,
                 getToken,
@@ -1349,6 +1406,8 @@ const PlanningScreen = () => {
                     onToggleSelect={() => handlePickItem(item)}
                     onSkip={() => handleSkipItem(item, index)}
                     onLove={() => handleLoveItem(item)}
+                    drinkOn={!!drinkOnKeys[key]}
+                    onToggleDrink={() => toggleDrink(item)}
                   />
                 );
               })

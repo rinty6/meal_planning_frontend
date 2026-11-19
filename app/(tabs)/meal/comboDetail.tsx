@@ -482,7 +482,15 @@ const FoodDetailScreen = () => {
   // Australian nutrition panel. Placed after every hook above, so the hook
   // order never changes; single foods and recipes continue below untouched.
   if (isPlate(item)) {
-    return <PlateDetail item={item} dateStr={dateFromPlanning || formatLocalYYYYMMDD(new Date())} />;
+    // A2, 2026-11-20: the card's drink, when it was turned on there.
+    const drinkIdParam = Array.isArray(params.drinkId) ? params.drinkId[0] : params.drinkId;
+    return (
+      <PlateDetail
+        item={item}
+        dateStr={dateFromPlanning || formatLocalYYYYMMDD(new Date())}
+        initialDrinkId={typeof drinkIdParam === "string" && drinkIdParam ? drinkIdParam : null}
+      />
+    );
   }
 
   const totalCalories =
