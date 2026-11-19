@@ -51,7 +51,7 @@ import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { buildAddMealBody } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from "../../../services/authedFetch";
 import { energyValue, formatEnergy, parseEnergyInput } from "../../../utils/energy";
-import { isPlate, logEntriesFor, plateFoodLine, plateLabel, platePhotos, type LogEntry } from "../../../utils/plateLog";
+import { isPlate, isSnackPlate, logEntriesFor, plateFoodLine, plateLabel, platePhotos, type LogEntry } from "../../../utils/plateLog";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
 
 const ALLERGEN_OPTIONS = [
@@ -206,11 +206,12 @@ const DishCard = ({
     !!String(item?.recipe_id || "").trim() ||
     String(item?.id || "").trim().toLowerCase().startsWith("recipe-");
   const plate = isPlate(item);
+  const snack = isSnackPlate(item);
   const sourceLabel = plate ? plateLabel(item) : item?.source === "fatsecret_recipe" ? "Recipe" : item?.food_type || "Food";
   // Recipes list per-serving calories (that's what the grid filters + recommender use),
   // so we say so explicitly and show the yield separately to avoid "116 kcal for 14 servings".
   const recipeYieldText = isRecipeItem ? formatServingsLabel(item?.servings) : "";
-  const servingText = plate ? "whole plate" : isRecipeItem ? "per serving" : getFoodServingText(item);
+  const servingText = snack ? "whole snack" : plate ? "whole plate" : isRecipeItem ? "per serving" : getFoodServingText(item);
 
   const fatGrams = toNumber(item?.fats);
   const proteinGrams = toNumber(item?.protein);
@@ -226,7 +227,11 @@ const DishCard = ({
         <LinearGradient colors={["#F0F6FF", "#FFFFFF"]} style={{ paddingHorizontal: 16, paddingTop: 18, paddingBottom: 14 }}>
           <View className="flex-row items-center" style={{ gap: 14 }}>
             <View className="flex-1">
-              <View style={{ alignSelf: "flex-start", backgroundColor: "#0B2149", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginBottom: 9 }}>
+              {/* A1, 2026-11-20: snack cards wear the snack green (Tailwind `snack`, #15803D, m4-09). */}
+              <View
+                className={snack ? "bg-snack" : undefined}
+                style={{ alignSelf: "flex-start", backgroundColor: snack ? undefined : "#0B2149", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginBottom: 9 }}
+              >
                 <Text style={{ color: "#fff", fontSize: 10, fontWeight: "600", letterSpacing: 0.4 }}>{sourceLabel.toUpperCase()}</Text>
               </View>
               <Text className="text-textDeep" style={{ fontSize: 19, fontWeight: "800", marginBottom: 8 }} numberOfLines={2}>
@@ -438,6 +443,9 @@ const PlanningScreen = () => {
   const [loadingDailyProgress, setLoadingDailyProgress] = useState(true);
   const [consumedCalories, setConsumedCalories] = useState(0);
   const [selectedItemKeys, setSelectedItemKeys] = useState<Record<string, any>>({});
+  // A1, 2026-11-20: meals the server planned around today's logs (P5). The
+  // hint line shows on these; the legacy payload has none.
+  const [adjustedMeals, setAdjustedMeals] = useState<string[]>([]);
 
   const [isRefineVisible, setIsRefineVisible] = useState(false);
   const [refineStep, setRefineStep] = useState(0);
@@ -579,11 +587,11 @@ const PlanningScreen = () => {
   }, [configuredApiURL, userId]);
 
   const applyRecommendationPayload = useCallback((payload: any, mealScope: MealType | "all" = "all") => {
-    const nextByMeal = {
-      breakfast: (payload?.recommendationsByMeal?.breakfast || []).slice(0, 8),
-      lunch: (payload?.recommendationsByMeal?.lunch || []).slice(0, 8),
-      dinner: (payload?.recommendationsByMeal?.dinner || []).slice(0, 8),
-    };
+    const nextByMeal = Object.fromEntries(
+      MEAL_TYPES.map((meal) => [meal, (payload?.recommendationsByMeal?.[meal] || []).slice(0, 8)])
+    ) as ItemsByMeal;
+    // Whatever meal was asked for, the server reports every adjusted meal.
+    setAdjustedMeals(Array.isArray(payload?.adjusted_meals) ? payload.adjusted_meals.map(String) : []);
 
     setItemsByMeal((previous) =>
       mealScope === "all"
@@ -1296,8 +1304,9 @@ const PlanningScreen = () => {
                     onPress={() => handleSelectMealType(mealType)}
                     className={`flex-1 py-3 rounded-xl mr-2 items-center ${isSelected ? "bg-secondary" : "bg-gray-50"}`}
                   >
-                    <Text className={`font-bold capitalize ${isSelected ? "text-white" : "text-gray-900"}`}>{mealType}</Text>
-                    {count > 0 && <Text className={`text-[11px] mt-1 ${isSelected ? "text-white" : "text-gray-400"}`}>{count} dishes</Text>}
+                    {/* A1, 2026-11-20: four tabs share a 375 px row, so the label is 14 px (text-sm). */}
+                    <Text className={`text-sm font-bold capitalize ${isSelected ? "text-white" : "text-gray-900"}`}>{mealType}</Text>
+                    {count > 0 && <Text className={`text-[11px] mt-1 ${isSelected ? "text-white" : "text-gray-400"}`}>{count} ideas</Text>}
                   </TouchableOpacity>
                 );
               })}
@@ -1312,6 +1321,14 @@ const PlanningScreen = () => {
                 <Text className="text-primary font-bold">Shuffle</Text>
               </TouchableOpacity>
             </View>
+
+            {adjustedMeals.includes(selectedMealType) ? (
+              // A1, 2026-11-20: SNACK_SLOT_DESIGN section 1. Never shows serves (m0-06).
+              <View className="flex-row items-center mb-3" style={{ gap: 6 }}>
+                <Ionicons name="information-circle-outline" size={14} color="#6B7280" />
+                <Text className="text-xs text-gray-500">Planned around what you&apos;ve logged today</Text>
+              </View>
+            ) : null}
 
             {loadingRecommendations && displayedItems.length === 0 ? (
               <View className="py-10 items-center">

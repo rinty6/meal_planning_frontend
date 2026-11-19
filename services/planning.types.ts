@@ -1,8 +1,13 @@
-export type MealType = "breakfast" | "lunch" | "dinner";
+// A1, 2026-11-20: the planner plans all four meal types, snack included
+// (m5-04, m6-01). The list is the app's one list (constants/mealTypes.ts),
+// imported here so the planning screen can never drift from it.
+import { MEAL_TYPES as ALL_MEAL_TYPES, type MealType as AppMealType } from "../constants/mealTypes";
+
+export type MealType = AppMealType;
 
 export type ItemsByMeal = Record<MealType, any[]>;
 
-export const MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner"];
+export const MEAL_TYPES: readonly MealType[] = ALL_MEAL_TYPES;
 
 export const LOADING_MESSAGES = [
   "Analyzing your eating patterns...",
@@ -14,6 +19,7 @@ export const createEmptyItemsByMeal = (): ItemsByMeal => ({
   breakfast: [],
   lunch: [],
   dinner: [],
+  snack: [],
 });
 
 export const formatLocalYYYYMMDD = (date: Date) => {

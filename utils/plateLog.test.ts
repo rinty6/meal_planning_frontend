@@ -7,7 +7,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { isPlate, logEntriesFor, plateFoodLine, plateLabel, platePhotos } from "./plateLog.ts";
+import { isPlate, isSnackPlate, logEntriesFor, plateFoodLine, plateLabel, platePhotos } from "./plateLog.ts";
 
 const plate = {
   id: "plate_dinner_1",
@@ -68,4 +68,42 @@ test("card text: label, food line with grams, and photos without blanks", () => 
   assert.equal(plateLabel(plate), "PLATE · 3 FOODS");
   assert.equal(plateFoodLine(plate), "Salmon 132 g · Brown rice 251 g · Broccolini 173 g");
   assert.deepEqual(platePhotos(plate), ["https://img/salmon.webp", "https://img/rice.webp"]);
+});
+
+// ---- A1, 2026-11-20: snack and dish cards ---------------------------------
+
+const snackPlate = {
+  id: "plate_snack_1",
+  type: "plate",
+  source: "catalog_plate",
+  mealType: "snack",
+  shape: "snack",
+  title: "Apple & cheddar",
+  calories: 172,
+  items: [
+    { id: "food_apple", externalId: "food_apple", title: "Apple", food_name: "Apple, fuji, raw", role: "main",
+      calories: 88, protein: 0.4, carbs: 20, fats: 0.2, grams: 150, image: "https://img/apple.webp",
+      serving_description: "1 × 1 apple (150 g)", nutrients: { energy_kj: 368, alcohol_g: 0 } },
+    { id: "food_cheddar", externalId: "food_cheddar", title: "Cheddar", food_name: "Cheese, cheddar, regular fat", role: "side",
+      calories: 84, protein: 5.3, carbs: 0, fats: 7, grams: 21, image: "https://img/cheddar.webp",
+      serving_description: "1 × 1 slice (21 g)", nutrients: { energy_kj: 351, calcium_mg: null } },
+  ],
+};
+
+test("a snack plate is labelled SNACK and logs one row per food, like any plate", () => {
+  assert.equal(isSnackPlate(snackPlate), true);
+  assert.equal(isSnackPlate(plate), false);
+  assert.equal(plateLabel(snackPlate), "SNACK · 2 FOODS");
+  assert.equal(plateLabel({ ...snackPlate, items: [snackPlate.items[0]] }), "SNACK");
+  const rows = logEntriesFor(snackPlate, legacy);
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((r) => r.source === "catalog"));
+  assert.equal(rows[1].nutrients.calcium_mg, null);
+  assert.equal(rows[0].nutrients.serving_grams, 150);
+});
+
+test("a whole dish alone is labelled DISH; a whole dish with a side stays a plate", () => {
+  const burger = { ...plate, shape: "whole", items: [plate.items[0]] };
+  assert.equal(plateLabel(burger), "DISH");
+  assert.equal(plateLabel({ ...plate, shape: "whole", items: plate.items.slice(0, 2) }), "PLATE · 2 FOODS");
 });

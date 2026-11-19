@@ -56,8 +56,21 @@ export const isPlate = (item: any): boolean =>
 /** The foods on a plate, main first. Empty for anything that is not a plate. */
 export const plateFoods = (item: any): PlateFood[] => (isPlate(item) ? (item.items as PlateFood[]) : []);
 
-/** "PLATE · 3 FOODS" */
-export const plateLabel = (item: any): string => `PLATE · ${plateFoods(item).length} FOODS`;
+/** A snack card from the planner's snack slot (P4/A1, 2026-11-20). */
+export const isSnackPlate = (item: any): boolean =>
+  isPlate(item) && (item.shape === "snack" || String(item.mealType || "").toLowerCase() === "snack");
+
+/**
+ * The card's label (A1, 2026-11-20): "SNACK" or "SNACK · 2 FOODS" for a
+ * snack, "DISH" for a whole dish served alone (a burger, a sandwich), and
+ * "PLATE · 3 FOODS" for everything else.
+ */
+export const plateLabel = (item: any): string => {
+  const count = plateFoods(item).length;
+  if (isSnackPlate(item)) return count > 1 ? `SNACK · ${count} FOODS` : "SNACK";
+  if (item?.shape === "whole" && count === 1) return "DISH";
+  return `PLATE · ${count} FOODS`;
+};
 
 /** "Salmon 132 g · Brown rice 251 g · Broccolini 173 g": short enough for the card. */
 export const plateFoodLine = (item: any): string =>
