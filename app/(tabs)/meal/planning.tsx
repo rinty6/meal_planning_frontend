@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   Modal,
   ScrollView,
   StyleSheet,
@@ -16,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@clerk/clerk-expo";
 import { useFocusEffect } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
+import { Image as ExpoImage } from "expo-image";
 import Svg, { Circle, G } from "react-native-svg";
 
 import AddFoodModal from "../../../components/addfoodmodal";
@@ -50,6 +50,7 @@ import { markFavoritesDirty } from "../../../services/favoritesStore";
 import { buildAddMealBody } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from "../../../services/authedFetch";
 import { energyValue, formatEnergy, parseEnergyInput } from "../../../utils/energy";
+import { isPlate, logEntriesFor, plateFoodLine, plateLabel, platePhotos, type LogEntry } from "../../../utils/plateLog";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
 
 const ALLERGEN_OPTIONS = [
@@ -157,6 +158,65 @@ const buildNutrientsSnapshot = (item: any) => ({
   per100: item?.per100 || {},
 });
 
+// The single log row a non-plate recommendation has always saved. Plates go
+// through utils/plateLog instead: one row per food (m5-01 step 4a).
+const legacyLogEntry = (item: any): LogEntry => ({
+  foodName: item.title || item.food_name || "Unknown Item",
+  calories: toNumber(item.calories),
+  protein: toNumber(item.protein),
+  carbs: toNumber(item.carbs),
+  fats: toNumber(item.fats),
+  image: item.image || "",
+  externalId: getExternalId(item),
+  source: item.source || item.type || "",
+  servingId: item.serving_id || "",
+  servingDescription: item.serving_description || "",
+  nutrients: buildNutrientsSnapshot(item),
+});
+
+// Photo cluster for a plate card: three overlapping circles in the same 88 pt
+// box as the single photo, so the card keeps its height and the title keeps
+// its width (PLANNER_PLATE_FLOW.html, section 0).
+const PLATE_PHOTO_SLOTS = [
+  { size: 56, style: { left: 0, top: 0, zIndex: 3 } },
+  { size: 50, style: { right: 0, top: 8, zIndex: 2 } },
+  { size: 50, style: { left: 22, bottom: 0, zIndex: 1 } },
+] as const;
+
+const PlatePhotoCluster = ({ photos, title }: { photos: string[]; title: string }) => (
+  <View style={{ width: 88, height: 88 }}>
+    {PLATE_PHOTO_SLOTS.map((slot, index) => (
+      <View
+        key={index}
+        style={{
+          position: "absolute",
+          ...slot.style,
+          width: slot.size,
+          height: slot.size,
+          borderRadius: slot.size / 2,
+          overflow: "hidden",
+          borderWidth: 3,
+          borderColor: "#fff",
+          backgroundColor: "#F3F4F6",
+          shadowColor: "#0B2149",
+          shadowOpacity: 0.2,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 5 },
+          elevation: 4,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {photos[index] ? (
+          <ExpoImage source={{ uri: photos[index] }} style={{ width: "100%", height: "100%" }} contentFit="cover" cachePolicy="disk" transition={120} />
+        ) : (
+          <Food3DIcon name={title} size={24} />
+        )}
+      </View>
+    ))}
+  </View>
+);
+
 const MACRO_DONUT_SIZE = 78;
 const MACRO_DONUT_STROKE = 14;
 const MACRO_DONUT_RADIUS = (MACRO_DONUT_SIZE - MACRO_DONUT_STROKE) / 2;
@@ -187,11 +247,12 @@ const DishCard = ({
     String(item?.type || "").toLowerCase().includes("recipe") ||
     !!String(item?.recipe_id || "").trim() ||
     String(item?.id || "").trim().toLowerCase().startsWith("recipe-");
-  const sourceLabel = item?.source === "fatsecret_recipe" ? "Recipe" : item?.food_type || "Food";
+  const plate = isPlate(item);
+  const sourceLabel = plate ? plateLabel(item) : item?.source === "fatsecret_recipe" ? "Recipe" : item?.food_type || "Food";
   // Recipes list per-serving calories (that's what the grid filters + recommender use),
   // so we say so explicitly and show the yield separately to avoid "116 kcal for 14 servings".
   const recipeYieldText = isRecipeItem ? formatServingsLabel(item?.servings) : "";
-  const servingText = isRecipeItem ? "per serving" : getFoodServingText(item);
+  const servingText = plate ? "whole plate" : isRecipeItem ? "per serving" : getFoodServingText(item);
 
   const fatGrams = toNumber(item?.fats);
   const proteinGrams = toNumber(item?.protein);
@@ -227,31 +288,46 @@ const DishCard = ({
                 </Text>
               ) : null}
             </View>
-            <View
-              style={{
-                width: 88,
-                height: 88,
-                borderRadius: 44,
-                overflow: "hidden",
-                borderWidth: 3,
-                borderColor: "#fff",
-                shadowColor: "#0B2149",
-                shadowOpacity: 0.2,
-                shadowRadius: 12,
-                shadowOffset: { width: 0, height: 8 },
-                elevation: 6,
-              }}
-            >
-              {image ? (
-                <Image source={{ uri: image }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
-              ) : (
-                <View className="w-full h-full items-center justify-center bg-gray-100">
-                  <Food3DIcon name={item?.title} size={40} />
-                </View>
-              )}
-            </View>
+            {plate ? (
+              <PlatePhotoCluster photos={platePhotos(item)} title={item?.title || ""} />
+            ) : (
+              <View
+                style={{
+                  width: 88,
+                  height: 88,
+                  borderRadius: 44,
+                  overflow: "hidden",
+                  borderWidth: 3,
+                  borderColor: "#fff",
+                  shadowColor: "#0B2149",
+                  shadowOpacity: 0.2,
+                  shadowRadius: 12,
+                  shadowOffset: { width: 0, height: 8 },
+                  elevation: 6,
+                }}
+              >
+                {image ? (
+                  // expo-image keeps a disk cache, so a photo seen once is not
+                  // downloaded again (PLANNER_PLATE_FLOW.html, performance).
+                  <ExpoImage source={{ uri: image }} style={{ width: "100%", height: "100%" }} contentFit="cover" cachePolicy="disk" transition={120} />
+                ) : (
+                  <View className="w-full h-full items-center justify-center bg-gray-100">
+                    <Food3DIcon name={item?.title} size={40} />
+                  </View>
+                )}
+              </View>
+            )}
           </View>
         </LinearGradient>
+
+        {plate ? (
+          // What's on the plate, without opening it.
+          <View style={{ paddingHorizontal: 16, paddingVertical: 9, backgroundColor: "#F8FAFC", borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#EEF2F7" }}>
+            <Text style={{ fontSize: 12, fontWeight: "600", color: "#374151" }} numberOfLines={2}>
+              {plateFoodLine(item)}
+            </Text>
+          </View>
+        ) : null}
 
         <View className="flex-row items-center" style={{ padding: 16, gap: 18 }}>
           <View style={{ width: MACRO_DONUT_SIZE, height: MACRO_DONUT_SIZE }}>
@@ -965,26 +1041,17 @@ const PlanningScreen = () => {
         addRequestInFlightRef.current = true;
         try {
           const date = formatLocalYYYYMMDD(selectedDate);
-          const payload = await addMealsBatch([
-            {
+          // A plate saves one row per food; anything else saves as it always has.
+          const payload = await addMealsBatch(
+            logEntriesFor(item, legacyLogEntry).map((entry) => ({
               apiURL: configuredApiURL,
               getToken,
               clerkId: userId,
               date,
               mealType: selectedMealType,
-              foodName: item.title || item.food_name || "Unknown Item",
-              calories: toNumber(item.calories),
-              protein: toNumber(item.protein),
-              carbs: toNumber(item.carbs),
-              fats: toNumber(item.fats),
-              image: item.image || "",
-              externalId: getExternalId(item),
-              source: item.source || item.type || "",
-              servingId: item.serving_id || "",
-              servingDescription: item.serving_description || "",
-              nutrients: buildNutrientsSnapshot(item),
-            },
-          ]);
+              ...entry,
+            }))
+          );
 
           settleMealLogSuccess(payload, date);
           setSelectedItemKeys({});
@@ -1020,24 +1087,16 @@ const PlanningScreen = () => {
         try {
           const date = formatLocalYYYYMMDD(selectedDate);
           const payload = await addMealsBatch(
-            selectedItems.map((item: any) => ({
-              apiURL: configuredApiURL,
-              getToken,
-              clerkId: userId,
-              date,
-              mealType: selectedMealType,
-              foodName: item.title || item.food_name || "Unknown Item",
-              calories: toNumber(item.calories),
-              protein: toNumber(item.protein),
-              carbs: toNumber(item.carbs),
-              fats: toNumber(item.fats),
-              image: item.image || "",
-              externalId: getExternalId(item),
-              source: item.source || item.type || "",
-              servingId: item.serving_id || "",
-              servingDescription: item.serving_description || "",
-              nutrients: buildNutrientsSnapshot(item),
-            }))
+            selectedItems
+              .flatMap((item: any) => logEntriesFor(item, legacyLogEntry))
+              .map((entry) => ({
+                apiURL: configuredApiURL,
+                getToken,
+                clerkId: userId,
+                date,
+                mealType: selectedMealType,
+                ...entry,
+              }))
           );
 
           settleMealLogSuccess(payload, date);
