@@ -370,12 +370,15 @@ const PlateDetail = ({ item, dateStr }: Props) => {
             <TouchableWithoutFeedback>
               <View style={{ backgroundColor: "#fff", width: "100%", maxWidth: 320, padding: 24, borderRadius: 24, maxHeight: windowHeight * 0.9 }}>
                 <ScrollView contentContainerStyle={{ alignItems: "center" }} showsVerticalScrollIndicator={false}>
-                  <Text style={{ fontSize: 20, fontWeight: "700", color: C.text, marginBottom: 4 }}>Add to meal log</Text>
-                  <Text style={{ fontSize: 13, color: C.muted, textAlign: "center" }}>
+                  {/* Title, foods and energy each get their own breathing room,
+                      as in PLANNER_PLATE_EDIT.html; the energy was sitting right
+                      under the food names (iPhone test, 2026-11-19). */}
+                  <Text style={{ fontSize: 20, fontWeight: "700", color: C.text }}>Add to meal log</Text>
+                  <Text style={{ fontSize: 13, lineHeight: 18, color: C.muted, textAlign: "center", marginTop: 8 }}>
                     {title} · {left.length} food{left.length === 1 ? "" : "s"}
                   </Text>
-                  <Text style={{ fontSize: 13, fontWeight: "800", color: C.orange, marginBottom: 16 }}>{formatEnergy(totalKcal)}</Text>
-                  <Text style={{ fontSize: 14, color: C.faint, marginBottom: 14 }}>When are you eating this?</Text>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.orange, marginTop: 8 }}>{formatEnergy(totalKcal)}</Text>
+                  <Text style={{ fontSize: 14, color: C.faint, marginTop: 18, marginBottom: 14 }}>When are you eating this?</Text>
                   {MEAL_TYPE_ENTRIES.map((entry, index) => (
                     <TouchableOpacity
                       key={entry.type}
