@@ -24,6 +24,8 @@ import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
 import { buildAddMealBody, scaleToTotals } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from "../../../services/authedFetch";
 import { MEAL_TYPE_ENTRIES, type MealType } from "../../../constants/mealTypes";
+import PlateDetail from "../../../components/PlateDetail";
+import { isPlate } from "../../../utils/plateLog";
 
 type ComboDetailItem = Record<string, any>;
 type ComboDetailPayload = ComboDetailItem & { items?: ComboDetailItem[] };
@@ -474,6 +476,13 @@ const FoodDetailScreen = () => {
         <Text>Unable to load food details.</Text>
       </SafeAreaView>
     );
+  }
+
+  // Catalogue plates (m5-01) get their own page: edit before adding, the
+  // Australian nutrition panel. Placed after every hook above, so the hook
+  // order never changes; single foods and recipes continue below untouched.
+  if (isPlate(item)) {
+    return <PlateDetail item={item} dateStr={dateFromPlanning || formatLocalYYYYMMDD(new Date())} />;
   }
 
   const totalCalories =

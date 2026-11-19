@@ -22,6 +22,7 @@ import AddFoodModal from "../../../components/addfoodmodal";
 import CustomAlert from "../../../components/customAlert";
 import FatSecretInfoModal from "../../../components/FatSecretInfoModal";
 import Food3DIcon from "../../../components/Food3DIcon";
+import PlatePhotoCluster from "../../../components/PlatePhotoCluster";
 import InfoButton from "../../../components/InforButton";
 import MostConsumedFoodsStrip from "../../../components/MostConsumedFoodsStrip";
 import RecentMealsModal from "../../../components/RecentMealModal";
@@ -173,49 +174,6 @@ const legacyLogEntry = (item: any): LogEntry => ({
   servingDescription: item.serving_description || "",
   nutrients: buildNutrientsSnapshot(item),
 });
-
-// Photo cluster for a plate card: three overlapping circles in the same 88 pt
-// box as the single photo, so the card keeps its height and the title keeps
-// its width (PLANNER_PLATE_FLOW.html, section 0).
-const PLATE_PHOTO_SLOTS = [
-  { size: 56, style: { left: 0, top: 0, zIndex: 3 } },
-  { size: 50, style: { right: 0, top: 8, zIndex: 2 } },
-  { size: 50, style: { left: 22, bottom: 0, zIndex: 1 } },
-] as const;
-
-const PlatePhotoCluster = ({ photos, title }: { photos: string[]; title: string }) => (
-  <View style={{ width: 88, height: 88 }}>
-    {PLATE_PHOTO_SLOTS.map((slot, index) => (
-      <View
-        key={index}
-        style={{
-          position: "absolute",
-          ...slot.style,
-          width: slot.size,
-          height: slot.size,
-          borderRadius: slot.size / 2,
-          overflow: "hidden",
-          borderWidth: 3,
-          borderColor: "#fff",
-          backgroundColor: "#F3F4F6",
-          shadowColor: "#0B2149",
-          shadowOpacity: 0.2,
-          shadowRadius: 8,
-          shadowOffset: { width: 0, height: 5 },
-          elevation: 4,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {photos[index] ? (
-          <ExpoImage source={{ uri: photos[index] }} style={{ width: "100%", height: "100%" }} contentFit="cover" cachePolicy="disk" transition={120} />
-        ) : (
-          <Food3DIcon name={title} size={24} />
-        )}
-      </View>
-    ))}
-  </View>
-);
 
 const MACRO_DONUT_SIZE = 78;
 const MACRO_DONUT_STROKE = 14;
