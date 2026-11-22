@@ -20,6 +20,19 @@ const inFlightFetches = new Map<string, Promise<any[] | null>>();
 
 const buildKey = (userId: string, date: string) => `${userId}|${date}`;
 
+// Users whose meal log changed since the planning screen last loaded its plan.
+const plannerStaleUsers = new Set<string>();
+
+/**
+ * True once after any meal log change for this user, then false until the next
+ * change: the planning screen reloads its plan exactly once per change.
+ */
+export const consumePlannerStale = (userId?: string | null): boolean => {
+  if (!userId || !plannerStaleUsers.has(userId)) return false;
+  plannerStaleUsers.delete(userId);
+  return true;
+};
+
 const cloneMeals = (meals: any[]) => (Array.isArray(meals) ? [...meals] : []);
 
 export const getCachedMealsSummary = (
@@ -59,6 +72,11 @@ export const markMealsSummaryDirty = (
   // must always go stale together. Doing it here rather than at each call site
   // means a future mutation screen cannot invalidate one and forget the other.
   markHomeDashboardDirty(userId);
+  // The meal plan is built around what is logged today (m5-04, 2026-11-22: the
+  // "Planned around what you've logged today" line never appeared because the
+  // planning screen kept the ideas it loaded before the log). Same reason as
+  // above: marked here, so every mutation site marks it.
+  plannerStaleUsers.add(userId);
 
   if (date) {
     const key = buildKey(userId, date);

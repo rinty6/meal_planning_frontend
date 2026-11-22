@@ -268,6 +268,15 @@ const FoodDetailScreen = () => {
         setLoadingNutrition(false);
         return;
       }
+      // 2026-11-22: a catalogue plate renders <PlateDetail> below and carries
+      // its own nutrition. This hook still runs for it (hooks run before that
+      // return), and it searched FatSecret for the main by title: 3 searches
+      // per tap, every one rejected on calories, before falling back to the
+      // catalogue food anyway. Plates skip the lookup.
+      if (isPlate(item)) {
+        setLoadingNutrition(false);
+        return;
+      }
       try {
         const explicitFatSecretId = String(selectedDish?.fatsecret_food_id || "").trim();
         const fallbackFoodId = getFallbackFatSecretFoodId(selectedDish);
@@ -335,7 +344,7 @@ const FoodDetailScreen = () => {
     };
 
     fetchNutritionData();
-  }, [selectedDish, userId, routePayloadKey, activeSelectedDishKey]);
+  }, [selectedDish, userId, routePayloadKey, activeSelectedDishKey, item]);
 
   // Resolve the real serving count for recipe-like items. The recommendation payload
   // now carries `servings` (backend enrichment) — trust it when it's > 1. A missing

@@ -42,7 +42,7 @@ import {
   MEAL_TYPES,
 } from "../../../services/planning.types";
 import type { ItemsByMeal, MealType } from "../../../services/planning.types";
-import { markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
+import { consumePlannerStale, markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
 import { type PipState } from "../../../components/pip/PipBird";
 import { PipActionStatusCard, usePipActionStatus } from "../../../components/pip/PipActionStatusCard";
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from "../../../services/mealLogOutcome";
@@ -52,16 +52,12 @@ import { buildAddMealBody } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from "../../../services/authedFetch";
 import { energyValue, formatEnergy, parseEnergyInput } from "../../../utils/energy";
 import {
-  drinkPortionShort,
   isPlate,
   isSnackPlate,
   logEntriesFor,
-  plateDrinks,
   plateFoodLine,
-  plateLabel,
   platePhotos,
   type LogEntry,
-  type PlateDrink,
 } from "../../../utils/plateLog";
 import { formatServingsLabel, getFoodServingText } from "../../../services/servingLabel";
 
@@ -200,8 +196,6 @@ const DishCard = ({
   onLove,
   isFavorite = false,
   isFavoriteLoading = false,
-  drinkOn = false,
-  onToggleDrink,
 }: {
   item: any;
   isSelected: boolean;
@@ -211,8 +205,6 @@ const DishCard = ({
   onLove: () => void;
   isFavorite?: boolean;
   isFavoriteLoading?: boolean;
-  drinkOn?: boolean;
-  onToggleDrink?: () => void;
 }) => {
   const image = typeof item?.image === "string" ? item.image.trim() : "";
   const isRecipeItem =
@@ -222,16 +214,14 @@ const DishCard = ({
     String(item?.id || "").trim().toLowerCase().startsWith("recipe-");
   const plate = isPlate(item);
   const snack = isSnackPlate(item);
-  const sourceLabel = plate ? plateLabel(item) : item?.source === "fatsecret_recipe" ? "Recipe" : item?.food_type || "Food";
+  const sourceLabel = item?.source === "fatsecret_recipe" ? "Recipe" : item?.food_type || "Food";
   // Recipes list per-serving calories (that's what the grid filters + recommender use),
   // so we say so explicitly and show the yield separately to avoid "116 kcal for 14 servings".
   const recipeYieldText = isRecipeItem ? formatServingsLabel(item?.servings) : "";
-  // A2, 2026-11-20: the card's optional drink (DRINKS_UI.html). Off by
-  // default; when on, the headline energy includes it.
-  const drink: PlateDrink | null = plateDrinks(item)[0] ?? null;
-  const withDrink = !!drink && drinkOn;
-  const headlineKcal = toNumber(item?.calories) + (withDrink ? toNumber(drink?.calories) : 0);
-  const servingText = withDrink ? "with drink" : snack ? "whole snack" : plate ? "whole plate" : isRecipeItem ? "per serving" : getFoodServingText(item);
+  // 2026-11-22 (user, iPhone test): drinks live on the plate detail page only
+  // ("Drink · optional"); the card shows the food.
+  const headlineKcal = toNumber(item?.calories);
+  const servingText = snack ? "whole snack" : plate ? "whole plate" : isRecipeItem ? "per serving" : getFoodServingText(item);
 
   const fatGrams = toNumber(item?.fats);
   const proteinGrams = toNumber(item?.protein);
@@ -247,13 +237,13 @@ const DishCard = ({
         <LinearGradient colors={["#F0F6FF", "#FFFFFF"]} style={{ paddingHorizontal: 16, paddingTop: 18, paddingBottom: 14 }}>
           <View className="flex-row items-center" style={{ gap: 14 }}>
             <View className="flex-1">
-              {/* A1, 2026-11-20: snack cards wear the snack green (Tailwind `snack`, #15803D, m4-09). */}
-              <View
-                className={snack ? "bg-snack" : undefined}
-                style={{ alignSelf: "flex-start", backgroundColor: snack ? undefined : "#0B2149", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginBottom: 9 }}
-              >
-                <Text style={{ color: "#fff", fontSize: 10, fontWeight: "600", letterSpacing: 0.4 }}>{sourceLabel.toUpperCase()}</Text>
-              </View>
+              {/* 2026-11-22 (user, iPhone test): plates, snacks and dishes carry no
+                  label; the photos and the foods line already say what it is. */}
+              {plate ? null : (
+                <View style={{ alignSelf: "flex-start", backgroundColor: "#0B2149", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginBottom: 9 }}>
+                  <Text style={{ color: "#fff", fontSize: 10, fontWeight: "600", letterSpacing: 0.4 }}>{sourceLabel.toUpperCase()}</Text>
+                </View>
+              )}
               <Text className="text-textDeep" style={{ fontSize: 19, fontWeight: "800", marginBottom: 8 }} numberOfLines={2}>
                 {item?.title || "Unknown dish"}
               </Text>
@@ -309,33 +299,6 @@ const DishCard = ({
             <Text style={{ fontSize: 12, fontWeight: "600", color: "#374151" }} numberOfLines={2}>
               {plateFoodLine(item)}
             </Text>
-          </View>
-        ) : null}
-
-        {drink ? (
-          // A2, 2026-11-20: the drink row sits under the foods line.
-          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 9, borderBottomWidth: 1, borderColor: "#EEF2F7", gap: 8 }}>
-            <Ionicons name="cafe-outline" size={16} color="#6B7280" />
-            <Text style={{ flex: 1, fontSize: 12, fontWeight: "600", color: "#374151" }} numberOfLines={1}>
-              {drink.title || drink.food_name}
-              {drinkPortionShort(drink) ? ` · ${drinkPortionShort(drink)}` : ""} · {formatEnergy(drink.calories)}
-            </Text>
-            <TouchableOpacity
-              onPress={onToggleDrink}
-              accessibilityRole="button"
-              accessibilityState={{ selected: withDrink }}
-              accessibilityLabel={withDrink ? `Remove ${drink.title || "drink"}` : `Add ${drink.title || "drink"}`}
-              style={{
-                paddingHorizontal: 10,
-                paddingVertical: 4,
-                borderRadius: 999,
-                borderWidth: 1.5,
-                borderColor: withDrink ? "#007BFF" : "#BFDBFE",
-                backgroundColor: withDrink ? "#007BFF" : "#fff",
-              }}
-            >
-              <Text style={{ fontSize: 12, fontWeight: "800", color: withDrink ? "#fff" : "#007BFF" }}>{withDrink ? "✓ Added" : "+ Add"}</Text>
-            </TouchableOpacity>
           </View>
         ) : null}
 
@@ -493,14 +456,6 @@ const PlanningScreen = () => {
   // A1, 2026-11-20: meals the server planned around today's logs (P5). The
   // hint line shows on these; the legacy payload has none.
   const [adjustedMeals, setAdjustedMeals] = useState<string[]>([]);
-  // A2, 2026-11-20: which cards have their drink turned on, by card key (like selection).
-  const [drinkOnKeys, setDrinkOnKeys] = useState<Record<string, boolean>>({});
-  const drinkFor = (item: any): PlateDrink | null =>
-    drinkOnKeys[createItemKey(item)] ? plateDrinks(item)[0] ?? null : null;
-  const toggleDrink = (item: any) => {
-    const key = createItemKey(item);
-    setDrinkOnKeys((current) => ({ ...current, [key]: !current[key] }));
-  };
 
   const [isRefineVisible, setIsRefineVisible] = useState(false);
   const [refineStep, setRefineStep] = useState(0);
@@ -773,10 +728,19 @@ const PlanningScreen = () => {
   // round-trip, forever, while the user sat still on the screen.
   const refreshDailyProgressRef = useRef(refreshDailyProgress);
   const loadFavoriteStatusesRef = useRef(loadFavoriteStatuses);
+  // 2026-11-22: the plan is reloaded on focus when the day's log changed
+  // elsewhere (plate detail, Meal Summary, voice, barcode), so the meals still
+  // to eat are planned around it. Refs, for the same reason as above.
+  const loadRecommendationsRef = useRef(loadRecommendations);
+  const hasPlanStartedRef = useRef(hasPlanStarted);
+  const userIdRef = useRef(userId);
   useEffect(() => {
     refreshDailyProgressRef.current = refreshDailyProgress;
     loadFavoriteStatusesRef.current = loadFavoriteStatuses;
-  }, [loadFavoriteStatuses, refreshDailyProgress]);
+    loadRecommendationsRef.current = loadRecommendations;
+    hasPlanStartedRef.current = hasPlanStarted;
+    userIdRef.current = userId;
+  }, [hasPlanStarted, loadFavoriteStatuses, loadRecommendations, refreshDailyProgress, userId]);
 
   // A date STRING, not the Date object: primitives compare by value, so this re-runs
   // when the user picks a different day and never merely because a Date was rebuilt.
@@ -785,6 +749,10 @@ const PlanningScreen = () => {
     useCallback(() => {
       void refreshDailyProgressRef.current();
       void loadFavoriteStatusesRef.current();
+      // Once per log change (consumePlannerStale clears the flag), never per render.
+      if (hasPlanStartedRef.current && consumePlannerStale(userIdRef.current)) {
+        void loadRecommendationsRef.current({ mealType: "all" });
+      }
     }, [focusedDateKey])
   );
 
@@ -1022,8 +990,6 @@ const PlanningScreen = () => {
       params: {
         itemData: JSON.stringify(item),
         selectedDate: formatLocalYYYYMMDD(selectedDate),
-        // A2, 2026-11-20: the detail page starts with the card's drink when it was on.
-        drinkId: drinkFor(item)?.id || "",
       },
     });
   };
@@ -1048,6 +1014,8 @@ const PlanningScreen = () => {
     markMealsSummaryDirty(userId!, date);
     setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories)));
     void refreshDailyProgress();
+    // 2026-11-22: a log made here changes what the other meals should hold.
+    if (consumePlannerStale(userId)) void loadRecommendations({ mealType: "all" });
   };
 
   const handlePickItem = async (item: any) => {
@@ -1066,7 +1034,7 @@ const PlanningScreen = () => {
           const date = formatLocalYYYYMMDD(selectedDate);
           // A plate saves one row per food; anything else saves as it always has.
           const payload = await addMealsBatch(
-            logEntriesFor(item, legacyLogEntry, drinkFor(item)).map((entry) => ({
+            logEntriesFor(item, legacyLogEntry).map((entry) => ({
               apiURL: configuredApiURL,
               getToken,
               clerkId: userId,
@@ -1111,7 +1079,7 @@ const PlanningScreen = () => {
           const date = formatLocalYYYYMMDD(selectedDate);
           const payload = await addMealsBatch(
             selectedItems
-              .flatMap((item: any) => logEntriesFor(item, legacyLogEntry, drinkFor(item)))
+              .flatMap((item: any) => logEntriesFor(item, legacyLogEntry))
               .map((entry) => ({
                 apiURL: configuredApiURL,
                 getToken,
@@ -1183,6 +1151,7 @@ const PlanningScreen = () => {
       markMealsSummaryDirty(userId, date);
       setConsumedCalories(Math.round(Number(payload?.dailyTotalCalories || consumedCalories + Number(foodItem?.calories || 0))));
       void refreshDailyProgress();
+      if (consumePlannerStale(userId)) void loadRecommendations({ mealType: "all" });
       return resolveMealLogOutcome(payload, { itemLabel: itemLabelOf(foodItem), mealType: foodItem.mealType || selectedMealType });
     } finally {
       addRequestInFlightRef.current = false;
@@ -1406,8 +1375,6 @@ const PlanningScreen = () => {
                     onToggleSelect={() => handlePickItem(item)}
                     onSkip={() => handleSkipItem(item, index)}
                     onLove={() => handleLoveItem(item)}
-                    drinkOn={!!drinkOnKeys[key]}
-                    onToggleDrink={() => toggleDrink(item)}
                   />
                 );
               })
