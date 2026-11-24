@@ -151,3 +151,38 @@ test("the panel: 6 summary rows under energy, the rest behind Show more", () => 
   assert.equal(panel.energyDi, "39%");
   assert.ok(Math.round(kcalOf(plateNutrients(plate()))) >= 810);
 });
+
+// ---- most eaten foods (2026-11-24, MOST_EATEN_STRIP_DESIGN.html) -------------
+
+test("a most eaten food logged long ago: no grams, no 100 g option, its own source kept", () => {
+  const [bun] = initialPlate([{
+    externalId: "123",
+    title: "Steamed Bun",
+    source: "fatsecret_food",
+    unitless: true,
+    servings: [{ description: "3 servings", grams: 100, isDefault: true }],
+    per100g: { calories_kcal: 141, protein_g: 3.18, carbohydrate_g: 24.06, fat_g: 3.45 },
+  }]);
+  assert.deepEqual(bun.options.map((o) => o.description), ["3 servings"]);
+  const [row] = logRowsFor([bun]);
+  assert.equal(row.source, "fatsecret_food");
+  assert.equal(row.externalId, "123");
+  assert.equal(row.calories, 141);
+  assert.equal(row.nutrients.serving_grams, null);
+});
+
+test("a matched most eaten food logs as a catalogue row with its grams", () => {
+  const [banana] = initialPlate([{
+    externalId: "food_ausnut_16502001",
+    title: "Banana",
+    source: "catalog",
+    serving: { description: "Your usual", grams: 110.1 },
+    servings: [{ description: "Your usual", grams: 110.1, isDefault: true }, { description: "1 banana, medium, sliced (127.4 g)", grams: 127.4 }],
+    per100g: { calories_kcal: 95.36, protein_g: 1.4 },
+  }]);
+  assert.ok(banana.options.some((o) => o.description === "100 g"));
+  const [row] = logRowsFor([banana]);
+  assert.equal(row.source, "catalog");
+  assert.equal(row.calories, 105);
+  assert.equal(row.nutrients.serving_grams, 110.1);
+});

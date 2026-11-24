@@ -30,6 +30,10 @@ export type PlateFoodInput = {
   serving?: Serving;
   servings?: Serving[];
   per100g?: Record<string, number | null>;
+  /** 2026-11-24: a most eaten food keeps its own log source (catalog, fatsecret_food...). */
+  source?: string | null;
+  /** 2026-11-24: a portion with no known grams (an old log row); grams are never shown or stored. */
+  unitless?: boolean;
 };
 
 export type EditableFood = {
@@ -44,6 +48,8 @@ export type EditableFood = {
   options: Serving[];
   per100g: Record<string, number | null>;
   removed: boolean;
+  source: string;
+  unitless: boolean;
 };
 
 export const QUANTITY_STEP = 0.5;
@@ -62,7 +68,8 @@ const round = (v: number, places = 2) => Math.round(v * 10 ** places) / 10 ** pl
 export const servingOptions = (food: PlateFoodInput): Serving[] => {
   const seen = new Set<string>();
   const out: Serving[] = [];
-  for (const s of [...(food.servings || []), HUNDRED_GRAMS]) {
+  // A unitless portion has no grams, so "100 g" would mean nothing.
+  for (const s of [...(food.servings || []), ...(food.unitless ? [] : [HUNDRED_GRAMS])]) {
     const grams = num(s?.grams);
     if (!s?.description || !grams || grams <= 0) continue;
     const key = grams.toFixed(1);
@@ -92,6 +99,8 @@ export const toEditableFood = (food: PlateFoodInput, index: number): EditableFoo
     options,
     per100g: food.per100g || {},
     removed: false,
+    source: String(food.source || "catalog"),
+    unitless: !!food.unitless,
   };
 };
 
@@ -179,11 +188,11 @@ export const logRowsFor = (foods: EditableFood[]) =>
       fats: round(n.fat_g ?? 0, 1),
       image: food.image,
       externalId: food.externalId,
-      source: "catalog",
+      source: food.source || "catalog",
       servingId: "",
       servingDescription: portionLabel(food),
       // Same keys as a catalogue-search log, unknown kept as null.
-      nutrients: { ...n, serving_grams: gramsOf(food) } as Record<string, number | null>,
+      nutrients: { ...n, serving_grams: food.unitless ? null : gramsOf(food) } as Record<string, number | null>,
     };
   });
 

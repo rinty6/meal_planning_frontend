@@ -69,8 +69,11 @@ const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
   const pipStatus = usePipActionStatus();
 
   const original = useMemo(() => initialPlate(item?.items || []), [item]);
+  // 2026-11-24: a most eaten food opens here as a one-food plate
+  // (backend usualFoods.js). No plate wording; the portion choice is open.
+  const single = item?.kind === "usual_food";
   const [foods, setFoods] = useState<EditableFood[]>(original);
-  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [openKey, setOpenKey] = useState<string | null>(() => (single ? original[0]?.key ?? null : null));
   const [view, setView] = useState<string>("plate"); // "plate" or a food key
   const [showMore, setShowMore] = useState(false);
   const [showMealSheet, setShowMealSheet] = useState(false);
@@ -158,7 +161,7 @@ const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
           <View style={{ flex: 1, gap: 10 }}>
             <Text style={{ fontSize: 23, fontWeight: "800", color: C.text, letterSpacing: -0.4 }}>
               {title}
-              {edited ? <Text style={{ fontSize: 12, fontWeight: "800", color: C.orange }}>  Edited</Text> : null}
+              {edited && !single ? <Text style={{ fontSize: 12, fontWeight: "800", color: C.orange }}>  Edited</Text> : null}
             </Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               <View style={pill(edited)}>
@@ -167,8 +170,8 @@ const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
               </View>
               <View style={pill(false)}>
                 <Ionicons name="restaurant-outline" size={15} color={C.muted} />
-                <Text style={{ fontWeight: "700", marginLeft: 6, color: C.text }}>
-                  {left.length} food{left.length === 1 ? "" : "s"}
+                <Text style={{ fontWeight: "700", marginLeft: 6, color: C.text }} numberOfLines={1}>
+                  {single && left[0] ? portionLabel(left[0]) : `${left.length} food${left.length === 1 ? "" : "s"}`}
                 </Text>
               </View>
             </View>
@@ -176,20 +179,22 @@ const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
           <PlatePhotoCluster photos={photos} title={title} size={104} />
         </View>
 
-        {/* On this plate */}
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-          <Text style={{ fontSize: 15, fontWeight: "800", color: C.ink }}>On this plate</Text>
-          {edited ? (
-            <TouchableOpacity onPress={reset} accessibilityRole="button">
-              <Text style={{ fontSize: 13, fontWeight: "800", color: C.blue }}>Reset plate</Text>
-            </TouchableOpacity>
-          ) : (
-            <Text style={{ fontSize: 12.5, fontWeight: "700", color: C.blue }}>Tap a food to change it</Text>
-          )}
-        </View>
+        {/* On this plate (not for a single most eaten food) */}
+        {single ? null : (
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+            <Text style={{ fontSize: 15, fontWeight: "800", color: C.ink }}>On this plate</Text>
+            {edited ? (
+              <TouchableOpacity onPress={reset} accessibilityRole="button">
+                <Text style={{ fontSize: 13, fontWeight: "800", color: C.blue }}>Reset plate</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={{ fontSize: 12.5, fontWeight: "700", color: C.blue }}>Tap a food to change it</Text>
+            )}
+          </View>
+        )}
 
         {foods.map((food) => {
-          const open = openKey === food.key && !food.removed;
+          const open = (single || openKey === food.key) && !food.removed;
           const kcal = kcalOf(nutrientsOf(food));
           return (
             <View
@@ -204,6 +209,8 @@ const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
                 marginBottom: 8,
               }}
             >
+              {/* A single most eaten food: the page header already names it. */}
+              {single ? null : (
               <TouchableOpacity
                 onPress={() => (food.removed ? undefined : setOpenKey(open ? null : food.key))}
                 disabled={food.removed}
@@ -237,9 +244,10 @@ const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
                   </>
                 )}
               </TouchableOpacity>
+              )}
 
               {open ? (
-                <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: "#E5EEF9", paddingTop: 10 }}>
+                <View style={single ? undefined : { marginTop: 10, borderTopWidth: 1, borderTopColor: "#E5EEF9", paddingTop: 10 }}>
                   <Text style={label}>How much?</Text>
                   <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 20 }}>
                     <TouchableOpacity
@@ -259,7 +267,7 @@ const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
                     </TouchableOpacity>
                   </View>
                   <Text style={{ textAlign: "center", fontSize: 11.5, color: C.faint, marginTop: 4 }}>
-                    = {formatEnergy(kcal)} · {Math.round(gramsOf(food))} g
+                    = {formatEnergy(kcal)}{food.unitless ? "" : ` · ${Math.round(gramsOf(food))} g`}
                   </Text>
                   <Text style={[label, { marginTop: 10 }]}>Of which serving?</Text>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 6 }}>
@@ -285,7 +293,7 @@ const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
                       );
                     })}
                   </View>
-                  {canRemove(foods) ? (
+                  {single ? null : canRemove(foods) ? (
                     <TouchableOpacity onPress={() => remove(food)} accessibilityRole="button" style={{ alignSelf: "center", marginTop: 12 }}>
                       <Text style={{ fontSize: 13, fontWeight: "800", color: C.red }}>Remove from plate</Text>
                     </TouchableOpacity>
@@ -298,7 +306,8 @@ const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
           );
         })}
 
-        {/* Whose nutrition: the plate or one food */}
+        {/* Whose nutrition: the plate or one food (a single food has only itself) */}
+        {single ? null : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8, marginBottom: 10 }} contentContainerStyle={{ gap: 6 }}>
           {[{ key: "plate", title: "Whole plate" }, ...left.map((f) => ({ key: f.key, title: f.title }))].map((chip) => {
             const on = (viewFood ? viewFood.key : "plate") === chip.key;
@@ -315,13 +324,14 @@ const PlateDetail = ({ item, dateStr, initialDrinkId = null }: Props) => {
             );
           })}
         </ScrollView>
+        )}
 
         {/* Nutrition information: the Australian label's 7 lines, then Show more */}
         <View style={{ borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 16, padding: 12, marginBottom: 14 }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
             <Text style={{ fontSize: 16, fontWeight: "800", color: C.text }}>Nutrition information</Text>
             <Text style={{ fontSize: 11.5, color: C.faint, flexShrink: 1, textAlign: "right", marginLeft: 8 }} numberOfLines={1}>
-              {viewFood ? portionLabel(viewFood) : "whole plate"}
+              {viewFood ? portionLabel(viewFood) : single ? "per portion" : "whole plate"}
             </Text>
           </View>
           <View style={{ backgroundColor: "#E8F1FF", borderRadius: 12, padding: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>

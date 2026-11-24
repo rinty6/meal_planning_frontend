@@ -1279,19 +1279,15 @@ const PlanningScreen = () => {
         )}
 
         <View className="flex-row justify-between items-center mb-4">
-          <Text className="text-2xl font-bold text-black">Most consumed foods</Text>
+          {/* 2026-11-24 (MOST_EATEN_STRIP_DESIGN.html, option A): shorter title, a quieter +. */}
+          <Text className="text-2xl font-bold text-black">Most eaten</Text>
           <TouchableOpacity
             onPress={() => setIsAddMenuVisible(true)}
-            className="w-8 h-8 rounded-full bg-primary items-center justify-center shadow-lg"
-            style={{
-              shadowColor: "#007BFF",
-              shadowOpacity: 0.28,
-              shadowRadius: 8,
-              shadowOffset: { width: 0, height: 4 },
-              elevation: 5,
-            }}
+            accessibilityRole="button"
+            accessibilityLabel="Add food"
+            style={{ width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: "#BFDBFE", backgroundColor: "#EFF6FF", alignItems: "center", justifyContent: "center" }}
           >
-            <Ionicons name="add" size={28} color="white" />
+            <Ionicons name="add" size={22} color="#007BFF" />
           </TouchableOpacity>
         </View>
 
