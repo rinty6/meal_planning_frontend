@@ -43,6 +43,8 @@ import {
 } from "../../../services/planning.types";
 import type { ItemsByMeal, MealType } from "../../../services/planning.types";
 import { consumePlannerStale, markMealsSummaryDirty } from "../../../services/mealsSummaryStore";
+import { adjustedHintText, emptyStateText, readPlanNotes, serveChipText, serveSheet, type PlanNote } from "../../../utils/planNotes";
+import PipBird from "../../../components/pip/PipBird";
 import { type PipState } from "../../../components/pip/PipBird";
 import { PipActionStatusCard, usePipActionStatus } from "../../../components/pip/PipActionStatusCard";
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from "../../../services/mealLogOutcome";
@@ -456,6 +458,11 @@ const PlanningScreen = () => {
   // A1, 2026-11-20: meals the server planned around today's logs (P5). The
   // hint line shows on these; the legacy payload has none.
   const [adjustedMeals, setAdjustedMeals] = useState<string[]>([]);
+  // 2026-11-25 (PLAN_STATES_DESIGN.html): what the plan cannot do, from the
+  // server's plan_notes. Kept from the last whole-day load, because a one-meal
+  // load (Shuffle) cannot judge the whole day.
+  const [planNotes, setPlanNotes] = useState<PlanNote[]>([]);
+  const [isServeSheetVisible, setIsServeSheetVisible] = useState(false);
 
   const [isRefineVisible, setIsRefineVisible] = useState(false);
   const [refineStep, setRefineStep] = useState(0);
@@ -602,6 +609,7 @@ const PlanningScreen = () => {
     ) as ItemsByMeal;
     // Whatever meal was asked for, the server reports every adjusted meal.
     setAdjustedMeals(Array.isArray(payload?.adjusted_meals) ? payload.adjusted_meals.map(String) : []);
+    if (mealScope === "all") setPlanNotes(readPlanNotes(payload));
 
     setItemsByMeal((previous) =>
       mealScope === "all"
@@ -1316,6 +1324,18 @@ const PlanningScreen = () => {
               {loadingRecommendations && <ActivityIndicator size="small" color="#007BFF" />}
             </View>
 
+            {serveChipText(planNotes) ? (
+              // m5-06: the one place the planner says a food-group goal cannot be reached today.
+              <TouchableOpacity
+                onPress={() => setIsServeSheetVisible(true)}
+                accessibilityRole="button"
+                style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#FFF7E6", borderWidth: 1, borderColor: "#F5D08A", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, marginTop: 0, marginBottom: 22 }}
+              >
+                <Ionicons name="warning-outline" size={14} color="#8A5A00" />
+                <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#8A5A00" }}>{serveChipText(planNotes)}</Text>
+              </TouchableOpacity>
+            ) : null}
+
             <View className="flex-row justify-between mb-5">
               {MEAL_TYPES.map((mealType) => {
                 const isSelected = selectedMealType === mealType;
@@ -1339,16 +1359,18 @@ const PlanningScreen = () => {
                 {selectedMealType}
                 {selectedItems.length > 0 ? ` ${selectedItems.length} picked` : ""}
               </Text>
-              <TouchableOpacity onPress={handleShuffle} className="px-3 py-2 rounded-full bg-blue-50 border border-blue-200">
-                <Text className="text-primary font-bold">Shuffle</Text>
-              </TouchableOpacity>
+              {displayedItems.length > 0 || loadingRecommendations ? (
+                <TouchableOpacity onPress={handleShuffle} className="px-3 py-2 rounded-full bg-blue-50 border border-blue-200">
+                  <Text className="text-primary font-bold">Shuffle</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
 
             {adjustedMeals.includes(selectedMealType) ? (
               // A1, 2026-11-20: SNACK_SLOT_DESIGN section 1. Never shows serves (m0-06).
               <View className="flex-row items-center mb-3" style={{ gap: 6 }}>
                 <Ionicons name="information-circle-outline" size={14} color="#6B7280" />
-                <Text className="text-xs text-gray-500">Planned around what you&apos;ve logged today</Text>
+                <Text className="text-xs text-gray-500">{adjustedHintText(planNotes)}</Text>
               </View>
             ) : null}
 
@@ -1377,7 +1399,16 @@ const PlanningScreen = () => {
             )}
 
             {!loadingRecommendations && displayedItems.length === 0 && (
-              <Text className="text-center text-gray-400 mt-10 mb-10">No recommendations available.</Text>
+              // m6-07: sad Pip (PipBird, still under Reduce Motion), one line, one way out.
+              <View style={{ borderWidth: 1.5, borderStyle: "dashed", borderColor: "#D1D5DB", borderRadius: 20, paddingVertical: 22, paddingHorizontal: 16, alignItems: "center", marginTop: 6, marginBottom: 24 }}>
+                <PipBird state="sad" size={110} />
+                <Text style={{ fontSize: 16, fontWeight: "800", color: "#0B2149", marginTop: 6, marginBottom: 14, textAlign: "center" }}>
+                  {emptyStateText(planNotes)}
+                </Text>
+                <TouchableOpacity onPress={openRefine} accessibilityRole="button" className="bg-primary rounded-full" style={{ paddingHorizontal: 20, paddingVertical: 10 }}>
+                  <Text className="text-white font-bold">Refine plan</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </>
         )}
@@ -1391,6 +1422,21 @@ const PlanningScreen = () => {
           <Text className="text-center text-gray-400 text-xs mt-2">You can edit each in the log</Text>
         </View>
       )}
+
+      <Modal transparent visible={isServeSheetVisible} animationType="fade" onRequestClose={() => setIsServeSheetVisible(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setIsServeSheetVisible(false)} className="flex-1 bg-black/40 justify-end">
+          <TouchableOpacity activeOpacity={1} className="bg-white rounded-t-3xl p-5 pb-8">
+            <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "#E5E7EB", alignSelf: "center", marginBottom: 14 }} />
+            <Text style={{ fontSize: 18, fontWeight: "800", color: "#0B2149", marginBottom: 8 }}>{serveSheet(planNotes)?.title}</Text>
+            {(serveSheet(planNotes)?.lines || []).map((line) => (
+              <Text key={line} style={{ fontSize: 14, lineHeight: 20, color: "#4B5563", marginBottom: 10 }}>{line}</Text>
+            ))}
+            <TouchableOpacity onPress={() => setIsServeSheetVisible(false)} className="bg-primary py-4 rounded-2xl items-center mt-2">
+              <Text className="text-white font-bold text-base">OK</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       <Modal transparent visible={isAddMenuVisible} animationType="fade" onRequestClose={() => setIsAddMenuVisible(false)}>
         <View className="flex-1 bg-black/40 justify-end">
