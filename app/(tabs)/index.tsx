@@ -22,6 +22,7 @@ import {
     markMealsSummaryDirty,
 } from '../../services/mealsSummaryStore';
 import PipReminderCard from '../../components/pip/PipReminderCard';
+import WaterRow from '../../components/WaterRow';
 import { extractLoggedMealTypes, resolvePipCard } from '../../components/pip/pipHomeState';
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../../services/mealLogOutcome';
 import { buildAddMealBody } from '../../api/mealLog/addMealPayload';
@@ -425,7 +426,7 @@ const HomeScreen = () => {
                 </View>
                 
                 <View
-                    className="rounded-2xl p-4 mb-8 bg-surface border border-borderSoft"
+                    className="rounded-2xl p-4 mb-3 bg-surface border border-borderSoft"
                     style={{
                         shadowColor: '#0F172A',
                         shadowOpacity: 0.08,
@@ -533,6 +534,9 @@ const HomeScreen = () => {
                         />
                     </View>
                 </View>
+
+                {/* 3b. Water today (m6-02, WATER_TOTAL_DESIGN.html H1): its own card, + only */}
+                <WaterRow date={getTodayFormatted()} className="mb-8" />
 
                 {/* 4. Category Grid Section */}
                 <Text className="text-2xl font-bold mb-3 text-textDeep">Category</Text>

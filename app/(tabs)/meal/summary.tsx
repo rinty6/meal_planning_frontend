@@ -8,6 +8,7 @@ import { buildAddMealBody } from '../../../api/mealLog/addMealPayload';
 import { authedFetch } from '../../../services/authedFetch';
 import { formatEnergy } from '../../../utils/energy';
 import AddFoodModal from '../../../components/addfoodmodal';
+import WaterRow from '../../../components/WaterRow';
 import { MEAL_TYPE_ENTRIES } from '../../../constants/mealTypes';
 import { MealLogRequestError, resolveMealLogOutcome, type MealLogOutcome } from '../../../services/mealLogOutcome';
 import {
@@ -381,6 +382,9 @@ export default function SummaryScreen() {
         <Text className="text-xl font-bold mb-4 text-gray-800">
           {selectedDate.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })}
         </Text>
+
+        {/* Water for the picked day (m6-02, WATER_TOTAL_DESIGN.html): - and + */}
+        <WaterRow date={formatLocalYYYYMMDD(selectedDate)} showMinus className="mb-4" />
 
         {loading ? (
           <ActivityIndicator size="large" color="#007BFF" className="mt-10" />
